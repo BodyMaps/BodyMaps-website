@@ -35,6 +35,11 @@ export default function OpacitySlider({
   };
 
 
+  const formStyle = {
+    display: "inline-block",
+    width: "fit-content"
+    // marginLeft: "10px"
+  };
 
   return (
     <div className="windowing-slider">

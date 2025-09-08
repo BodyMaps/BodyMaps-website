@@ -36,6 +36,14 @@ export default function WindowingSlider({ windowWidth, windowCenter, onWindowCha
       onWindowChange(null, v);
     }
   };
+  const inputStyle = {
+    backgroundColor: '#333',  // 深灰色背景
+    color: 'white',           // 白色文字
+    border: '1px solid #ccc', // 可选：浅灰色边框
+    borderRadius: '4px',
+    padding: '6px 10px',
+    outline: 'none',
+  };
   return (
     <div className="windowing-slider w-full flex flex-col gap-3">
 
