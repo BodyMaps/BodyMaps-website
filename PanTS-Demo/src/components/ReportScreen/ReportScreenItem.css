@@ -5,7 +5,6 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
     padding: 10px;
     font-size: 20px;
-    font-family: Aptos;
     width:100%;
 }
 

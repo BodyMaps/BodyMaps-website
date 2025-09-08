@@ -1,4 +1,4 @@
-import type { APP_CONSTANTS_TYPE, cornerstoneCustomColorLUTType, SegmentationCategories } from "../types";
+import type { APP_CONSTANTS_TYPE, cornerstoneCustomColorLUTType, OrganSystemsType, SegmentationCategories, Systems } from "../types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE
 
@@ -33,6 +33,63 @@ export const segmentation_categories: SegmentationCategories[] = [
     "veins"
 ]
 
+export const OrganSystemsArray: Systems[] = [
+    "Vascular System",
+    "Adrenal Glands",
+    "Pancreas",
+    "Kidneys",
+    "Femur",
+    "Lung",
+    "Digestive System",
+    "Other"
+]
+export const OrganSystems: OrganSystemsType = {
+    "Vascular System": [
+        "aorta",
+        "celiac_artery",
+        "postcava",
+        "superior_mesenteric_artery",
+        "veins"
+    ],
+    "Adrenal Glands": [
+        "adrenal_gland_left",
+        "adrenal_gland_right",
+    ],
+    "Pancreas": [
+        "pancreas_body",
+        "pancreas_head",
+        "pancreas_tail",
+        "pancreas",
+        "pancreatic_duct",
+        "pancreatic_lesion"
+    ],
+    "Kidneys": [
+        "kidney_left",
+        "kidney_right"
+    ],
+    // bladder
+    "Femur": [
+        "femur_left",
+        "femur_right"
+    ],
+    "Digestive System": [
+        "colon",
+        "common_bile_duct",
+        "duodenum",
+        "gall_bladder",
+        "liver",
+        "stomach"
+    ],
+    "Lung": [
+        "lung_left",
+        "lung_right"
+    ],
+    "Other": [
+        "prostate",
+        "bladder",
+        "spleen"
+    ]
+    }
 
 const RED = [230, 25, 75, 255];
 const BLUE = [0, 130, 200, 255];

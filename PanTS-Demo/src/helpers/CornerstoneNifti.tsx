@@ -172,7 +172,7 @@ export async function renderVisualization(ref1: React.RefObject<HTMLDivElement |
   );
 
   const initialWindowWidth = 50;
-  const initialWindowCenter = 500;
+  const initialWindowCenter = 100;
 
   viewportInputArray.forEach(({ viewportId }) => {
     const viewport = renderingEngine.getViewport(viewportId);

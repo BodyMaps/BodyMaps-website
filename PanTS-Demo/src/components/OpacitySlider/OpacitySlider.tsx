@@ -34,37 +34,34 @@ export default function OpacitySlider({
     handleOpacityOnFormSubmit(v);
   };
 
-  const inputStyle = {
-    backgroundColor: '#333',  // 深灰色背景
-    color: 'white',           // 白色文字
-    border: '1px solid #ccc', // 可选：浅灰色边框
-    borderRadius: '4px',
-    padding: '6px 10px',
-    outline: 'none',
-  };
 
   const formStyle = {
     display: "inline-block",
-    marginLeft: "10px"
+    width: "fit-content"
+    // marginLeft: "10px"
   };
 
   return (
     <div className="windowing-slider">
-      <div>
-        <label style={{ color: 'white' }}>Overall Label Opacity</label>
-        <form onSubmit={handleOpacitySubmit} style={formStyle}>
+      <div className="flex gap-1 flex-col justify-center items-center border">
+        <div className="flex justify-between w-full items-center">
+          
+        <div style={{ color: 'white' }}>Label Opacity</div>
+        <form onSubmit={handleOpacitySubmit} className="w-1/3">
           <input
             type="text"
             value={textValue}
             onChange={handleTextChange}
-            style={inputStyle}
-          />
+            className="text-white rounded-md border p-1 w-full"
+            />
         </form>
+          </div>
         <input
           type="range"
           min="0"
           max="100"
           step="1"
+          className="w-full"
           value={opacityValue}
           onChange={handleOpacityOnSliderChange}
         />

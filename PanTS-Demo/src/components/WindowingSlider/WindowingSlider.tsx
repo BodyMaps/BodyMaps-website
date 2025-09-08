@@ -45,19 +45,22 @@ export default function WindowingSlider({ windowWidth, windowCenter, onWindowCha
     outline: 'none',
   };
   return (
-    <div className="windowing-slider">
+    <div className="windowing-slider w-full flex flex-col gap-3">
 
-      <div>
+      <div className="flex gap-1 flex-col w-full justify-center items-center">
+        <div className="flex justify-between w-full items-center">
+
         <label style={{ color: 'white' }}>Level</label>
 
-        <form onSubmit={handleCenterSubmit} style={{ display: 'inline-block', marginLeft: '10px' }}>
+        <form onSubmit={handleCenterSubmit}  className="w-1/3">
           <input
             type="text"
             value={centerInput}
             onChange={handleCenterInputChange}
-            style={inputStyle}
-          />
+            className="text-white rounded-md p-1 border w-full"
+            />
         </form>
+          </div>
         <input
           type="range"
           min="-1000"
@@ -69,19 +72,23 @@ export default function WindowingSlider({ windowWidth, windowCenter, onWindowCha
             setCenterInput(v);
             onWindowChange(null, v);
           }}
+          className="w-full"
         />
       </div>
-      <div>
+      <div className="flex gap-2 flex-col w-full justify-center items-center">
+        <div className="flex justify-between w-full items-center">
+
         <label style={{ color: 'white' }}>Window</label>
 
-        <form onSubmit={handleWidthSubmit} style={{ display: 'inline-block', marginLeft: '10px' }}>
+        <form onSubmit={handleWidthSubmit} className="w-1/3">
           <input
             type="text"
             value={widthInput}
             onChange={handleWidthInputChange}
-            style={inputStyle}
-          />
+            className="border text-white p-1 rounded-md w-full"
+            />
         </form>
+        </div>
         <input
           type="range"
           min="1"
@@ -93,6 +100,7 @@ export default function WindowingSlider({ windowWidth, windowCenter, onWindowCha
             setWidthInput(v);
             onWindowChange(v, null);
           }}
+          className="w-full"
         />
       </div>
     </div>

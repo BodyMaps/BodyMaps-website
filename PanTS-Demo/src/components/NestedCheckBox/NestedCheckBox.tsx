@@ -20,7 +20,7 @@ type Props = {
   checkState: boolean[];
   update: (id: number, checked: boolean) => void;
   sessionId: string | undefined;
-  clabelId: string
+  clabelId: string;
 }
 
 function ChipBox({ itemData, checkStateProp, update, rgbaVals, checkBoxData, isAll, onAdd, forceAdd }: ChipBoxProps) {
@@ -124,34 +124,7 @@ function NestedCheckBox({ setCheckState, checkBoxData, checkState, update, sessi
   return (
     <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', width: '100%' }}>
       {/* 左侧：搜索框 */}
-      <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            border: '1px solid rgba(255,255,255,0.3)',
-            borderRadius: '8px',
-            padding: '4px',
-            backgroundColor: '#030a1e',
-          }}
-        >
-          <input
-            type="text"
-            placeholder="Search organs..."
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            className="search-box"
-            ref={inputRef}
-            style={{
-              backgroundColor: '#030a1e',
-              color: 'white',
-              border: 'none',
-              minWidth: '200px',
-            }}
-          />
-        </div>
-      </div>
+
   
       {/* 右侧两行 scroll 区域 */}
       <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, gap: '12px', minWidth: 0 }}>

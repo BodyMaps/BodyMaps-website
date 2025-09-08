@@ -33,6 +33,7 @@ class Constants:
     MAIN_NIFTI_FILENAME = 'ct.nii.gz'
     COMBINED_LABELS_FILENAME = 'combined_labels.npz'
     COMBINED_LABELS_NIFTI_FILENAME = 'combined_labels.nii.gz'
+    ORGAN_INTENSITIES_FILENAME = 'organ_intensities.json'
     SESSION_TIMEDELTA = 3  # in days
 
     # NiftiProcessor Variables
@@ -45,32 +46,36 @@ class Constants:
     VOXEL_THRESHOLD = 100
 
     PREDEFINED_LABELS = {
-        0: "background",
-        1: "aorta",
-        2: "adrenal_gland_left",
-        3: "adrenal_gland_right",
-        4: "common_bile_duct",
-        5: "celiac_aa",
-        6: "colon",
+        0: "adrenal_gland_left",
+        1: "adrenal_gland_right",
+        2: "aorta",
+        3: "bladder",
+        4:"celiac_artery",
+        5: "colon",
+        6: "common_bile_duct",
         7: "duodenum",
-        8: "gall_bladder",
-        9: "postcava",
-        10: "kidney_left",
-        11: "kidney_right",
-        12: "liver",
-        13: "pancreas",
-        14: "pancreatic_duct",
-        15: "superior_mesenteric_artery",
-        16: "intestine",
-        17: "spleen",
-        18: "stomach",
-        19: "veins",
-        20: "renal_vein_left",
-        21: "renal_vein_right",
-        22: "cbd_stent",
-        23: "pancreatic_pdac",
-        24: "pancreatic_cyst",
-        25: "pancreatic_pnet"
+        8: "femur_left",
+        9: "femur_right",
+        10: "gall_bladder",
+        11: "kidney_left",
+        12: "kidney_right",
+        13: "liver",
+        14: "lung_left",
+        15: "lung_right",
+        16: "pancreas_body",
+        17: "pancreas_head",
+        18: "pancreas_tail",
+        19: "pancreas",
+        20: "pancreatic_duct",
+        21: "pancreatic_lesion",
+        22: "postcava",
+        23: "prostate",
+        24: "spleen",
+        25: "stomach",
+        26: "superior_mesenteric_artery",
+        27: "veins"
     }
+    
+    
 
 

@@ -1,10 +1,11 @@
 import type { RenderingEngine } from '@cornerstonejs/core';
 import type { IImageVolume } from '@cornerstonejs/core/dist/types/types';
 import { Niivue } from '@niivue/niivue';
+import { IconDownload, IconHome, IconReport, IconSettings } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import NestedCheckBox from '../components/NestedCheckBox/NestedCheckBox';
 import OpacitySlider from '../components/OpacitySlider/OpacitySlider';
+import OrganCheckbox from '../components/OrganCheckbox';
 import ReportScreen from '../components/ReportScreen/ReportScreen';
 import WindowingSlider from '../components/WindowingSlider/WindowingSlider';
 import { renderVisualization, setToolGroupOpacity, setVisibilities } from '../helpers/CornerstoneNifti';
@@ -45,7 +46,9 @@ function VisualizationPage() {
   const [volumeId, setVolumeId] = useState<string | null>(null);
   const [showReportScreen, setShowReportScreen] = useState(false);
   const [_lastClicked, setLastClicked] = useState<LastClicked | null>(null);
-  const [showTaskDetails, setShowTaskDetails] = useState(false);
+  const [showTaskDetails, setShowTaskDetails] = useState(true);
+  const [showOrganDetails, setShowOrganDetails] = useState(false);  
+  const [loading, setLoading] = useState(true);
 
 
   const navigate = useNavigate();
@@ -80,7 +83,7 @@ function VisualizationPage() {
 
       const result =
         await renderVisualization(axial_ref, sagittal_ref, coronal_ref, "2", pantsCase);
-
+      setLoading(false);
       if (!result) return;
       const { segmentationVolumeArray, segRepUIDs, renderingEngine, viewportIds, volumeId } = result;
 
@@ -104,6 +107,7 @@ function VisualizationPage() {
       [id]: checked
     }));
   };
+
   
 
   // Update VOI (window/level) settings
@@ -210,22 +214,36 @@ function VisualizationPage() {
   }
 
   return (
-    <div className="VisualizationPage" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <div style={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
-        <div className="sidebar">
-          <div className="tasks-container">
-            <div className="dropdown">
-              {/* Toggle dropdown */}
-              <div
-                className="dropdown-header"
-                onClick={() => setShowTaskDetails(prev => !prev)}
+    <div className="VisualizationPage" style={{ display: 'flex', overflow: 'hidden', flexDirection: 'column', height: '100vh', width: '100vw' }}>
+      <div style={{ position: 'relative' }}>
+        <div className="sidebar position-absolute z-3 top-0 left-0">
+          
+          <div>
+            <div className='flex'>
+            <div
+              className={`hover:bg-gray-700 z-3 cursor-pointer bg-[#0f0824] p-2 ml-4 mt-4 rounded-lg w-fit`}
+              onClick={() => setShowTaskDetails(prev => !prev)}
               >
-                {showTaskDetails ? "Settings" : "Settings"}
-              </div>
+              <IconSettings color="white"/>
+              {/* {showTaskDetails ? "Settings" : "Settings"} */}
+            </div>
+            <div
+              className={`hover:bg-gray-700 z-3 cursor-pointer bg-[#0f0824] p-2 ml-4 mt-4 rounded-lg w-fit`}
+              onClick={() => navBack()}
+              >
+              <IconHome color="white"/>
+              {/* {showTaskDetails ? "Settings" : "Settings"} */}
+            </div>
+            </div>
+            <div className={`text-black bg-[#0f0824] m-[2vh] z-3 rounded-lg w-fit p-6 pt-3 gap-3 flex flex-col relative transition-all duration-100 origin-top-left ${showTaskDetails ? "scale-0" : "scale-100"}`}>
+              {/* Toggle dropdown */}
   
               {!showTaskDetails && (
                 <>
-
+                  <div className="flex items-center justify-center mb-2">
+                    <div className="text-white font-bold text-xl">{`Case ID: ${pantsCase}`}</div>
+                  </div>
+  
   
                   {/* Opacity & Windowing Sliders */}
                   <OpacitySlider
@@ -239,85 +257,113 @@ function VisualizationPage() {
                     windowCenter={windowCenter}
                     onWindowChange={handleWindowChange}
                   />
+                  <button className='text-white relative pt-3 !bg-blue-700 hover:!border-white' onClick={() => {setShowOrganDetails(prev => !prev); setShowTaskDetails(prev => !prev);}}>
+                    Manage organs
+                  </button>
   
                   {/* Report Download Buttons */}
-                  <div className="report-container">
-                    <button onClick={handleDownloadClick}>Download</button>
-                    <button onClick={() => setShowReportScreen(prev => !prev)}>Report</button>
+                  <div className="flex gap-3 items-center justify-center">
+                    <div className='group hover:bg-gray-700 cursor-pointer p-2 rounded-md relative  '>
+                    <IconDownload onClick={handleDownloadClick} className='w-6 h-6 text-white relative'>
+                    </IconDownload>
+                      <span className="transition-all pointer-events-none duration-100 scale-0 group-hover:scale-100 absolute top-0 left-12 z-1 bg-gray-900 text-white rounded-md p-2">Download</span>
+                    </div>
+                    <div className='group hover:bg-gray-700 cursor-pointer p-2 rounded-md relative'>
+                    <IconReport className='w-6 h-6 text-white relative' onClick={() => setShowReportScreen(prev => !prev)}>
+                    </IconReport>
+                    <span className="transition-all pointer-events-none duration-100 scale-0 group-hover:scale-100 absolute top-0 left-12 z-1 bg-gray-900 text-white rounded-md p-2">Report</span>
+                    </div>
                   </div>
                 </>
               )}
             </div>
           </div>
   
-          <button onClick={navBack} className="back-button">Back</button>
 
         </div>
-  
-        <div
-          className="visualization-container"
-          ref={VisualizationContainer_ref}
-          style={{ flexGrow: 1, position: 'relative', paddingBottom: '90px', overflow: 'hidden' }}
-        >
+        
+        
+        {
+          loading ?
+          <div className="flex z-3 absolute top-0 left-0 w-screen h-screen items-center justify-center">
+              <div role="status">
+                  <svg aria-hidden="true" className="w-8 h-8 text-gray-200 animate-spin dark:text-gray-600 fill-blue-600" viewBox="0 0 100 101" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M100 50.5908C100 78.2051 77.6142 100.591 50 100.591C22.3858 100.591 0 78.2051 0 50.5908C0 22.9766 22.3858 0.59082 50 0.59082C77.6142 0.59082 100 22.9766 100 50.5908ZM9.08144 50.5908C9.08144 73.1895 27.4013 91.5094 50 91.5094C72.5987 91.5094 90.9186 73.1895 90.9186 50.5908C90.9186 27.9921 72.5987 9.67226 50 9.67226C27.4013 9.67226 9.08144 27.9921 9.08144 50.5908Z" fill="currentColor"/><path d="M93.9676 39.0409C96.393 38.4038 97.8624 35.9116 97.0079 33.5539C95.2932 28.8227 92.871 24.3692 89.8167 20.348C85.8452 15.1192 80.8826 10.7238 75.2124 7.41289C69.5422 4.10194 63.2754 1.94025 56.7698 1.05124C51.7666 0.367541 46.6976 0.446843 41.7345 1.27873C39.2613 1.69328 37.813 4.19778 38.4501 6.62326C39.0873 9.04874 41.5694 10.4717 44.0505 10.1071C47.8511 9.54855 51.7191 9.52689 55.5402 10.0491C60.8642 10.7766 65.9928 12.5457 70.6331 15.2552C75.2735 17.9648 79.3347 21.5619 82.5849 25.841C84.9175 28.9121 86.7997 32.2913 88.1811 35.8758C89.083 38.2158 91.5421 39.6781 93.9676 39.0409Z" fill="currentFill"/></svg>
+                  <span className="sr-only">Loading...</span>
+              </div>
+          </div>
+          :
           <div
-            className="axial"
-            ref={axial_ref}
-            onMouseDown={(e) =>
-              setLastClicked({
-                orientation: 'axial',
-                x: Math.floor(e.clientX - e.currentTarget.getBoundingClientRect().left),
-                y: Math.floor(e.clientY - e.currentTarget.getBoundingClientRect().top),
-              })
-            }
-          ></div>
-  
-          <div
-            className="sagittal"
-            ref={sagittal_ref}
-            onMouseDown={(e) =>
-              setLastClicked({
-                orientation: 'sagittal',
-                x: Math.floor(e.clientX - e.currentTarget.getBoundingClientRect().left),
-                y: Math.floor(e.clientY - e.currentTarget.getBoundingClientRect().top),
-              })
-            }
-          ></div>
-  
-          <div
-            className="coronal"
-            ref={coronal_ref}
-            onMouseDown={(e) =>
-              setLastClicked({
-                orientation: 'coronal',
-                x: Math.floor(e.clientX - e.currentTarget.getBoundingClientRect().left),
-                y: Math.floor(e.clientY - e.currentTarget.getBoundingClientRect().top),
-              })
-            }
-          ></div>
-  
-          <div className="render">
-            <div className="canvas">
-              <canvas ref={render_ref}></canvas>
+            className="visualization-container"
+            ref={VisualizationContainer_ref}
+            style={{ overflow: 'hidden' }}
+          > 
+
+
+            <div
+              className="axial"
+              ref={axial_ref}
+              onMouseDown={(e) =>
+                setLastClicked({
+                  orientation: 'axial',
+                  x: Math.floor(e.clientX - e.currentTarget.getBoundingClientRect().left),
+                  y: Math.floor(e.clientY - e.currentTarget.getBoundingClientRect().top),
+                })
+              }
+            ></div>
+    
+            <div
+              className="sagittal"
+              ref={sagittal_ref}
+              onMouseDown={(e) =>
+                setLastClicked({
+                  orientation: 'sagittal',
+                  x: Math.floor(e.clientX - e.currentTarget.getBoundingClientRect().left),
+                  y: Math.floor(e.clientY - e.currentTarget.getBoundingClientRect().top),
+                })
+              }
+            ></div>
+    
+            <div
+              className="coronal"
+              ref={coronal_ref}
+              onMouseDown={(e) =>
+                setLastClicked({
+                  orientation: 'coronal',
+                  x: Math.floor(e.clientX - e.currentTarget.getBoundingClientRect().left),
+                  y: Math.floor(e.clientY - e.currentTarget.getBoundingClientRect().top),
+                })
+              }
+            ></div>
+    
+            <div className="render">
+              <div className="canvas">
+                <canvas ref={render_ref}></canvas>
+              </div>
             </div>
           </div>
-        </div>
+        }
+
+
+
       </div>
   
       {/* Fixed bottom bar for organ selection */}
-      <div className="checkbox-bottom-bar">
-        <NestedCheckBox
+
+        <OrganCheckbox
           setCheckState={setCheckState}
           checkBoxData={checkBoxData}
           checkState={checkState}
           update={update}
           sessionId={sessionKey}
           clabelId={pantsCase}
+          setShowTaskDetails={setShowTaskDetails}
+          setShowOrganDetails={setShowOrganDetails}
+          showOrganDetails={showOrganDetails}
         />
-      </div>
 
   
       {showReportScreen && (
-        <ReportScreen sessionKey={sessionKey} onClose={() => setShowReportScreen(false)} />
+        <ReportScreen id={pantsCase} onClose={() => setShowReportScreen(false)} />
       )}
     </div>
   );

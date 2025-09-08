@@ -7,7 +7,6 @@
 }
 
 .sidebar {
-  font-family: AptosDisplay;
   background-color: black;
   color: white;
   grid-column: 1;
@@ -41,9 +40,12 @@
   grid-column: 2;
   grid-row: 1;
   display: grid;
-  grid-template-columns: 40vw 40vw;
-  grid-template-rows: 40vh 40vh;
+  grid-template-columns: 50vw 50vw;
+  grid-template-rows: 50vh 50vh;
   gap: 0;
+  position: absolute;
+  top: 0;
+  left: 0;
 }
 
 .canvas {

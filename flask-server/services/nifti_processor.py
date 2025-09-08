@@ -19,7 +19,7 @@ def has_large_connected_component(slice_mask, threshold=8):
 
 
 class NiftiProcessor:
-    def __init__(self, main_nifti_path, clabel_path, file_type="nii.gz",organ_intensities=None):
+    def __init__(self, main_nifti_path, clabel_path, organ_intensities=None):
         self._main_nifti_path = main_nifti_path
         self._clabel_path = clabel_path
         self.number_max = 999999
@@ -53,12 +53,12 @@ class NiftiProcessor:
 
         voxel_dims_mm = clabel_header.get_zooms()
         voxel_volume_cm3 = np.prod(voxel_dims_mm) / 1000  # convert mm³ to cm³
-
         for organ, label_val in self._organ_intensities.items():
             binary_mask = (clabel_array == label_val)
             slice_0 = binary_mask[:, :, 0]
             slice_last = binary_mask[:, :, -1]
 
+            
             if has_large_connected_component(slice_0, 8) or has_large_connected_component(slice_last, 8):
                 data["organ_metrics"].append({
                     "organ_name": organ,
@@ -66,8 +66,10 @@ class NiftiProcessor:
                     "mean_hu": self.number_max
                 })
                 continue
-
-            volume_cm3 = round(float(int_freq[label_val] * voxel_volume_cm3), Constants.DECIMAL_PRECISION_VOLUME)
+            if label_val in int_freq:
+                volume_cm3 = round(float(int_freq[label_val] * voxel_volume_cm3), Constants.DECIMAL_PRECISION_VOLUME)
+            else:
+                volume_cm3 = 0
             mean_hu = self.calculate_mean_hu_with_erosion(binary_mask, main_nifti_array)
 
             data["organ_metrics"].append({
@@ -187,8 +189,8 @@ class NiftiProcessor:
         clabel_obj = nib.load(self._clabel_path)
         clabel_data = np.around(clabel_obj.get_fdata()).astype(np.uint8)
 
-        PDAC_LABEL = 23  # pancreatic_pdac
-        SMA_LABEL = 15   # superior_mesenteric_artery
+        PDAC_LABEL = 20  # pancreatic_pdac
+        SMA_LABEL = 26   # superior_mesenteric_artery
 
         pdac_mask = (clabel_data == PDAC_LABEL)
         sma_mask = (clabel_data == SMA_LABEL)

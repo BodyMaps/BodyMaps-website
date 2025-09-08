@@ -67,17 +67,25 @@ def organname_to_name(filename):
 def get_mask_data_internal(id, fallback=False):
     """Retrieve or compute organ metadata from NIfTI and mask paths for a session."""
     try:
-        subfolder = "ImageTr" if id < 9000 else "ImageTe"
-        label_subfolder = "LabelTr" if id < 9000 else "LabelTe"
+        subfolder = "ImageTr" if int(id) < 9000 else "ImageTe"
+        label_subfolder = "LabelTr" if int(id) < 9000 else "LabelTe"
         main_nifti_path = f"{Constants.PANTS_PATH}/data/{subfolder}/{get_panTS_id(id)}/{Constants.MAIN_NIFTI_FILENAME}"
-        combined_labels_path = f"{Constants.PANTS_PATH}/data/{subfolder}/{get_panTS_id(id)}/{Constants.COMBINED_LABELS_NIFTI_FILENAME}"
+        combined_labels_path = f"{Constants.PANTS_PATH}/data/{label_subfolder}/{get_panTS_id(id)}/{Constants.COMBINED_LABELS_NIFTI_FILENAME}"
         print(f"[INFO] Processing NIFTI for id {id}")
+        organ_intensities = None
+        
+        organ_intensities_path = f"{Constants.PANTS_PATH}/data/{label_subfolder}/{get_panTS_id(id)}/{Constants.ORGAN_INTENSITIES_FILENAME}"
+        if not os.path.exists(organ_intensities_path) or not os.path.exists(combined_labels_path):
+            npz_processor = NpzProcessor()
+            labels, organ_intensities = npz_processor.combine_labels(int(id), keywords={"pancrea": "pancreas"}, save=True)
+        else: 
+            with open(organ_intensities_path, "r") as f:
+                organ_intensities = json.load(f)
+        
         nifti_processor = NiftiProcessor(main_nifti_path, combined_labels_path)
-        # nifti_processor.set_organ_intensities(organ_intensities)
-        # organ_metadata = nifti_processor.calculate_metrics()
-        # organ_metadata = clean_nan(organ_metadata)
-
-        # stmt = db.select(CombinedLabels).where(CombinedLabels.combined_labels_id == row.combined_labels_id)
+        nifti_processor.set_organ_intensities(organ_intensities)
+        organ_metadata = nifti_processor.calculate_metrics()
+        organ_metadata = clean_nan(organ_metadata)
 
         return organ_metadata
 
@@ -237,64 +245,39 @@ def generate_pdf_with_template(
     from reportlab.pdfgen import canvas
     from reportlab.lib.pagesizes import letter
 
-    LABELS = {
-        "background": 0,
-        "aorta": 1,
-        "adrenal_gland_left": 2,
-        "adrenal_gland_right": 3,
-        "common_bile_duct": 4,
-        "celiac_aa": 5,
-        "colon": 6,
-        "duodenum": 7,
-        "gall_bladder": 8,
-        "postcava": 9,
-        "kidney_left": 10,
-        "kidney_right": 11,
-        "liver": 12,
-        "pancreas": 13,
-        "pancreatic_duct": 14,
-        "superior_mesenteric_artery": 15,
-        "intestine": 16,
-        "spleen": 17,
-        "stomach": 18,
-        "veins": 19,
-        "renal_vein_left": 20,
-        "renal_vein_right": 21,
-        "cbd_stent": 22,
-        "pancreatic_pdac": 23,
-        "pancreatic_cyst": 24,
-        "pancreatic_pnet": 25
-    }
+    LABELS = {v: k for k, v in Constants.PREDEFINED_LABELS.items()}
     NAME_TO_ORGAN = {
         # Pancreas and its lesions
         "pancreas": "pancreas",
-        "pancreatic_pdac": "pancreas",
-        "pancreatic_cyst": "pancreas",
-        "pancreatic_pnet": "pancreas",
+        "pancreas_body": "pancreas",
+        "pancreas_head": "pancreas",
+        "pancreas_tail": "pancreas",
+        "pancreatic_lesion": "pancreas",
+        "pancreatic_duct": "pancreas",
 
         # All other organs: map to self
-        "background": "background",
         "aorta": "aorta",
         "adrenal_gland_left": "adrenal_gland_left",
         "adrenal_gland_right": "adrenal_gland_right",
+        "bladder": "bladder",
         "common_bile_duct": "common_bile_duct",
-        "celiac_aa": "celiac_aa",
+        "celic_artery": "celiac_artery",
         "colon": "colon",
         "duodenum": "duodenum",
+        "femur_right": "femur_right",
+        "femur_left": "femur_left",
         "gall_bladder": "gall_bladder",
         "postcava": "postcava",
         "kidney_left": "kidney_left",
         "kidney_right": "kidney_right",
         "liver": "liver",
-        "pancreatic_duct": "pancreatic_duct",
+        "postcava": "postcava",
+        "prostate": "prostate",
         "superior_mesenteric_artery": "superior_mesenteric_artery",
         "intestine": "intestine",
         "spleen": "spleen",
         "stomach": "stomach",
         "veins": "veins",
-        "renal_vein_left": "renal_vein_left",
-        "renal_vein_right": "renal_vein_right",
-        "cbd_stent": "cbd_stent"
     }
 
     try:
@@ -335,29 +318,39 @@ def generate_pdf_with_template(
                 val = extracted_data[index]
                 return "N/A" if pd.isna(val) else val
             return default
-
+        
         wb = load_workbook(os.path.join(Constants.PANTS_PATH, "data", "metadata.xlsx"))
         sheet = wb["PanTS_metadata"]
-        row = None
-        for x in sheet.iter_rows(values_only=True):
-            if x[0] == get_panTS_id(id):
-                row = x
+        age = None
+        sex = "-"
+        contrast = ""
+        study_detail = ""
+        for row in sheet.iter_rows(values_only=True):
+            if row[0] == get_panTS_id(folder_name):
+                age = row[5]
+                sex = row[4]
+                contrast = row[3]
+                study_detail = row[8]
                 break
-        
+
         # Title
         temp_pdf.setFont("Helvetica-Bold", 26)
         title_text = "MEDICAL REPORT"
         title_width = temp_pdf.stringWidth(title_text, "Helvetica-Bold", 26)
-        temp_pdf.drawString((width - title_width) / 2, height - 130, title_text)
-        y_position = height - 160
+        temp_pdf.drawString((width - title_width) / 2, height - 70, title_text)
+        y_position = height - 100
 
         # Patient info
         temp_pdf.setFont("Helvetica-Bold", 12)
         temp_pdf.drawString(left_margin, y_position, "PATIENT INFORMATION")
         y_position -= line_height
 
-        left_y = write_wrapped_text(left_margin, y_position, f"PanTS ID: {get_panTS_id(id)}")
-        right_y = write_wrapped_text(width / 2, y_position, f"Sex: {row[4]}")
+        left_y = write_wrapped_text(left_margin, y_position, f"PANTS ID: {folder_name}")
+        right_y = write_wrapped_text(width / 2, y_position, f"Sex: {sex}")
+        y_position -= line_height
+        
+        write_wrapped_text(left_margin, y_position, f"Age: {age}")
+        
         y_position = min(left_y, right_y) - section_spacing
 
         # Imaging detail
@@ -366,7 +359,7 @@ def generate_pdf_with_template(
         y_position -= line_height
 
         ct_nii = nib.load(ct_path)
-        spacing = row[2]
+        spacing = ct_nii.header.get_zooms()
         shape = ct_nii.shape
 
         try:
@@ -374,18 +367,18 @@ def generate_pdf_with_template(
         except Exception:
             scanner_info = "N/A"
 
-        contrast_used = extracted_data.get("contrast_used", "N/A") if extracted_data is not None else "N/A"
 
         y_position = write_wrapped_text(left_margin, y_position, f"Spacing: {spacing}")
         y_position = write_wrapped_text(left_margin, y_position, f"Shape: {shape}")
-        y_position = write_wrapped_text(left_margin, y_position, f"Scanner: {scanner_info}")
-        y_position = write_wrapped_text(left_margin, y_position, f"Contrast: {contrast_used}")
+        y_position = write_wrapped_text(left_margin, y_position, f"Study type: {study_detail}")
+        y_position = write_wrapped_text(left_margin, y_position, f"Contrast: {contrast}")
         y_position -= section_spacing
 
         # Load image data
         ct_array = ct_nii.get_fdata()
-        mask_array = nib.load(mask_path).get_fdata()
+        mask_array = nib.load(mask_path).get_fdata().astype(np.uint8)
         voxel_volume = np.prod(nib.load(mask_path).header.get_zooms()) / 1000  # mm³ to cm³
+        print(np.unique(mask_array))
 
         # AI Measurements
         temp_pdf.setFont("Helvetica-Bold", 12)
@@ -393,8 +386,8 @@ def generate_pdf_with_template(
         y_position -= line_height
 
         # Table configuration
-        headers = ["Organ", "Volume (cc)", "Mean HU", "Total Lesion #", "Total Lesion Volume (cc)"]
-        col_widths = [120, 70, 60, 80, 120]
+        headers = ["Organ", "Volume (cc)", "Mean HU"]
+        col_widths = [120, 100, 100]
         row_height = 20
 
         def draw_table_row(row_data, is_header=False):
@@ -423,6 +416,7 @@ def generate_pdf_with_template(
             if organ in NAME_TO_ORGAN and NAME_TO_ORGAN[organ] != organ:
                 mask = (mask_array == label_id)
                 if not np.any(mask):
+                    print("none")
                     continue
                 volume = np.sum(mask) * voxel_volume
                 mean_hu = np.mean(ct_array[mask])
@@ -434,6 +428,8 @@ def generate_pdf_with_template(
                         "number": 1,
                         "volume": volume
                     }
+                    
+        print(lession_volume_dict)
         
         for organ, label_id in LABELS.items():
             if organ in NAME_TO_ORGAN and NAME_TO_ORGAN[organ] != organ:
@@ -447,53 +443,50 @@ def generate_pdf_with_template(
             mean_hu = np.mean(ct_array[mask])
             
             if organ in lession_volume_dict:
-                row = [organ.replace('_', ' '), f"{volume:.2f}", f"{mean_hu:.1f}", f"{lession_volume_dict[organ]['number']}", f"{lession_volume_dict[organ]['volume']:.2f}"]
+                row = [organ.replace('_', ' '), f"{volume:.2f}", f"{mean_hu:.1f}"]
             else:
-                row = [organ.replace('_', ' '), f"{volume:.2f}", f"{mean_hu:.1f}", "N/A", "N/A"]
+                row = [organ.replace('_', ' '), f"{volume:.2f}", f"{mean_hu:.1f}"]
             draw_table_row(row)
 
-        y_position -= section_spacing
+        # y_position -= section_spacing
 
         # === Step 2: PDAC Staging ===
-        temp_pdf.setFont("Helvetica-Bold", 12)
-        temp_pdf.drawString(left_margin, y_position, "PDAC STAGING")
-        y_position -= line_height
+        # temp_pdf.setFont("Helvetica-Bold", 12)
+        # temp_pdf.drawString(left_margin, y_position, "PDAC STAGING")
+        # y_position -= line_height
 
-        try:
-            nifti_processor = NiftiProcessor(ct_path, mask_path)
-            pdac_info = nifti_processor.calculate_pdac_sma_staging()
-            pdac_text = pdac_info
-        except Exception:
-            pdac_text = "Error fetching PDAC staging information."
+        # try:
+        #     pdac_info = get_pdac_staging(id)
+        #     print(pdac_info, id)
+        #     pdac_text = pdac_info.get("staging_description", "No staging data available.")
+        # except Exception:
+        #     pdac_text = "Error fetching PDAC staging information."
 
-        y_position = write_wrapped_text(left_margin, y_position, pdac_text, bold=False, font_size=10)
+        # y_position = write_wrapped_text(left_margin, y_position, pdac_text, bold=False, font_size=10)
         # === Step 3: Key Images ===
         
-        include_liver = lession_volume_dict.get("liver", {}).get("number", 0) > 0
-        include_pancreas = lession_volume_dict.get("pancreas", {}).get("number", 0) > 0
-        include_kidney = (
-            lession_volume_dict.get("kidney_left", {}).get("number", 0) > 0 or
-            lession_volume_dict.get("kidney_right", {}).get("number", 0) > 0
-        )
-        print(include_liver, include_pancreas, include_kidney)
-        if include_liver or include_pancreas or include_kidney:
-            def check_and_reset_page(space_needed):
-                nonlocal y_position
-                if y_position - space_needed < 50:
-                    reset_page()
+        # include_liver = np.count_nonzero(mask_array == LABELS["liver"]) > 0
+        # include_pancreas = lession_volume_dict.get("pancreas", {}).get("number", 0) > 0
+        # include_kidney = np.count_nonzero(mask_array == LABELS["kidney_left"]) > 0 or np.count_nonzero(mask_array == LABELS["kidney_right"]) > 0
+        # print(include_liver, include_pancreas, include_kidney)
+        # if include_liver or include_pancreas or include_kidney:
+        #     def check_and_reset_page(space_needed):
+        #         nonlocal y_position
+        #         if y_position - space_needed < 50:
+        #             reset_page()
 
-            temp_pdf.showPage()
-            y_position = height - top_margin
-            temp_pdf.setFont("Helvetica-Bold", 14)
-            temp_pdf.drawString(left_margin, y_position, "KEY IMAGES")
-            y_position -= section_spacing
+        #     temp_pdf.showPage()
+        #     y_position = height - top_margin
+        #     temp_pdf.setFont("Helvetica-Bold", 14)
+        #     # temp_pdf.drawString(left_margin, y_position, "KEY IMAGES")
+        #     y_position -= section_spacing
 
-            organs = {
-                "liver": include_liver,
-                "pancreas": include_pancreas,
-                "kidney_left": include_kidney,
-                "kidney_right": include_kidney
-            }
+        #     organs = {
+        #         "liver": include_liver,
+        #         "pancreas": include_pancreas,
+        #         "kidney_left": include_kidney,
+        #         "kidney_right": include_kidney
+        #     }
             # download_clean_folder(ct_path.replace("/inputs/", "/outputs/").rsplit("/", 1)[0])
             # for organ in organs:
             #     organ_data = lession_volume_dict.get(organ)
@@ -510,6 +503,7 @@ def generate_pdf_with_template(
             #     overlay_path = f"/tmp/{organ}_overlay.png"
             #     print(ct_path, mask_path)
             #     organ_mask_path = mask_path.replace('combined_labels.nii.gz', 'segmentations/'+organ+'.nii.gz')
+            #     print(organ_mask_path)
             #     if create_overlay_image(ct_path, organ_mask_path, overlay_path, color="red"):
             #         try:
             #             temp_pdf.drawImage(overlay_path, left_margin, y_position - 200, width=200, height=200)
@@ -525,7 +519,7 @@ def generate_pdf_with_template(
         temp_pdf.save()
 
         # Merge with template
-        template_reader = PdfReader(template_pdf)
+        template_reader =  PdfReader(template_pdf)
         content_reader = PdfReader(temp_pdf_path)
         writer = PdfWriter()
 
@@ -548,7 +542,6 @@ def generate_pdf_with_template(
     finally:
         if os.path.exists(temp_pdf_path):
             os.remove(temp_pdf_path)
-
 
 # Helper Function to Process CT and Mask
 def get_most_labeled_slice(ct_path, mask_path, output_png, contrast_min=-150, contrast_max=250):
@@ -681,35 +674,14 @@ def zoom_into_labeled_area(ct_path, mask_path, output_path, color="red"):
     except Exception as e:
         return False
 
-def get_pdac_staging(session_key):
-    # Step 1: Validate input
-    if not session_key:
-        return {"error": "Session key is missing."}
-
+def get_pdac_staging(clabel_id):
     try:
-        # Step 2: Prepare aliased tables
-        as1 = db.aliased(ApplicationSession)
-        cl2 = db.aliased(CombinedLabels)
-
-        # Step 3: Join ApplicationSession and CombinedLabels on combined_labels_id
-        j = db.join(cl2, as1, as1.combined_labels_id == cl2.combined_labels_id)
-
-        # Step 4: Construct and execute query
-        stmt = (
-            db.select(as1.session_id, as1.main_nifti_path, cl2.combined_labels_path)
-            .select_from(j)
-            .where(as1.session_id == session_key)
-        )
-
-        resp = db.session.execute(stmt)
-        row = resp.fetchone()
-
-        # Step 5: If no result, diagnose and return informative error
-        if not row:
-            return {"error": f"PDAC staging failed:"}
-
-        # Step 6: Instantiate processor and calculate PDAC staging
-        nifti_processor = NiftiProcessor(row.main_nifti_path, row.combined_labels_path)
+        subfolder = "ImageTr" if int(clabel_id) < 9000 else "ImageTe"
+        label_subfolder = "LabelTr" if int(clabel_id) < 9000 else "LabelTe"
+        main_nifti_path = f"{Constants.PANTS_PATH}/data/{subfolder}/{get_panTS_id(clabel_id)}/{Constants.MAIN_NIFTI_FILENAME}"
+        combined_labels_path = f"{Constants.PANTS_PATH}/data/{label_subfolder}/{get_panTS_id(clabel_id)}/{Constants.COMBINED_LABELS_NIFTI_FILENAME}"
+        
+        nifti_processor = NiftiProcessor(main_nifti_path, combined_labels_path)
         staging_result = nifti_processor.calculate_pdac_sma_staging()
 
         return {"staging_description": staging_result}

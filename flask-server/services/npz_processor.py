@@ -8,6 +8,7 @@ import tempfile
 from scipy.ndimage import label
 import pathlib
 from openpyxl import load_workbook
+import json
 
 def get_panTS_id(index):
     cur_case_id = str(index)
@@ -58,44 +59,26 @@ class NpzProcessor:
 
         return round(float(np.mean(hu_values)), Constants.DECIMAL_PRECISION_HU)
     
-    def npz_to_nifti(self, id: int, combined_label=True, save=True):
-        subfolder = "LabelTr" if combined_label else "ImageTr"
-        if id >= 9000:
-            subfolder = "LabelTe" if combined_label else "ImageTe"
+    
+    def npz_to_nifti(self, id: int, combined_label=True, save=True, path=None):
+        subfolder = "LabelTr" if id < 9000 else "LabelTe"
+        image_subfolder = "ImageTe" if id >= 9000 else "ImageTr"
         
-        if combined_label:    
+        if combined_label and path is None:    
             dir_path = pathlib.Path(f"{Constants.PANTS_PATH}/data/{subfolder}/{get_panTS_id(id)}/{Constants.COMBINED_LABELS_FILENAME}")
         else:
-            dir_path = pathlib.Path(f"{Constants.PANTS_PATH}/data/{subfolder}/{get_panTS_id(id)}/ct.npz")
-        
-        metadata_path = pathlib.Path(f"{Constants.PANTS_PATH}/data/metadata.xlsx")
-        
-        wb = load_workbook(metadata_path)
-        sheet = wb["PanTS_metadata"]
-        spacing = []
-        # ! col_0 - id, col_1 - shape, col_2 - spacing, col_3  - ct_phase, col_4 - sex, col_5 - age
-        for row in sheet.iter_rows(values_only=True):
-            if row[0] == get_panTS_id(id):
-                # make into int
-                spacing = row[2].strip("()").split(", ")
-                break
-                            
-        if len(spacing) == 0:
-            f"Could not find metadata for PanTS ID: {get_panTS_id(id)}"
-            return None
-
-        for i in range(len(spacing)):
-            spacing[i] = float(spacing[i])
+            dir_path = pathlib.Path(path)   
+            
+        nifti_path = pathlib.Path(f"{Constants.PANTS_PATH}/data/{image_subfolder}/{get_panTS_id(id)}/{Constants.MAIN_NIFTI_FILENAME}")
+        nifti_dat = nib.load(nifti_path)
 
         arr = np.load(dir_path)["data"].astype(np.float32)
-        affine = np.diag(spacing + [1])
-        img = nib.nifti1.Nifti1Image(arr, affine=affine)
-        img.header.set_zooms(spacing) 
+        img = nib.nifti1.Nifti1Image(arr, affine=nifti_dat.affine, header=nifti_dat.header)
 
         nib.save(img, dir_path.with_suffix(".nii.gz"))
             
             
-    def combine_labels(self, id: int, save=True):   
+    def combine_labels(self, id: int, keywords={"pancrea": "pancreas"}, save=True):   
         """
         Merge multiple label masks into one combined segmentation and re-index the labels.
         """
@@ -104,28 +87,63 @@ class NpzProcessor:
         if id >= 9000:
             segment_subfolder = "LabelTe"   
         
+        image_subfolder = "ImageTe" if id >= 9000 else "ImageTr"
+            
+        nifti_path = pathlib.Path(f"{Constants.PANTS_PATH}/data/{image_subfolder}/{get_panTS_id(id)}/{Constants.MAIN_NIFTI_FILENAME}")
+        nifti_dat = nib.load(nifti_path)
+        
         dir_path = pathlib.Path(f"{Constants.PANTS_PATH}/data/{segment_subfolder}/{get_panTS_id(id)}/segmentations")
         npz_files = list(dir_path.glob("*.npz"))
         
         combined_labels_img_data = None
+        keyword_dict = {organ: None for organ in keywords.values()}
 
-        for i in range(len(npz_files)):
-            filename = npz_files[i].name
-            data = np.load(dir_path /filename)["data"]
-            # not contiguous, may need original ct to get shape
+        for i, file in enumerate(npz_files):
+            filename = file.name
+            data = np.load(file)["data"]
+
             if combined_labels_img_data is None:
                 combined_labels_img_data = np.ndarray(shape=data.shape, dtype=np.float64)
-
-            scaled = data * np.float64(i + 1)
-            combined_labels_img_data = np.maximum(combined_labels_img_data, scaled)
-
-            organ_intensities[filename] = i + 1
+                
+            matched = False
+            for substring, organ in keywords.items():
+                if substring in filename:
+                    if keyword_dict[organ] is None:
+                        keyword_dict[organ] = np.ndarray(shape=data.shape, dtype=np.float64)
+                    scaled = data * np.float64(i + 1)
+                    keyword_dict[organ] = np.maximum(keyword_dict[organ], scaled)
+                    combined_labels_img_data = np.maximum(combined_labels_img_data, scaled)
+                    organ_intensities[organ] = i + 1
+                    matched = True
+                    break
+            
+            if not matched:  # no keyword match, still add to combined
+                scaled = data * np.float64(i + 1)
+                combined_labels_img_data = np.maximum(combined_labels_img_data, scaled)
+                organ_intensities[filename] = i + 1
 
         if save:
-            save_path = f"{Constants.PANTS_PATH}/data/{segment_subfolder}/{get_panTS_id(id)}/{Constants.COMBINED_LABELS_FILENAME}"
-            np.savez_compressed(save_path, data=combined_labels_img_data)
+            # save each organ-specific file
+            for organ, data in keyword_dict.items():
+                if data is not None:
+                    save_path = (
+                        f"{Constants.PANTS_PATH}/data/{segment_subfolder}/{get_panTS_id(id)}/segmentations/{organ}.nii.gz"
+                    )
+                    img = nib.Nifti1Image(data, affine=nifti_dat.affine, header=nifti_dat.header)
+                    nib.save(img, save_path)
+            
+            # save combined labels
+            if combined_labels_img_data is not None:
+                save_path = (
+                    f"{Constants.PANTS_PATH}/data/{segment_subfolder}/{get_panTS_id(id)}/{Constants.COMBINED_LABELS_FILENAME}"
+                )
+                np.savez_compressed(save_path, data=combined_labels_img_data)
+
+            # save organ intensities
+            organ_save_path = (
+                f"{Constants.PANTS_PATH}/data/{segment_subfolder}/{get_panTS_id(id)}/{Constants.ORGAN_INTENSITIES_FILENAME}"
+            )
+            with open(organ_save_path, "w") as f:
+                json.dump(organ_intensities, f)
 
         return combined_labels_img_data, organ_intensities
-
-    def __str__(self):
-        return f"Npz Processor Object\n"

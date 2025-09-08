@@ -78,6 +78,10 @@ export type SegmentationAnnotations = {
 	[key in SegmentationCategories]?: string[];
 };
 
+export type Systems = "Vascular System" | "Adrenal Glands" | "Pancreas" | "Kidneys" | "Digestive System" | "Femur" | "Lung" | "Other";
+export type OrganSystemsType = {[key in Systems]: SegmentationCategories[]};
+
+
 export type SegmentationCategories =
 	| "adrenal_gland_left"
 	| "adrenal_gland_right"

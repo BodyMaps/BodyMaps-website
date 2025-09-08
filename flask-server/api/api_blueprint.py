@@ -43,7 +43,9 @@ from openpyxl import load_workbook
 
 
 SESSIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "tmp")
+PDF_DIR = f"{Constants.PANTS_PATH}/data/pdf"
 os.makedirs(SESSIONS_DIR, exist_ok=True)
+os.makedirs(PDF_DIR, exist_ok=True)
 
 @api_blueprint.route('/get_preview/<clabel_ids>', methods=['GET'])
 def get_preview(clabel_ids):
@@ -93,9 +95,7 @@ def get_image_preview(clabel_id):
 
 @api_blueprint.route('/get-label-colormap/<clabel_id>', methods=['GET'])
 def get_label_colormap(clabel_id):
-    subfolder = "LabelTr"
-    if not id_is_training(int(clabel_id)):
-        subfolder = "LabelTe"
+    subfolder = "LabelTr" if int(clabel_id) < 9000 else "LabelTe"
     
     clabel_path = os.path.join(Constants.PANTS_PATH, "data", subfolder, get_panTS_id(int(clabel_id)),  'combined_labels.npz')
 
@@ -186,25 +186,9 @@ def upload():
 
         combined_labels, organ_intensities = nifti_processor.combine_labels(filenames, nifti_multi_dict, save=True)
 
-        combined_labels_id = generate_uuid()
-
-        SessionManager.instance().update_session_info(
-            session_id=session_id,
-            main_nifti_path=main_nifti_path,
-            combined_labels_id=combined_labels_id
-        )
-
-        SessionManager.instance().bind_combined_labels_to_session(
-            session_id=session_id,
-            clabel_path=nifti_processor._clabel_path,
-            organ_intensities=organ_intensities
-        )
-
-
         resp = {
             'status': "200",
             'session_id': session_id,
-            'combined_labels_id': combined_labels_id,
             'organ_intensities': organ_intensities
         }
         return jsonify(resp)
@@ -235,57 +219,54 @@ def get_main_nifti(clabel_id):
         response.headers['Content-Encoding'] = 'gzip'
 
     else:
-        print(f"Could not find filepath: {main_nifti_path}. Creating a new one")
-        npz_path = main_nifti_path.replace(".nii.gz", ".npz")
-        if not os.path.exists(npz_path):   
-            return jsonify({"error": "Could not find npz filepath"}), 404
-        npz_processor = NpzProcessor()
-        npz_processor.npz_to_nifti(int(clabel_id), combined_label=False, save=True)  
+        print(f"Could not find filepath: {main_nifti_path}. ")
+        return jsonify({"error": "Could not find filepath"}), 404
         
-        response = make_response(send_file(main_nifti_path, mimetype='application/gzip'))
+        # npz_path = main_nifti_path.replace(".nii.gz", ".npz")
+        # if not os.path.exists(npz_path):   
+        #     return jsonify({"error": "Could not find npz filepath"}), 404
+        # npz_processor = NpzProcessor()
+        # npz_processor.npz_to_nifti(int(clabel_id), combined_label=False, save=True)  
+        
+        # response = make_response(send_file(main_nifti_path, mimetype='application/gzip'))
 
-        response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
-        response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
-        response.headers['Content-Encoding'] = 'gzip'
+        # response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+        # response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
+        # response.headers['Content-Encoding'] = 'gzip'
 
     return response
 
 
 
 
-@api_blueprint.route('/get-report/<id>', methods=['POST'])
+@api_blueprint.route('/get-report/<id>', methods=['GET'])
 def get_report(id):
+    temp_pdf_path = f"{PDF_DIR}/temp.pdf"
+    output_pdf_path = f"{PDF_DIR}/final.pdf"
     try:
         try:
             organ_metrics = get_mask_data_internal(id)
-            if organ_metrics.get("error"):
-                organ_metrics = get_mask_data_internal(id, fallback=True)
             organ_metrics = organ_metrics.get("organ_metrics", [])
         except Exception as e:
-            pass
-            # return jsonify({"error": f"Error loading organ metrics: {str(e)}"}), 500
+            return jsonify({"error": f"Error loading organ metrics: {str(e)}"}), 500
 
         subfolder = "ImageTr" if int(id) < 9000 else "ImageTe"
-        label_subfolder = "LabelsTr" if int(id) < 9000 else "LabelsTe"
+        label_subfolder = "LabelTr" if int(id) < 9000 else "LabelTe"
 
         base_path = f"{SESSIONS_DIR}/{id}"
         ct_path = f"{Constants.PANTS_PATH}/data/{subfolder}/{get_panTS_id(id)}/{Constants.MAIN_NIFTI_FILENAME}"
         masks = f"{Constants.PANTS_PATH}/data/{label_subfolder}/{get_panTS_id(id)}/{Constants.COMBINED_LABELS_NIFTI_FILENAME}"
         
         npz_processor = NpzProcessor()
-        if (not os.path.exists(ct_path)):
-            npz_processor.npz_to_nifti(int(id), combined_label=False, save=True)
+
+        # if (not os.path.exists(ct_path)):
+        #     npz_processor.npz_to_nifti(int(id), combined_label=False, save=True)
 
         if (not os.path.exists(masks)): 
-            npz_processor.combine_labels(int(id), save=True)
+            npz_processor.combine_labels(int(id), keywords={"pancrea": "pancreas"}, save=True)
             npz_processor.npz_to_nifti(int(id), combined_label=True, save=True)
             
-            
-            
         template_pdf = os.getenv("TEMPLATE_PATH", "report_template_3.pdf")
-
-        temp_pdf_path = f"{SESSIONS_DIR}/{id}_temp.pdf"
-        output_pdf_path = f"{SESSIONS_DIR}/{id}_final.pdf"
 
         extracted_data = None
         column_headers = None
@@ -304,7 +285,7 @@ def get_report(id):
             mask_path=masks,
             template_pdf=template_pdf,
             temp_pdf_path=temp_pdf_path,
-            session_key=id,
+            id=id,
             extracted_data=extracted_data,
             column_headers=column_headers
         )
@@ -335,7 +316,9 @@ def get_segmentations(combined_labels_id):
         npz_processor = NpzProcessor()
         if not os.path.exists(npz_path):   
             print(f"Could not find npz filepath: {npz_path}. Creating a new one")
-            npz_processor.combine_labels(combined_labels_id, True)
+
+            # ! pancrea instead of pancreas to include pancreatic labels
+            npz_processor.combine_labels(combined_labels_id, keywords={"pancrea": "pancreas"}, save=True)
             
         npz_processor.npz_to_nifti(int(combined_labels_id), combined_label=True, save=True)   
 

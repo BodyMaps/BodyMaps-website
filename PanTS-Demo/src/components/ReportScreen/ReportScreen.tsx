@@ -2,18 +2,13 @@ import { useEffect } from 'react';
 import { APP_CONSTANTS } from '../../helpers/constants';
 
 type Props = {
-  sessionKey: string | undefined;
+  id: string;
   onClose: () => void;
 }
-const ReportScreen = ({ sessionKey, onClose }: Props): React.ReactElement | null => {
+const ReportScreen = ({ id, onClose }: Props): React.ReactElement | null => {
   useEffect(() => {
-    if (typeof sessionKey !== "undefined") {
-      const formData = new FormData();
-      formData.append("sessionKey", sessionKey);
-
-      fetch(`${APP_CONSTANTS.API_ORIGIN}/api/get-report`, {
-        method: "POST",
-        body: formData,
+      fetch(`${APP_CONSTANTS.API_ORIGIN}/api/get-report/${id}`, {
+        method: "GET",
       })
         .then(async (res) => {
           if (!res.ok) {
@@ -30,8 +25,7 @@ const ReportScreen = ({ sessionKey, onClose }: Props): React.ReactElement | null
         .catch(() => {
           onClose(); // Also close on error
         });
-    }
-  }, [sessionKey, onClose]);
+  }, [id, onClose]);
 
   return null; // Do not render anything
 };
