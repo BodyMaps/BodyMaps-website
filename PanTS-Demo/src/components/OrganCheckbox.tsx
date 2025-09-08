@@ -1,7 +1,7 @@
 import { IconArrowLeft, IconChevronRight } from '@tabler/icons-react';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { APP_CONSTANTS, OrganSystems, OrganSystemsArray, segmentation_categories } from '../helpers/constants';
-import { type CheckBoxData, type SegmentationCategories, type Systems } from '../types';
+import { type CheckBoxData, type Systems } from '../types';
 
 type ChipBoxProps = {
   labelColorMap: {[key: number]: number[]};
@@ -79,11 +79,8 @@ function Checked({ system, labelColorMap, checkState, setCheckState }: ChipBoxPr
 }
 
 
-function OrganCheckbox({ setCheckState, checkBoxData, checkState, update, sessionId, clabelId, setShowTaskDetails, setShowOrganDetails, showOrganDetails }: Props) {
-  const [searchText, setSearchText] = useState("");
+function OrganCheckbox({ setCheckState, checkBoxData, checkState, sessionId, clabelId, setShowTaskDetails, setShowOrganDetails, showOrganDetails }: Props) {
   const [labelColorMap, setLabelColorMap] = useState<{ [key: number]: number[] }>({});
-  const inputRef = useRef(null);
-  const [organs, setOrgans] = useState<SegmentationCategories[]>([]);
 
   const cacheKey = `labelColorMap_${sessionId}`;
 
@@ -116,17 +113,6 @@ function OrganCheckbox({ setCheckState, checkBoxData, checkState, update, sessio
 
 
   
-  const handleSelectAllUnselected = () => {
-    setCheckState(prev => {
-      const newState = { ...prev };
-      checkBoxData.forEach(item => {
-        if (!prev[item.id]) {
-          newState[item.id] = true;
-        }
-      });
-      return newState;
-    });
-  };
 
   const toggleAll = () => {
     setCheckState(prev => {
