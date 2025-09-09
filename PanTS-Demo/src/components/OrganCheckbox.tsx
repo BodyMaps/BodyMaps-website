@@ -1,7 +1,7 @@
 import { IconArrowLeft, IconChevronRight } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
 import { APP_CONSTANTS, OrganSystems, OrganSystemsArray, segmentation_categories } from '../helpers/constants';
-import { type CheckBoxData, type Systems } from '../types';
+import { type Systems } from '../types';
 
 type ChipBoxProps = {
   labelColorMap: {[key: number]: number[]};
@@ -12,7 +12,6 @@ type ChipBoxProps = {
 
 type Props = {
   setCheckState: React.Dispatch<React.SetStateAction<boolean[]>>;
-  checkBoxData: CheckBoxData[];
   checkState: boolean[];
   sessionId: string | undefined;
   clabelId: string;
@@ -78,7 +77,7 @@ function Checked({ system, labelColorMap, checkState, setCheckState }: ChipBoxPr
 }
 
 
-function OrganCheckbox({ setCheckState, checkBoxData, checkState, sessionId, clabelId, setShowTaskDetails, setShowOrganDetails, showOrganDetails }: Props) {
+function OrganCheckbox({ setCheckState, checkState, sessionId, clabelId, setShowTaskDetails, setShowOrganDetails, showOrganDetails }: Props) {
   const [labelColorMap, setLabelColorMap] = useState<{ [key: number]: number[] }>({});
 
   const cacheKey = `labelColorMap_${sessionId}`;
@@ -126,7 +125,6 @@ function OrganCheckbox({ setCheckState, checkBoxData, checkState, sessionId, cla
     });
   };
 
-  console.log(checkBoxData)
 
   return (
     <div className={`flex w-2xs h-screen flex-col gap-4 p-3 z-3 absolute top-0 left-0 bg-[#0f0824] duration-100 transition-all ${showOrganDetails ? 'translate-x-0' : '-translate-x-full'} origin-left`}>

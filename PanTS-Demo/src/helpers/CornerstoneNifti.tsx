@@ -44,21 +44,21 @@ const toolGroupSpecificRepresentationConfig = {
   },
 };
 
-export async function renderVisualization(ref1: React.RefObject<HTMLDivElement | null>, ref2: React.RefObject<HTMLDivElement | null>, ref3: React.RefObject<HTMLDivElement | null>, _sessionId: string, clabelId: string): Promise<VisualizationRenderReturnType | undefined> {
+export async function renderVisualization(ref1: HTMLDivElement | null, ref2: HTMLDivElement | null, ref3: HTMLDivElement | null, _sessionId: string, clabelId: string): Promise<VisualizationRenderReturnType | undefined> {
   cache.purgeCache();
-  console.log(clabelId)
   csTools3dInit();
   await csInit();
-  if (!ref1.current || !ref2.current || !ref3.current) return;
-  ref1.current.oncontextmenu = (e) => e.preventDefault();
-  ref2.current.oncontextmenu = (e) => e.preventDefault();
-  ref3.current.oncontextmenu = (e) => e.preventDefault();
+  if (!ref1 || !ref2 || !ref3) {
+    return;
+  };
+  ref1.oncontextmenu = (e) => e.preventDefault();
+  ref2.oncontextmenu = (e) => e.preventDefault();
+  ref3.oncontextmenu = (e) => e.preventDefault();
   
   const toolGroup = createToolGroup();
   if (!toolGroup) return;
   volumeLoader.registerVolumeLoader('nifti', cornerstoneNiftiImageVolumeLoader);
   const renderingEngine = createRenderingEngine();
-  console.log("🧩 renderingEngine = ", renderingEngine);
 
   const mainNiftiURL = `${APP_CONSTANTS.API_ORIGIN}/api/get-main-nifti/${clabelId}`;
   const volumeId = 'nifti:' + mainNiftiURL;
@@ -74,7 +74,6 @@ export async function renderVisualization(ref1: React.RefObject<HTMLDivElement |
   const segmentationURL = `${APP_CONSTANTS.API_ORIGIN}/api/get-segmentations/${clabelId}`;
   const combined_labels_Id = 'nifti:' + segmentationURL;
   const combined_labels = await volumeLoader.createAndCacheVolume(combined_labels_Id);
-
   const segmentationVolumeArray = combined_labels.getScalarData(); // ✅ 加这一句
 
 
@@ -136,7 +135,7 @@ export async function renderVisualization(ref1: React.RefObject<HTMLDivElement |
       {
         viewportId: viewportId1, 
         type: Enums.ViewportType.ORTHOGRAPHIC,
-        element: ref1.current,
+        element: ref1,
         defaultOptions: {
           orientation: Enums.OrientationAxis.AXIAL,
         },
@@ -144,7 +143,7 @@ export async function renderVisualization(ref1: React.RefObject<HTMLDivElement |
       {
         viewportId: viewportId2,
         type: Enums.ViewportType.ORTHOGRAPHIC,
-        element: ref2.current,
+        element: ref2,
         defaultOptions: {
           orientation: Enums.OrientationAxis.SAGITTAL,
         },
@@ -152,7 +151,7 @@ export async function renderVisualization(ref1: React.RefObject<HTMLDivElement |
       {
         viewportId: viewportId3,
         type: Enums.ViewportType.ORTHOGRAPHIC,
-        element: ref3.current, 
+        element: ref3, 
         defaultOptions: {
           orientation: Enums.OrientationAxis.CORONAL,
         },
