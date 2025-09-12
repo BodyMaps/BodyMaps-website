@@ -1,5 +1,5 @@
 import type { RenderingEngine } from '@cornerstonejs/core';
-import type { IImageVolume } from '@cornerstonejs/core/dist/types/types';
+import type { Color, ColorLUT, IImageVolume } from '@cornerstonejs/core/dist/types/types';
 import { Niivue } from '@niivue/niivue';
 import { IconDownload, IconHome, IconReport, IconSettings } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
@@ -49,6 +49,8 @@ function VisualizationPage() {
   const [showTaskDetails, setShowTaskDetails] = useState(true);
   const [showOrganDetails, setShowOrganDetails] = useState(false);  
   const [_loading, setLoading] = useState(true);
+  const [labelColorMap, setLabelColorMap] = useState<{ [key: number]: Color }>({});
+  
 
 
   const navigate = useNavigate();
@@ -76,11 +78,18 @@ function VisualizationPage() {
         initialState[item.id] = true;
       });
       setCheckState(initialState);
+      const max = Math.max(...Object.keys(labelColorMap).map((key) => parseInt(key)));
 
-      if (!axial_ref.current || !sagittal_ref.current || !coronal_ref.current || !render_ref.current) return;
+      const cmap: ColorLUT = Array.from({ length: max+1 }, () => [0, 0, 0, 0]);
+      for (const key in labelColorMap) {
+        cmap[parseInt(key)] = labelColorMap[parseInt(key)];
+      }
+      if (!axial_ref.current || !sagittal_ref.current || !coronal_ref.current || !render_ref.current || cmap.length === 0) return;
+
+      console.log(cmap)
 
       const result =
-        await renderVisualization(axial_ref.current, sagittal_ref.current, coronal_ref.current, "2", pantsCase);
+        await renderVisualization(axial_ref.current, sagittal_ref.current, coronal_ref.current, cmap, pantsCase);
       setLoading(false);
       if (!result) return;
       const { segmentationVolumeArray, segRepUIDs, renderingEngine, viewportIds, volumeId } = result;
@@ -90,16 +99,41 @@ function VisualizationPage() {
       setViewportIds(viewportIds);
       setVolumeId(volumeId);
 
-      const { nv, cmapCopy } = await create3DVolume(render_ref, pantsCase);
+      const { nv, cmapCopy } = await create3DVolume(render_ref, pantsCase, labelColorMap);
       cmapRef.current = cmapCopy;
       setNV(nv);
       segmentationRef.current = segmentationVolumeArray;
     };
 
     setup();
-  }, [pantsCase, axial_ref, sagittal_ref, coronal_ref, render_ref]);
+  }, [pantsCase, axial_ref, sagittal_ref, coronal_ref, render_ref, labelColorMap]);
   // Toggle checkbox state
+    useEffect(() => {
+    const fetchColorMap = async () => {
+      try {
+        // const cached = sessionStorage.getItem(cacheKey);
+        // if (cached) {
+        //   setLabelColorMap(JSON.parse(cached));
+        //   return;
+        // }
+        const response = await fetch(`${APP_CONSTANTS.API_ORIGIN}/api/get-label-colormap/${pantsCase}`);
+        const lut = await response.json();
+        const parsedMap: {[key: number]: Color}= {};
+        for (const labelId in lut) {
+          const color = lut[labelId];
+          if (color && color.R !== undefined) {
+            const arr: Color = [color.R, color.G, color.B, color.A ?? 255];
+            parsedMap[Number(labelId)] = arr;
+          }
+        }
+        setLabelColorMap(parsedMap);
+      } catch (err) {
+        console.warn("❗ Failed to fetch colormap:", err);
+      }
+    };
 
+    fetchColorMap();
+  }, [pantsCase]);
   
 
   // Update VOI (window/level) settings
@@ -345,10 +379,10 @@ function VisualizationPage() {
           setCheckState={setCheckState}
           checkState={checkState}
           sessionId={sessionKey}
-          clabelId={pantsCase}
           setShowTaskDetails={setShowTaskDetails}
           setShowOrganDetails={setShowOrganDetails}
           showOrganDetails={showOrganDetails}
+          labelColorMap={labelColorMap}
         />
 
   

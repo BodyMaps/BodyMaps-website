@@ -1,10 +1,11 @@
+import type { Color } from '@cornerstonejs/core/dist/types/types';
 import { Niivue, NVImage, SLICE_TYPE } from '@niivue/niivue';
 import type { NColorMap } from '../types';
 import { APP_CONSTANTS } from './constants';
 
 
 
-export async function create3DVolume(canvasRef: React.RefObject<HTMLCanvasElement | null>, clabelId: string): Promise<{nv: Niivue, nvImage: NVImage | null, cmapCopy: NColorMap}> {
+export async function create3DVolume(canvasRef: React.RefObject<HTMLCanvasElement | null>, clabelId: string, colorLUT: {[key: number]: Color}): Promise<{nv: Niivue, nvImage: NVImage | null, cmapCopy: NColorMap}> {
   console.log(clabelId)
   
   const nv = new Niivue({
@@ -17,11 +18,6 @@ export async function create3DVolume(canvasRef: React.RefObject<HTMLCanvasElemen
     name: "combined_labels.nii.gz",
     url: `${APP_CONSTANTS.API_ORIGIN}/api/get-segmentations/${clabelId}`,
   });
-
-  const colorLUT = await fetch(`${APP_CONSTANTS.API_ORIGIN}/api/get-label-colormap/${clabelId}`)
-    .then(r => r.json());
-
-  console.log("✅ Raw colorLUT = ", JSON.stringify(colorLUT, null, 2));
 
   const labelIds = Object.keys(colorLUT).map(id => parseInt(id));
   const maxLabelId = Math.max(...labelIds);
@@ -36,15 +32,15 @@ export async function create3DVolume(canvasRef: React.RefObject<HTMLCanvasElemen
     const labelId = parseInt(rawLabelId);
     const color = colorLUT[rawLabelId];
   
-    if (!color || [color.R, color.G, color.B].some(v => v === undefined)) {
+    if (!color || [color[0], color[1], color[2]].some(v => v === undefined)) {
       console.warn(`❗ Invalid color for label ${labelId}`);
       continue;
     }
-    console.log(`❗ label ${labelId}  ${color.R}`)
-    R[labelId] = color.R;
-    G[labelId] = color.G;
-    B[labelId] = color.B;
-    A[labelId] = color.A ?? 128;
+    console.log(`❗ label ${labelId}  ${color[0]}`)
+    R[labelId] = color[0];
+    G[labelId] = color[1];
+    B[labelId] = color[2];
+    A[labelId] = color[3] ?? 128;
     I[labelId] = labelId;
   }
   const cmapCopy = {

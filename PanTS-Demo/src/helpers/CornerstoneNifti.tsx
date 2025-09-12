@@ -44,7 +44,7 @@ const toolGroupSpecificRepresentationConfig = {
   },
 };
 
-export async function renderVisualization(ref1: HTMLDivElement | null, ref2: HTMLDivElement | null, ref3: HTMLDivElement | null, _sessionId: string, clabelId: string): Promise<VisualizationRenderReturnType | undefined> {
+export async function renderVisualization(ref1: HTMLDivElement | null, ref2: HTMLDivElement | null, ref3: HTMLDivElement | null, convertedColorLUT: ColorLUT, clabelId: string): Promise<VisualizationRenderReturnType | undefined> {
   cache.purgeCache();
   csTools3dInit();
   await csInit();
@@ -84,48 +84,50 @@ export async function renderVisualization(ref1: HTMLDivElement | null, ref2: HTM
   //});
 
   
-  const colorLUTResponse = await fetch(`${APP_CONSTANTS.API_ORIGIN}/api/get-label-colormap/${clabelId}`);
-  //console.log("✅8686 Raw colorLUT = ", colorLUT);
-  const colorLUT = await colorLUTResponse.json();
+  // const colorLUTResponse = await fetch(`${APP_CONSTANTS.API_ORIGIN}/api/get-label-colormap/${clabelId}`);
+  // //console.log("✅8686 Raw colorLUT = ", colorLUT);
+  // const colorLUT = await colorLUTResponse.json();
 
-  console.log("✅ Raw colorLUT = ", JSON.stringify(colorLUT, null, 2));
+  // console.log("✅ Raw colorLUT = ", JSON.stringify(colorLUT, null, 2));
 
-  // 转换为 Cornerstone 支持的 array 格式
-  const convertedColorLUT: ColorLUT = [];
+  // // 转换为 Cornerstone 支持的 array 格式
+  // const convertedColorLUT: ColorLUT = [];
 
-  // 先确定最大 labelId，用于后续填补空位
-  const labelIds = Object.keys(colorLUT).map(id => parseInt(id));
-  const maxLabelId = Math.max(...labelIds);
+  // // 先确定最大 labelId，用于后续填补空位
+  // const labelIds = Object.keys(colorLUT).map(id => parseInt(id));
+  // const maxLabelId = Math.max(...labelIds);
 
-  // 默认填满数组，防止稀疏索引（比如 0 没定义会是 empty slot）
-  for (let i = 0; i <= maxLabelId; i++) {
-    convertedColorLUT[i] = [0, 0, 0, 0];  // 默认透明黑色，可按需调整
-  }
+  // // 默认填满数组，防止稀疏索引（比如 0 没定义会是 empty slot）
+  // for (let i = 0; i <= maxLabelId; i++) {
+  //   convertedColorLUT[i] = [0, 0, 0, 0];  // 默认透明黑色，可按需调整
+  // }
 
-  for (const rawLabelId in colorLUT) {
-    const labelId = parseInt(rawLabelId);
-    const color = colorLUT[rawLabelId];
+  // for (const rawLabelId in colorLUT) {
+  //   const labelId = parseInt(rawLabelId);
+  //   const color = colorLUT[rawLabelId];
 
-    if (!color) {
-      console.warn(`❗ Label ${labelId} has no color value`);
-      continue;
-    }
+  //   if (!color) {
+  //     console.warn(`❗ Label ${labelId} has no color value`);
+  //     continue;
+  //   }
 
-    const r = color.R;
-    const g = color.G;
-    const b = color.B;
-    const a = color.A ?? 255;
+  //   const r = color.R;
+  //   const g = color.G;
+  //   const b = color.B;
+  //   const a = color.A ?? 255;
 
-    if ([r, g, b].some(v => v === undefined)) {
-      console.warn(`❗ Invalid color format for label ${labelId}:`, color);
-      continue;
-    }
+  //   if ([r, g, b].some(v => v === undefined)) {
+  //     console.warn(`❗ Invalid color format for label ${labelId}:`, color);
+  //     continue;
+  //   }
 
-    // 覆盖默认值
-    convertedColorLUT[labelId] = [r, g, b, a];
-
-    console.log(`✅ Label ${labelId}: RGB(${r}, ${g}, ${b}), A: ${a}`);
-  }
+  //   // 覆盖默认值
+  //   convertedColorLUT[labelId] = [r, g, b, a];
+  //   console.log(`✅ Label ${labelId}: RGB(${r}, ${g}, ${b}), A: ${a}`);
+  // }
+  convertedColorLUT.forEach((color, labelId) => {
+    console.log(`labelId: ${labelId}, color: ${JSON.stringify(color)}`);
+  })
 
   console.log("✅ convertedColorLUT = ", convertedColorLUT);
 

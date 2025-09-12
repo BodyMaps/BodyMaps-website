@@ -1,6 +1,7 @@
+import type { Color } from '@cornerstonejs/core/dist/types/types';
 import { IconArrowLeft, IconChevronRight } from '@tabler/icons-react';
 import React, { useEffect, useState } from 'react';
-import { APP_CONSTANTS, OrganSystems, OrganSystemsArray, segmentation_categories } from '../helpers/constants';
+import { OrganSystems, OrganSystemsArray, segmentation_categories } from '../helpers/constants';
 import { type Systems } from '../types';
 
 type ChipBoxProps = {
@@ -11,10 +12,10 @@ type ChipBoxProps = {
 }
 
 type Props = {
+  labelColorMap: {[key: number]: Color};
   setCheckState: React.Dispatch<React.SetStateAction<boolean[]>>;
   checkState: boolean[];
   sessionId: string | undefined;
-  clabelId: string;
   setShowTaskDetails: React.Dispatch<React.SetStateAction<boolean>>;
   setShowOrganDetails: React.Dispatch<React.SetStateAction<boolean>>;
   showOrganDetails: boolean;
@@ -77,39 +78,7 @@ function Checked({ system, labelColorMap, checkState, setCheckState }: ChipBoxPr
 }
 
 
-function OrganCheckbox({ setCheckState, checkState, sessionId, clabelId, setShowTaskDetails, setShowOrganDetails, showOrganDetails }: Props) {
-  const [labelColorMap, setLabelColorMap] = useState<{ [key: number]: number[] }>({});
-
-  const cacheKey = `labelColorMap_${sessionId}`;
-
-  useEffect(() => {
-    const fetchColorMap = async () => {
-      try {
-        // const cached = sessionStorage.getItem(cacheKey);
-        // if (cached) {
-        //   setLabelColorMap(JSON.parse(cached));
-        //   return;
-        // }
-        const response = await fetch(`${APP_CONSTANTS.API_ORIGIN}/api/get-label-colormap/${clabelId}`);
-        const lut = await response.json();
-        const parsedMap: {[key: number]: number[]}= {};
-        for (const labelId in lut) {
-          const color = lut[labelId];
-          if (color && color.R !== undefined) {
-            parsedMap[Number(labelId)] = [color.R, color.G, color.B, color.A ?? 255];
-          }
-        }
-        sessionStorage.setItem(cacheKey, JSON.stringify(parsedMap));
-        setLabelColorMap(parsedMap);
-      } catch (err) {
-        console.warn("❗ Failed to fetch colormap:", err);
-      }
-    };
-
-    fetchColorMap();
-  }, [sessionId]);
-
-
+function OrganCheckbox({ setCheckState, checkState, labelColorMap, setShowTaskDetails, setShowOrganDetails, showOrganDetails }: Props) {
   
 
   const toggleAll = () => {
