@@ -44,7 +44,7 @@ const toolGroupSpecificRepresentationConfig = {
   },
 };
 
-export async function renderVisualization(ref1: HTMLDivElement | null, ref2: HTMLDivElement | null, ref3: HTMLDivElement | null, convertedColorLUT: ColorLUT, clabelId: string, setLoading: React.Dispatch<React.SetStateAction<boolean>>): Promise<VisualizationRenderReturnType | undefined> {
+export async function renderVisualization(ref1: HTMLDivElement | null, ref2: HTMLDivElement | null, ref3: HTMLDivElement | null, convertedColorLUT: ColorLUT, clabelId: string, setProgress: React.Dispatch<React.SetStateAction<number>>): Promise<VisualizationRenderReturnType | undefined> {
   cache.purgeCache();
   csTools3dInit();
   await csInit();
@@ -74,9 +74,9 @@ export async function renderVisualization(ref1: HTMLDivElement | null, ref2: HTM
   const segmentationURL = `${APP_CONSTANTS.API_ORIGIN}/api/get-segmentations/${clabelId}`;
   const combined_labels_Id = 'nifti:' + segmentationURL;
   const combined_labels = await volumeLoader.createAndCacheVolume(combined_labels_Id);
-  setLoading(false);
+  setProgress(1)
+  // setLoading(false);
   const segmentationVolumeArray = combined_labels.getScalarData(); // ✅ 加这一句
-
 
   //const colorLUT = [];
   // Fill the colorLUT array with your custom colors

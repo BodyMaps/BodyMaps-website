@@ -48,8 +48,11 @@ function VisualizationPage() {
   const [_lastClicked, setLastClicked] = useState<LastClicked | null>(null);
   const [showTaskDetails, setShowTaskDetails] = useState(true);
   const [showOrganDetails, setShowOrganDetails] = useState(false);  
-  const [loading, setLoading] = useState(true);
+  // const [loading, setLoading] = useState(true);
   const [labelColorMap, setLabelColorMap] = useState<{ [key: number]: Color }>({});
+  const [progress, setProgress] = useState(0);
+
+
   
 
 
@@ -88,8 +91,10 @@ function VisualizationPage() {
 
 
       const result =
-        await renderVisualization(axial_ref.current, sagittal_ref.current, coronal_ref.current, cmap, pantsCase, setLoading);
-      setLoading(false);
+        await renderVisualization(axial_ref.current, sagittal_ref.current, coronal_ref.current, cmap, pantsCase, setProgress);
+
+      
+      // setLoading(false);
       if (!result) return;
       const { segmentationVolumeArray, segRepUIDs, renderingEngine, viewportIds, volumeId } = result;
 
@@ -115,6 +120,7 @@ function VisualizationPage() {
         //   setLabelColorMap(JSON.parse(cached));
         //   return;
         // }
+        setProgress(0.15)
         const response = await fetch(`${APP_CONSTANTS.API_ORIGIN}/api/get-label-colormap/${pantsCase}`);
         const lut = await response.json();
         const parsedMap: {[key: number]: Color}= {};
@@ -126,6 +132,8 @@ function VisualizationPage() {
           }
         }
         setLabelColorMap(parsedMap);
+
+        setProgress(0.7)
       } catch (err) {
         console.warn("❗ Failed to fetch colormap:", err);
       }
@@ -220,14 +228,6 @@ function VisualizationPage() {
   };
 
   const navBack = () => {
-    const formData = new FormData();
-    if (sessionKey) {
-      formData.append('sessionKey', sessionKey);
-      fetch(`${APP_CONSTANTS.API_ORIGIN}/api/terminate-session`, {
-        method: 'POST',
-        body: formData,
-      }).then(res => res.json()).then(data => console.log(data.message));
-    }
     navigate('/');
   };
   const PREVIEW_IDS = [1, 17, 30, 35, 121];
@@ -246,14 +246,14 @@ function VisualizationPage() {
           <div>
             <div className='flex'>
             <div
-              className={`hover:bg-gray-700 z-3 cursor-pointer bg-[#0f0824] p-2 ml-4 mt-4 rounded-lg w-fit`}
+              className={`hover:bg-gray-700 z-4 cursor-pointer bg-[#0f0824] p-2 ml-4 mt-4 rounded-lg w-fit`}
               onClick={() => setShowTaskDetails(prev => !prev)}
               >
               <IconSettings color="white"/>
               {/* {showTaskDetails ? "Settings" : "Settings"} */}
             </div>
             <div
-              className={`hover:bg-gray-700 z-3 cursor-pointer bg-[#0f0824] p-2 ml-4 mt-4 rounded-lg w-fit`}
+              className={`hover:bg-gray-700 z-4 cursor-pointer bg-[#0f0824] p-2 ml-4 mt-4 rounded-lg w-fit`}
               onClick={() => navBack()}
               >
               <IconHome color="white"/>
@@ -308,7 +308,7 @@ function VisualizationPage() {
         </div>
         
         
-        {
+        {/* {
           loading ?
           <div className="flex z-3 absolute top-0 left-0 w-screen h-screen items-center justify-center">
               <div role="status">
@@ -317,6 +317,19 @@ function VisualizationPage() {
               </div>
           </div>
           :
+          null
+        } */}
+        {
+          progress < 1 ? 
+          <div className="flex flex-col items-center justify-center gap-2 z-3 absolute top-0 left-0 w-screen h-screen bg-black/50">
+          <div className="text-2xl font-bold">Loading...</div>
+          <div className="w-4/5 h-6 relative bg-gray-200 rounded-lg overflow-hidden mx-auto">
+          <div
+            className="h-full bg-blue-500 transition-all duration-1000 ease-in-out"
+            style={{ width: `${progress * 100}%` }}
+            />
+          </div>
+          </div> :
           null
         }
           <div

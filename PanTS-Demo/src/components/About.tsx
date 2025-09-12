@@ -6,7 +6,7 @@ export default function About({aboutRef}: Props) {
     return (
         <section
         ref={aboutRef}
-        className="flex flex-col gap-4 justify-center items-center w-screen"
+        className="flex flex-col gap-4 justify-center items-center w-screen pb-2"
         >
 				<div className="flex flex-col gap-1.5 w-6/12 items-center">
 					<div className="text-2xl font-bold">About PanTS</div>

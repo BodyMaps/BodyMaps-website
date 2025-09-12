@@ -96,7 +96,7 @@ function OrganCheckbox({ setCheckState, checkState, labelColorMap, setShowTaskDe
 
 
   return (
-    <div className={`flex w-2xs h-screen flex-col gap-4 p-3 z-3 absolute top-0 left-0 bg-[#0f0824] duration-100 transition-all ${showOrganDetails ? 'translate-x-0' : '-translate-x-full'} origin-left`}>
+    <div className={`flex w-2xs h-screen flex-col gap-4 p-3 z-5 absolute top-0 left-0 bg-[#0f0824] duration-100 transition-all ${showOrganDetails ? 'translate-x-0' : '-translate-x-full'} origin-left`}>
         <div className="flex gap-4 items-center justify-start">
             <IconArrowLeft className="cursor-pointer text-white hover:bg-gray-700 rounded-md flex items-center justify-center" onClick={() => {setShowTaskDetails(false); setShowOrganDetails(false)}} />
             <div className="text-white text-2xl">Organs</div>
