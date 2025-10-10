@@ -311,6 +311,28 @@ export function setZoom(zoomValue: number){
     })
 }
 
+// 0 left
+// 1 right
+// 2 up
+// 3 down
+
+export function setPan(panValue: number) {
+  const engine = getRenderingEngine(renderingEngineId);
+  const MULT = 20;
+  [viewportId1, viewportId2, viewportId3].forEach((viewportId) => {
+      if (engine){
+        const viewport = engine.getViewport(viewportId);
+        const cur_point = viewport.getPan();
+        if (panValue === 0) viewport.setPan([cur_point[0] + (1*MULT), cur_point[1]]);
+        if (panValue === 1) viewport.setPan([cur_point[0] - (1*MULT), cur_point[1]]);
+        if (panValue === 2) viewport.setPan([cur_point[0], cur_point[1] - (1*MULT)]);
+        if (panValue === 3) viewport.setPan([cur_point[0], cur_point[1] + (1*MULT)]);
+        console.log(viewport.getPan());
+        viewport.render();
+      }
+    })
+}
+
 
 export function setToolGroupOpacity(opacityValue: number){
   const newSegConfig = { ...DEFAULT_SEGMENTATION_CONFIG };

@@ -24,7 +24,7 @@ export default function WindowingSlider({ windowWidth, windowCenter, onWindowCha
     e.preventDefault();
     let v = widthInput;
     if (!isNaN(v)) {
-      v = Math.min(Math.max(v, 1), 5000);
+      v = Math.min(Math.max(v, 1), 2000);
       onWindowChange(v, null);
     }
   };
@@ -80,7 +80,7 @@ export default function WindowingSlider({ windowWidth, windowCenter, onWindowCha
             type="number"
             value={widthInput}
             min="1"
-            max="5000"
+            max="200"
             onChange={handleWidthInputChange}
           className="border text-white p-1 rounded-md w-full"
             />
@@ -89,7 +89,7 @@ export default function WindowingSlider({ windowWidth, windowCenter, onWindowCha
         <input
           type="range"
           min="1"
-          max="5000"
+          max="2000"
           step="1"
           value={windowWidth}
           onChange={(e) => {

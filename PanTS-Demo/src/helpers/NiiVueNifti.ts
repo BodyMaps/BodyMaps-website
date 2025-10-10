@@ -11,6 +11,30 @@ export async function create3DVolume(canvasRef: React.RefObject<HTMLCanvasElemen
   const nv = new Niivue({
     sliceType: SLICE_TYPE.RENDER, 
   });
+
+  nv.mouseMove = (x: number, y: number): void => {
+    x *= nv.uiData.dpr!
+    y *= nv.uiData.dpr!
+    const dx = (x - nv.mousePos[0]) / nv.uiData.dpr!
+    const dy = (y - nv.mousePos[1]) / nv.uiData.dpr!
+    nv.mousePos = [x, y]
+    if (nv.inRenderTile(x, y) < 0) {
+      return
+    }
+
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) {
+      return
+    }
+    nv.scene.renderAzimuth += dx * 0.5;
+    nv.scene.renderElevation += dy * 0.5;
+
+    nv.drawScene()
+  }
+
+
+
+  console.log(nv.getCurrentDragMode()); 
+
   if (!canvasRef.current) return { nv, nvImage: null, cmapCopy: {R: [], G: [], B: [], I: [], A: []} };
   nv.attachToCanvas(canvasRef.current);
 

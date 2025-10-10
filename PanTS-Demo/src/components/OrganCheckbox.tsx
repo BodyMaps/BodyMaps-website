@@ -2,16 +2,16 @@ import type { Color } from "@cornerstonejs/core/dist/types/types";
 import { IconArrowLeft, IconChevronRight } from "@tabler/icons-react";
 import React, { useEffect, useState } from "react";
 import {
-  MiscColorMap, OrganSystems,
-  OrganSystemsArray,
-  segmentation_categories
+	MiscColorMap, OrganSystems,
+	OrganSystemsArray,
+	segmentation_categories
 } from "../helpers/constants";
 import { deepIsEqual } from "../helpers/utils";
 import {
-  type AllSystems,
-  type OrganSystemsAllType,
-  type SubSystems,
-  type Systems,
+	type AllSystems,
+	type OrganSystemsAllType,
+	type SubSystems,
+	type Systems,
 } from "../types";
 
 type ChipBoxProps = {
@@ -96,7 +96,7 @@ function Checked({
 
 	if (!OrganSystem[system] || level > 1) return null;
 	return (
-		<div className={`flex gap-2 flex-col ${level === 0 ? "" : "pl-4"}`}>
+		<div className={`flex gap-2 flex-col ${level === 0 ? "" : "pl-3"}`}>
 			<div className="flex justify-between items-center">
 				{!color ? (
 					<>
@@ -165,7 +165,7 @@ function Checked({
 							? `rgb(${color[0]}, ${color[1]}, ${color[2]})`
 							: "gray";
 						return (
-							<div className={`flex items-center gap-2 "pl-4"`} key={idx}>
+							<div className={`flex items-center gap-2 ${level == 0 ? "pl-8" : "pl-9"} `} key={idx}>
 								<div className="cursor-pointer text-white hover:bg-gray-700 rounded-md flex items-center justify-center transition-all duration origin-center" />
 								<div
 									className={`text-white text-md rounded-md p-1 cursor-pointer hover:border-3 ${
