@@ -147,3 +147,83 @@ class NpzProcessor:
                 json.dump(organ_intensities, f)
 
         return combined_labels_img_data, organ_intensities
+
+    
+    def nifti_combine_labels(self, id: int, keywords: dict[str, str] = {"pancrea": "pancreas"}, save=True):
+        """
+        Merge multiple NIfTI label masks into one combined segmentation and re-index the labels.
+        """
+
+        organ_intensities = {}
+        segment_subfolder = "LabelTr" if id < 9000 else "LabelTe"
+        image_subfolder = "ImageTr" if id < 9000 else "ImageTe"
+
+        # load main reference image (for affine/header)
+        nifti_path = pathlib.Path(
+            f"{Constants.PANTS_PATH}/data/{image_subfolder}/{get_panTS_id(id)}/{Constants.MAIN_NIFTI_FILENAME}"
+        )
+        base_nifti = nib.load(nifti_path)
+
+        # folder containing NIfTI segmentations
+        dir_path = pathlib.Path(
+            f"{Constants.PANTS_PATH}/data/{segment_subfolder}/{get_panTS_id(id)}/segmentations"
+        )
+        nii_files = list(dir_path.glob("*.nii*"))
+
+        if not nii_files:
+            raise FileNotFoundError(f"No NIfTI label files found in {dir_path}")
+
+        combined_labels = None
+        keyword_dict = {organ: None for organ in keywords.values()}
+
+        for i, file in enumerate(sorted(nii_files)):
+            filename = file.name
+            nii = nib.load(file)
+            data = nii.get_fdata()
+
+            if combined_labels is None:
+                combined_labels = np.zeros_like(data, dtype=np.float64)
+
+            matched = False
+            for substring, organ in keywords.items():
+                if substring.lower() in filename.lower():
+                    if keyword_dict[organ] is None:
+                        keyword_dict[organ] = np.zeros_like(data, dtype=np.float64)
+                    scaled = data * float(i + 1)
+                    keyword_dict[organ] = np.maximum(keyword_dict[organ], scaled)
+                    combined_labels = np.maximum(combined_labels, scaled)
+                    organ_intensities[organ] = i + 1
+                    matched = True
+                    break
+
+            if not matched:
+                scaled = data * float(i + 1)
+                combined_labels = np.maximum(combined_labels, scaled)
+                organ_intensities[filename] = i + 1
+
+        if save:
+            # save each organ-specific mask
+            for organ, data in keyword_dict.items():
+                if data is not None:
+                    save_path = (
+                        f"{Constants.PANTS_PATH}/data/{segment_subfolder}/{get_panTS_id(id)}/segmentations/{organ}.nii.gz"
+                    )
+                    img = nib.Nifti1Image(data, affine=base_nifti.affine, header=base_nifti.header)
+                    nib.save(img, save_path)
+
+            # save combined mask as NIfTI
+            if combined_labels is not None:
+                save_path = (
+                    f"{Constants.PANTS_PATH}/data/{segment_subfolder}/{get_panTS_id(id)}/{Constants.COMBINED_LABELS_NIFTI_FILENAME}"
+                )
+                img = nib.Nifti1Image(combined_labels, affine=base_nifti.affine, header=base_nifti.header)
+                nib.save(img, save_path)
+
+            # save organ intensity mapping
+            organ_save_path = (
+                f"{Constants.PANTS_PATH}/data/{segment_subfolder}/{get_panTS_id(id)}/{Constants.ORGAN_INTENSITIES_FILENAME}"
+            )
+            with open(organ_save_path, "w") as f:
+                json.dump(organ_intensities, f, indent=2)
+
+        return combined_labels, organ_intensities

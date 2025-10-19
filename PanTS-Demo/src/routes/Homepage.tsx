@@ -1,29 +1,40 @@
+import { IconArrowsShuffle } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import About from "../components/About";
 import Header from "../components/Header";
 import Preview from "../components/Preview";
 import { API_BASE } from "../helpers/constants";
 import type { PreviewType } from "../types";
 
-const PREVIEW_IDS = [1, 17, 30, 35, 121];
+function generateId(min: number = 1, max: number = 9901) {
+	return Math.floor(Math.random() * (max - min + 1)) + min;
+}
 
 export default function Homepage() {
+	const [PREVIEW_IDS, SET_PREVIEW_IDS] = useState<number[]>([]);
+	const navigation = useNavigate();
+
+	useEffect(() => {
+		const newIds = Array.from({ length: 5 }, () => generateId());
+		SET_PREVIEW_IDS(newIds);
+	}, []);
 	const [previewMetadata, setPreviewMetadata] = useState<{
 		[key: string]: PreviewType;
 	}>({});
+
 	const [loading, setLoading] = useState(true);
 
 	// const navigate = useNavigate();
 
 	const aboutRef = useRef<HTMLDivElement>(null);
 
-	const params = useParams<{ page: string; type: string }>();
-	const type = params.type || "train";
-
 	useEffect(() => {
 		const fetchFiles = async () => {
 			try {
+				if (PREVIEW_IDS.length === 0) {
+					return;
+				}
 				const res = await fetch(
 					`${API_BASE}/api/get_preview/${PREVIEW_IDS.join(",")}`
 				);
@@ -44,20 +55,56 @@ export default function Homepage() {
 			}
 		};
 		fetchFiles();
-	}, []);
+	}, [PREVIEW_IDS]);
 
 	const handleAboutClick = () => {
 		aboutRef.current?.scrollIntoView({ behavior: "smooth" });
 	};
 
-	if (type.toLowerCase() !== "test" && type?.toLowerCase() !== "train")
-		return null;
 
+	// if ((type.toLowerCase() !== "test" && type?.toLowerCase() !== "train") )
+	// return null;
+	const [searchId, setSearchId] = useState<number>(0);	
 	return (
 		<div className="flex gap-4 flex-col text-white relative min-h-screen">
 			<Header handleAboutClick={handleAboutClick} />
-			<div className="flex flex-col gap-4 p-4 justify-center items-center w-screen">
-				<div className="text-2xl font-bold">Previews</div>
+			<div className="flex flex-col gap-3 p-4 justify-center items-center w-screen">
+				<div className="text-2xl flex items-center gap-2 font-bold">
+					<div>Previews</div>
+					<div
+						className="cursor-pointer flex items-center gap-1 border-1 bg-gray-800 p-1 rounded text-sm hover:bg-gray-700"
+						onClick={() => {
+							const newIds = Array.from({ length: 5 }, () => generateId());
+							SET_PREVIEW_IDS(newIds);
+						}}
+					>
+						Shuffle
+						<IconArrowsShuffle />
+					</div>
+				</div>
+				<div className="flex justify-center gap-2 items-center w-1/2">
+				Search ID
+				<input
+					type="number"
+					className="rounded border-1 p-1 w-1/8"
+					min={1}
+					max={9901}
+					value={searchId}
+					onChange={(e) => setSearchId(Number(e.target.value))}
+					onKeyDown={(e) => {
+						if (e.key === "Enter") {
+							if (searchId > 9901) {
+								setSearchId(9901);
+								return;
+							} else if (searchId < 1) {
+								setSearchId(1);
+								return;
+							}
+							navigation("/case/" + searchId);
+						}
+					}}
+					/>
+				</div>
 				<hr className="w-screen" />
 				<div className="flex gap-y-4 gap-x-8 p-4 flex-wrap justify-center relative items-center w-full">
 					{loading ? (

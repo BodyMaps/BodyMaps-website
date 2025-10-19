@@ -73,21 +73,21 @@ def get_preview(clabel_ids):
 def get_image_preview(clabel_id):
     # get age and thumbnail
     # subfolder = "LabelTr" if int(clabel_id) < 9000 else "LabelTe"
-    subfolder = "ImageTr" if int(clabel_id) < 9000 else "ImageTe"
+    subfolder = "ProfileTr" if int(clabel_id) < 9000 else "ProfileTe"
     # path = os.path.join(Constants.PANTS_PATH, "data", subfolder, get_panTS_id(clabel_id), Constants.COMBINED_LABELS_FILENAME)
     # if not os.path.exists(path):
     #     print(f"File not found: {path}. Making file")
     #     npz_processor = NpzProcessor()
     #     npz_processor.combine_labels(int(clabel_id))
 
-    path = os.path.join(Constants.PANTS_PATH, "data", subfolder, get_panTS_id(clabel_id), "ct.npz")
-    arr = np.load(path)["data"]
-    bytes = volume_to_png(arr)
+    path = os.path.join(Constants.PANTS_PATH, subfolder, get_panTS_id(clabel_id), "profile.jpg")
+    # arr = np.load(path)["data"]
+    # bytes = volume_to_png(arr)
     return send_file(
-        bytes,
-        mimetype="image/png",   
+        path,
+        mimetype="image/jpg",   
         as_attachment=False,
-        download_name=f"{clabel_id}_slice.png"
+        download_name=f"{clabel_id}_slice.jpg"
     )
 
 
@@ -144,23 +144,6 @@ def get_label_colormap(clabel_id):
 def home():
     return "api"
 
-@api_blueprint.route('/progress/<session_id>', methods=['GET'])
-def get_progress(session_id):
-    if session_id not in progress_tracker:
-        return jsonify({"progress": 100})
-
-    start_time, expected_time, done_flag = progress_tracker[session_id]
-    elapsed = (datetime.now() - start_time).total_seconds()
-
-    if done_flag:
-        if progress < 100:
-            progress = 100
-    else:
-        progress = min(95, int((elapsed / expected_time) * 100))
-
-    return jsonify({"progress": progress})
-
-
 
 @api_blueprint.route('/upload', methods=['POST'])
 def upload():
@@ -182,7 +165,6 @@ def upload():
             filenames.remove(Constants.MAIN_NIFTI_FORM_NAME)
         else:
             return jsonify({"error": "Main NIFTI file missing"}), 400
-
 
         nifti_processor = NiftiProcessor.from_clabel_path(os.path.join(base_path, Constants.COMBINED_LABELS_FILENAME))
 
@@ -308,21 +290,24 @@ def get_report(id):
 
 
 @api_blueprint.route('/get-segmentations/<combined_labels_id>', methods=['GET'])
-def get_segmentations(combined_labels_id):
+async def get_segmentations(combined_labels_id):
     subfolder = "LabelTr" if int(combined_labels_id) < 9000 else "LabelTe" 
     nifti_path = f"{Constants.PANTS_PATH}/data/{subfolder}/{get_panTS_id(combined_labels_id)}/{Constants.COMBINED_LABELS_NIFTI_FILENAME}"
-
+    labels = list(Constants.PREDEFINED_LABELS.values()) 
     if not os.path.exists(nifti_path):
-        print(f"Could not find filepath: {nifti_path}. Creating a new one")
-        npz_path = nifti_path.replace(".nii.gz", ".npz")
-        npz_processor = NpzProcessor()
-        if not os.path.exists(npz_path):   
-            print(f"Could not find npz filepath: {npz_path}. Creating a new one")
+        await store_files(combined_labels_id)
+        niftiProcessor = NpzProcessor()
+        niftiProcessor.nifti_combine_labels(int(combined_labels_id))
+        # print(f"Could not find filepath: {nifti_path}. Creating a new one")
+        # npz_path = nifti_path.replace(".nii.gz", ".npz")
+        # npz_processor = NpzProcessor()
+        # if not os.path.exists(npz_path):   
+        #     print(f"Could not find npz filepath: {npz_path}. Creating a new one")
 
-            # ! pancrea instead of pancreas to include pancreatic labels
-            npz_processor.combine_labels(combined_labels_id, keywords={"pancrea": "pancreas"}, save=True)
+        #     # ! pancrea instead of pancreas to include pancreatic labels
+        #     npz_processor.combine_labels(combined_labels_id, keywords={"pancrea": "pancreas"}, save=True)
             
-        npz_processor.npz_to_nifti(int(combined_labels_id), combined_label=True, save=True)   
+        # npz_processor.npz_to_nifti(int(combined_labels_id), combined_label=True, save=True)   
 
     img = nib.load(nifti_path)
     data = img.get_fdata()

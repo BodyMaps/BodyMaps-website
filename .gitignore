@@ -2,3 +2,7 @@
 node_modules/
 certs/
 dist/
+
+PanTS/ProfileTr/
+PanTS/ProfileTe/
+PanTS/data/

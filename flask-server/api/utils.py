@@ -23,6 +23,7 @@ from collections import defaultdict
 from services.npz_processor import NpzProcessor
 from PIL import Image
 from openpyxl import load_workbook
+import requests
 # Track last session validation time
 last_session_check = datetime.now()
 
@@ -31,6 +32,8 @@ progress_tracker = {}
 
 def id_is_training(index):
     return index < 9000
+
+
 
 def combine_label_npz(index: int):
     npz_processor = NpzProcessor()
@@ -739,3 +742,31 @@ def download_clean_folder(root):
         os.remove(dataset_json_path)
     else:
         print("ℹ️ Folder content does not match the expected file set. Skipping cleanup and split.")
+        
+async def store_files(combined_labels_id):
+    subfolder = "LabelTr" if int(combined_labels_id) < 9000 else "LabelTe" 
+    image_subfolder = "ImageTr" if int(combined_labels_id) < 9000 else "ImageTe"
+
+    def download(url, path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        res = requests.get(url, stream=True, headers=headers, allow_redirects=True)
+        if res.status_code == 200:
+            with open(path, "wb") as f:
+                for chunk in res.iter_content(1024):
+                    f.write(chunk)
+            print(f"Saved: {path}")
+        else:
+            print(f"Failed: {url} ({res.status_code})")
+
+    # main CT
+    image_url = f"https://huggingface.co/datasets/BodyMaps/iPanTSMini/resolve/main/image_only/{get_panTS_id(combined_labels_id)}/ct.nii.gz"
+    image_path = f"{Constants.PANTS_PATH}/data/{image_subfolder}/{get_panTS_id(combined_labels_id)}/ct.nii.gz"
+    download(image_url, image_path)
+
+    # labels
+    for label in list(Constants.PREDEFINED_LABELS.values()):
+        mask_url = f"https://huggingface.co/datasets/BodyMaps/iPanTSMini/resolve/main/mask_only/{get_panTS_id(combined_labels_id)}/segmentations/{label}.nii.gz"
+        mask_path = f"{Constants.PANTS_PATH}/data/{subfolder}/{get_panTS_id(combined_labels_id)}/segmentations/{label}.nii.gz"
+        download(mask_url, mask_path)
+        

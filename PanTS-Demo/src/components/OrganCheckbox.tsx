@@ -136,7 +136,7 @@ function Checked({
 								}`}
 							/>
 							<div
-								className={`text-white text-md rounded-md p-1 cursor-pointer hover:border-3 ${
+								className={`text-white text-md rounded-md p-1 cursor-pointer hover:border-2 ${
 										!partialToggled
 											? "border-0"
 											: "border-2"
@@ -168,7 +168,7 @@ function Checked({
 							<div className={`flex items-center gap-2 ${level == 0 ? "pl-8" : "pl-9"} `} key={idx}>
 								<div className="cursor-pointer text-white hover:bg-gray-700 rounded-md flex items-center justify-center transition-all duration origin-center" />
 								<div
-									className={`text-white text-md rounded-md p-1 cursor-pointer hover:border-3 ${
+									className={`text-white text-md rounded-md p-1 cursor-pointer hover:border-2 ${
 										!checkState[getOrganIdx(organ) + 1]
 											? "border-0"
 											: "border-2"

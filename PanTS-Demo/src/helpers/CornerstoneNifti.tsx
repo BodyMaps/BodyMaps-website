@@ -8,6 +8,7 @@ import {
   volumeLoader
 } from '@cornerstonejs/core';
 import {
+  CrosshairsTool,
   PanTool,
   SegmentationDisplayTool,
   StackScrollMouseWheelTool,
@@ -26,9 +27,13 @@ import type { VisualizationRenderReturnType } from '../types';
 import { APP_CONSTANTS } from './constants';
 import { getPanTSId } from './utils';
 
+type viewportIdTypes = 'CT_NIFTI_AXIAL' | 'CT_NIFTI_SAGITTAL' | 'CT_NIFTI_CORONAL';
+
 const toolGroupId = "myToolGroup";
 const renderingEngineId = "myRenderingEngine";
 const segmentationId = "combined_labels";
+
+// const {create}
 
 const DEFAULT_SEGMENTATION_CONFIG = {
   fillAlpha: APP_CONSTANTS.DEFAULT_SEGMENTATION_OPACITY,
@@ -45,9 +50,11 @@ const toolGroupSpecificRepresentationConfig = {
     [csToolsEnums.SegmentationRepresentations.Labelmap]: DEFAULT_SEGMENTATION_CONFIG
   },
 };
-const viewportId1 = 'CT_NIFTI_AXIAL';
-const viewportId2 = 'CT_NIFTI_SAGITTAL';
-const viewportId3 = 'CT_NIFTI_CORONAL';
+
+
+const viewportId1: viewportIdTypes = 'CT_NIFTI_AXIAL';
+const viewportId2: viewportIdTypes = 'CT_NIFTI_SAGITTAL';
+const viewportId3: viewportIdTypes = 'CT_NIFTI_CORONAL';
 
 export async function renderVisualization(ref1: HTMLDivElement | null, ref2: HTMLDivElement | null, ref3: HTMLDivElement | null, convertedColorLUT: ColorLUT, clabelId: string, setLoading: React.Dispatch<React.SetStateAction<boolean>>): Promise<VisualizationRenderReturnType | undefined> {
   cache.purgeCache();
@@ -60,6 +67,8 @@ export async function renderVisualization(ref1: HTMLDivElement | null, ref2: HTM
   ref2.oncontextmenu = (e) => e.preventDefault();
   ref3.oncontextmenu = (e) => e.preventDefault();
   
+  
+
   const toolGroup = createToolGroup();
   if (!toolGroup) return;
   volumeLoader.registerVolumeLoader('nifti', cornerstoneNiftiImageVolumeLoader);
@@ -178,6 +187,7 @@ export async function renderVisualization(ref1: HTMLDivElement | null, ref2: HTM
 
   viewportInputArray.forEach(({ viewportId }) => {
     const viewport = renderingEngine.getViewport(viewportId);
+    console.log(viewport.getSliceIndex(), viewport.getNumberOfSlices);
     try {
       // @ts-expect-error setProperties does not exist
       viewport.setProperties({ 
@@ -230,7 +240,53 @@ function addToolsToCornerstone(){
   if (!addedTools.StackScrollMouseWheel) addTool(StackScrollMouseWheelTool);
   if (!addedTools.SegmentationDisplay) addTool(SegmentationDisplayTool);
   if (!addedTools.Zoom) addTool(ZoomTool);
+  if (!addedTools.Crosshairs) addTool(CrosshairsTool);
   if (!addedTools.Pan) addTool(PanTool);
+}
+
+const viewportColors: Record<viewportIdTypes,string> = {
+  [viewportId1]: 'rgb(200, 0, 0)',
+  [viewportId2]: 'rgb(200, 200, 0)',
+  [viewportId3]: 'rgb(0, 200, 0)',
+};
+
+const viewportReferenceLineControllable = [
+  viewportId1,
+  viewportId2,
+  viewportId3,
+];
+
+const viewportReferenceLineDraggableRotatable = [
+  viewportId1,
+  viewportId2,
+  viewportId3,
+];
+
+const viewportReferenceLineSlabThicknessControlsOn = [
+  viewportId1,
+  viewportId2,
+  viewportId3,
+];
+
+function getReferenceLineColor(viewportId: viewportIdTypes) {
+  return viewportColors[viewportId];
+}
+
+
+function getReferenceLineControllable(viewportId: viewportIdTypes) {
+  const index = viewportReferenceLineControllable.indexOf(viewportId);
+  return index !== -1;
+}
+
+function getReferenceLineDraggableRotatable(viewportId: viewportIdTypes) {
+  const index = viewportReferenceLineDraggableRotatable.indexOf(viewportId);
+  return index !== -1;
+}
+
+function getReferenceLineSlabThicknessControlsOn(viewportId: viewportIdTypes) {
+  const index =
+    viewportReferenceLineSlabThicknessControlsOn.indexOf(viewportId);
+  return index !== -1;
 }
 
 function createToolGroup(){
@@ -239,11 +295,26 @@ function createToolGroup(){
   const toolGroup = ToolGroupManager.createToolGroup(toolGroupId);
 
   if (!toolGroup) return;
+  
 
   toolGroup.addTool(StackScrollMouseWheelTool.toolName);
   toolGroup.addTool(SegmentationDisplayTool.toolName);
   toolGroup.addTool(ZoomTool.toolName);
   toolGroup.addTool(PanTool.toolName);
+  toolGroup.addTool(CrosshairsTool.toolName, {
+    getReferenceLineColor,
+    getReferenceLineControllable,
+    getReferenceLineDraggableRotatable,
+    getReferenceLineSlabThicknessControlsOn,
+    mobile: {
+      enabled: false,
+      opacity: 0.8,
+      handleRadius: 9,
+    }
+  })
+  // toolGroup.setToolActive(CrosshairsTool.toolName, {
+  //   bindings: [{ mouseButton: csToolsEnums.MouseBindings.Primary }],
+  // });
 
   toolGroup.setToolActive(StackScrollMouseWheelTool.toolName);
   toolGroup.setToolEnabled(SegmentationDisplayTool.toolName);
@@ -255,8 +326,30 @@ function createToolGroup(){
   toolGroup.setToolActive(ZoomTool.toolName, {
     bindings: [{ mouseButton: csToolsEnums.MouseBindings.Secondary}],
   });
+
+
   return toolGroup;
 } 
+
+export function toggleCrosshairTool(value: boolean) {
+  const toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
+  if (!toolGroup) return;
+  if (value) {
+    toolGroup.setToolActive(CrosshairsTool.toolName, {
+      bindings: [{ mouseButton: csToolsEnums.MouseBindings.Primary }],
+    });
+
+    toolGroup.setToolDisabled(PanTool.toolName);
+    return;
+  }
+  if (!value) {
+    toolGroup.setToolDisabled(CrosshairsTool.toolName);
+    toolGroup.setToolActive(PanTool.toolName, {
+      bindings: [{ mouseButton: csToolsEnums.MouseBindings.Primary }],
+    });
+  }
+}
+
 /*
 function createRenderingEngine(){
   let renderingEngine = getRenderingEngine(renderingEngineId);
@@ -298,6 +391,15 @@ export function setVisibilities(segRepUIDs: string[], checkState: boolean[]){
     segmentation.config.visibility.setSegmentVisibility(toolGroupId, uid, i, checkState[i]);
   }
 };
+
+export function getSlicePercent(viewportId: viewportIdTypes){
+  const engine = getRenderingEngine(renderingEngineId);
+  if (engine){
+    const viewport = engine.getViewport(viewportId);
+    return viewport.getSliceIndex() / viewport.getSliceIndex();
+  }
+  return 0;
+}
 
 export function setZoom(zoomValue: number){
   const engine = getRenderingEngine(renderingEngineId);

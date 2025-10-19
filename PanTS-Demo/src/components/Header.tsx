@@ -9,7 +9,7 @@ export default function Header({handleAboutClick}: Props)  {
         <header className="flex items-center pl-8 justify-start gap-20 w-screen p-4 bg-black relative">
 				<div className="text-4xl cursor-pointer" onClick={() => navigate("/")}>PanTS Data</div>
 				<div className="flex items-center gap-8 justify-center">
-					<div className="text-lg cursor-pointer group relative">
+					{/* <div className="text-lg cursor-pointer group relative">
 						Browse Full Catalog
 						<div className="scale-0 flex flex-col rounded gap-2 p-2 w-full transition-all bg-gray-800 absolute top-8 origin-top group-hover:scale-100 duration-100">
 							<div
@@ -27,7 +27,7 @@ export default function Header({handleAboutClick}: Props)  {
 								Test
 							</div>
 						</div>
-					</div>
+					</div> */}
 					<div
 						className="text-lg cursor-pointer"
 						onClick={() =>

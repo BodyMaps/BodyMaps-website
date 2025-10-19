@@ -1,5 +1,4 @@
 import JSZip from "jszip";
-
 export const cleanName = (case_id: string) => {
     let new_id = case_id;
     new_id = new_id.replace("PanTS_", "");
@@ -88,3 +87,4 @@ export function deepIsEqual<T>(a: T, b: T): boolean {
 
   return true;
 }
+

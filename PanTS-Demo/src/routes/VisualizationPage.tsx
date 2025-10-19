@@ -6,6 +6,7 @@ import type {
 } from "@cornerstonejs/core/dist/types/types";
 import { Niivue } from "@niivue/niivue";
 import {
+	IconCrosshair,
 	IconDownload,
 	IconHome,
 	IconReport,
@@ -25,6 +26,7 @@ import {
 	renderVisualization,
 	setToolGroupOpacity,
 	setVisibilities,
+	toggleCrosshairTool
 } from "../helpers/CornerstoneNifti";
 import { create3DVolume, updateVisibilities } from "../helpers/NiiVueNifti";
 import {
@@ -80,11 +82,17 @@ function VisualizationPage() {
 	);
 	const [zoomMode, setZoomMode] = useState(false);
 	const [zoomLevel, setZoomLevel] = useState(1);
+	const [crosshairToolActive, setCrosshairToolActive] = useState(false);
 
+	
 	const navigate = useNavigate();
 	// const location = useLocation();
-
+	
 	// Load and render visualization on first render
+	useEffect(() => {
+		toggleCrosshairTool(crosshairToolActive);
+	}, [crosshairToolActive])
+
 	useEffect(() => {
 		const setup = async () => {
 			// const state = location.state;
@@ -290,12 +298,12 @@ function VisualizationPage() {
 	const navBack = () => {
 		navigate("/");
 	};
-	const PREVIEW_IDS = [1, 17, 30, 35, 121];
+	// const PREVIEW_IDS = [1, 17, 30, 35, 121];
 
-	if (PREVIEW_IDS.filter((id) => id === Number(pantsCase)).length === 0) {
-		navigate("/");
-		return null;
-	}
+	// if (PREVIEW_IDS.filter((id) => id === Number(pantsCase)).length === 0) {
+	// 	navigate("/");
+	// 	return null;
+	// }
 
 	return (
 		<div
@@ -341,7 +349,10 @@ function VisualizationPage() {
 									</div>
 
 									{zoomMode ? (
-										<ZoomHandle submitted={zoomLevel} setSubmitted={setZoomLevel}/>
+										<ZoomHandle
+											submitted={zoomLevel}
+											setSubmitted={setZoomLevel}
+										/>
 									) : (
 										<>
 											<OpacitySlider
@@ -361,16 +372,26 @@ function VisualizationPage() {
 									)}
 									{/* Report Download Zoom Buttons */}
 									{/* Opacity & Windowing Sliders */}
-                    <button
-                      className="text-white relative pt-3 !bg-blue-700 hover:!border-white"
-                      onClick={() => {
-                        setShowOrganDetails((prev) => !prev);
-                        setShowTaskDetails((prev) => !prev);
-                      }}
-                    >
-                      Class Map
-                    </button>
+									<button
+										className="text-white relative pt-3 !bg-blue-700 hover:!border-white"
+										onClick={() => {
+											setShowOrganDetails((prev) => !prev);
+											setShowTaskDetails((prev) => !prev);
+										}}
+									>
+										Class Map
+									</button>
 									<div className="flex gap-3 items-center justify-center">
+										<div className={`group hover:bg-gray-700 cursor-pointer p-2 rounded-md relative ${crosshairToolActive ? "bg-gray-700" : ""}`}>
+
+										<IconCrosshair
+											className="w-6 h-6 text-white relative cursor-pointer"
+											onClick={() => setCrosshairToolActive((prev) => !prev)}
+											></IconCrosshair>
+											<span className="transition-all pointer-events-none duration-100 scale-0 group-hover:scale-100 absolute top-0 left-12 z-1 bg-gray-900 text-white rounded-md p-2">
+												Crosshair Mode
+											</span>
+										</div>
 										<div className="group hover:bg-gray-700 cursor-pointer p-2 rounded-md relative">
 											{!zoomMode ? (
 												<>
@@ -407,7 +428,6 @@ function VisualizationPage() {
 										<div className="group hover:bg-gray-700 cursor-pointer p-2 rounded-md relative">
 											<IconReport
 												className="w-6 h-6 text-white relative"
-												onClick={() => setShowReportScreen((prev) => !prev)}
 											></IconReport>
 											<span className="transition-all pointer-events-none duration-100 scale-0 group-hover:scale-100 absolute top-0 left-12 z-1 bg-gray-900 text-white rounded-md p-2">
 												Report
@@ -437,6 +457,7 @@ function VisualizationPage() {
 					ref={VisualizationContainer_ref}
 					style={{ overflow: "hidden" }}
 				>
+
 					<div
 						className="axial"
 						ref={axial_ref}
@@ -451,8 +472,11 @@ function VisualizationPage() {
 								),
 							})
 						}
-					></div>
-
+						// onScroll={() => {
+						// 	const progress = getSlicePercent("CT_NIFTI_AXIAL");
+						// 	if (axialSliceProgress !== progress) setAxialSliceProgress(progress);
+						// }}
+						></div>
 					<div
 						className="sagittal"
 						ref={sagittal_ref}

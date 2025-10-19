@@ -43,7 +43,7 @@ export const segmentation_category_colors: { [key: number]: Color } = {
 	3: [255, 0, 0, 255], // Artery (red)
 	4: [0, 191, 255, 255], // Urinary system (sky blue)
 	5: [220, 20, 60, 255], // Artery (crimson red)
-	6: [255, 160, 122, 255], // Digestive (salmon)
+	6: [255, 160, 202, 255], // Digestive (salmon)
 	7: [34, 139, 34, 255], // Green (bile duct)
 	8: [255, 127, 80, 255], // Coral (GI tract)
 	9: [245, 245, 245, 255], // Bone (light gray)
