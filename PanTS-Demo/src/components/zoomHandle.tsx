@@ -1,11 +1,12 @@
-import { IconArrowDown, IconArrowLeft, IconArrowRight, IconArrowUp } from "@tabler/icons-react";
+import { IconArrowLeft } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { setPan, setZoom } from "../helpers/CornerstoneNifti";
+import { centerOnCursor, setZoom, zoomToFit } from "../helpers/CornerstoneNifti";
 type Props = {
 	submitted: number;
 	setSubmitted: React.Dispatch<React.SetStateAction<number>>;
+	setZoomMode: React.Dispatch<React.SetStateAction<boolean>>;
 };
-const ZoomHandle = ({ submitted, setSubmitted }: Props) => {
+const ZoomHandle = ({ submitted, setSubmitted, setZoomMode }: Props) => {
 	const [text, setText] = useState(submitted.toString());
 	// const [submitted, setSubmitted] = useState(1);
 	useEffect(() => {
@@ -26,7 +27,13 @@ const ZoomHandle = ({ submitted, setSubmitted }: Props) => {
 		}
 	};
 	return (
-		<div className="flex flex-col gap-8 items-center">
+		<div className="flex flex-col gap-2 items-center">
+			<div className="flex flex-start w-full">
+				<IconArrowLeft className="cursor-pointer text-white" onClick={() => setZoomMode(false)}>
+
+				</IconArrowLeft>
+			</div>
+			<div className="flex flex-col items-center gap-3">
 
 			<div className="flex gap-2 items-center justify-between w-full">
 				<div className="text-white">Zoom</div>
@@ -43,11 +50,27 @@ const ZoomHandle = ({ submitted, setSubmitted }: Props) => {
 					<button className="text-white !bg-blue-950 w-8 h-8 !p-1" onClick={() => setSubmitted(Math.max(submitted - 0.1, 0.5))}>
 						-
 					</button>
-					<button className="text-white !bg-blue-950 w-8 h-8 !p-1" onClick={() => setSubmitted(Math.min(submitted + 0.1, 2))}>
+					<button className="text-white !bg-blue-950 w-8 h-8 !p-1" onClick={() => setSubmitted(Math.min(submitted + 0.1, 3))}>
 						+
 					</button>
 				</div>
 				</div>
+			</div>
+			<div className="flex flex-col gap-2 w-full">
+
+			<button className="text-white !font-medium text-xl !p-1.5" onClick={() => {
+				centerOnCursor();
+			}}>
+				Center on cursor
+			</button>
+			<button className="text-white !font-medium text-xl !p-1.5" onClick={() => {
+				zoomToFit();
+				setText("1.0");
+			}}>
+				Zoom to fit
+			</button>
+
+			</div>
 			</div>
 			{/* <div className="flex gap-2 text-white">
 				{[0.75, 1, 1.5].map((el, idx) => (
@@ -56,28 +79,6 @@ const ZoomHandle = ({ submitted, setSubmitted }: Props) => {
 					</button>
 					))}
 					</div> */}
-			<div className="flex justify-between items-center w-full">
-			<div className="text-white">Pan</div>
-			<div className="grid grid-cols-3 grid-rows-3 place-items-center h-14 w-14">
-				<div></div>
-				<div className="hover:bg-gray-700">
-				<IconArrowUp className="text-white cursor-pointer" onClick={() => setPan(3)} />
-				</div>
-				<div></div>
-				<div className="hover:bg-gray-700">
-				<IconArrowLeft className="text-white cursor-pointer" onClick={() => setPan(0)} />
-				</div>
-				<div></div>
-				<div className="hover:bg-gray-700">
-				<IconArrowRight className="text-white cursor-pointer" onClick={() => setPan(1)} />
-				</div>
-				<div></div>
-				<div className="hover:bg-gray-700">
-				<IconArrowDown className="text-white cursor-pointer" onClick={() => setPan(2)} />
-				</div>
-				<div></div>
-			</div>
-			</div>
 		</div>
 	);
 };

@@ -6,12 +6,9 @@ import type {
 } from "@cornerstonejs/core/dist/types/types";
 import { Niivue } from "@niivue/niivue";
 import {
-	IconArrowLeft,
-	IconCrosshair,
-	IconDownload,
-	IconReport,
+	IconDownload, IconHome, IconPointer, IconReport,
 	IconSettings,
-	IconZoom,
+	IconZoom
 } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -330,13 +327,13 @@ function VisualizationPage() {
 									className={`hover:bg-gray-700 z-4 cursor-pointer bg-[#0f0824] p-2 ml-4 mt-4 rounded-lg w-fit`}
 									onClick={() => navBack()}
 								>
-									<IconArrowLeft color="white" />
+									<IconHome color="white" />
 									{/* {showTaskDetails ? "Settings" : "Settings"} */}
 								</div>
 							) : null}
 						</div>
 						<div
-							className={`text-black bg-[#0f0824] m-[2vh] z-3 rounded-lg w-64 p-6 pt-3 gap-3 flex flex-col relative transition-all duration-100 origin-top-left ${
+							className={`text-black bg-[#0f0824] m-4 z-3 rounded-lg w-64 p-4 pt-3 gap-3 flex flex-col relative transition-all duration-100 origin-top-left ${
 								showTaskDetails ? "scale-0" : "scale-100"
 							}`}
 						>
@@ -344,27 +341,24 @@ function VisualizationPage() {
 
 							{!showTaskDetails && (
 								<>
-									<div className="grid grid-cols-6 items-center justify-center mb-2">
+									{!zoomMode &&
+									<div className="grid grid-cols-6 items-center justify-center">
 										<div>
-											{zoomMode ? (
-												<>
-													<IconArrowLeft
-														className="cursor-pointer text-white hover:bg-gray-700 rounded-md flex items-center justify-center"
-														onClick={() => {
-															setZoomMode(false);
-														}}
-													/>
-												</>
-											) : null}
+										
 										</div>
-										<div className="text-white font-bold text-xl col-span-4">{`Case ID: ${pantsCase}`}</div>
+										{zoomMode ? null : (
+											
+											<div className="text-white font-bold text-xl col-span-4">{`Case ID: ${pantsCase}`}</div>
+										)}
 										<div></div>
 									</div>
 
+									}
 									{zoomMode ? (
 										<ZoomHandle
 											submitted={zoomLevel}
 											setSubmitted={setZoomLevel}
+											setZoomMode={setZoomMode}
 										/>
 									) : (
 										<>
@@ -388,7 +382,7 @@ function VisualizationPage() {
 									{!zoomMode ? (
 										<>
 											<button
-												className="text-white relative pt-3 !bg-blue-700 hover:!border-white"
+												className="text-white relative pt-3 !bg-blue-900 hover:!border-white"
 												onClick={() => {
 													setShowOrganDetails((prev) => !prev);
 													setShowTaskDetails((prev) => !prev);
@@ -398,55 +392,56 @@ function VisualizationPage() {
 											</button>
 											<div className="flex gap-3 items-center justify-center">
 												<div
-													className={`group hover:bg-gray-700 cursor-pointer p-2 rounded-md relative ${
-														crosshairToolActive ? "bg-gray-700" : ""
-													}`}
+													className={`group cursor-pointer rounded-md relative border `}
 												>
-													<IconCrosshair
+													<div className={`border-gray-500 hover:bg-gray-700 border rounded-md p-2 ${
+														crosshairToolActive ? "bg-gray-700" : ""
+													}`}>
+
+													<IconPointer
 														className="w-6 h-6 text-white relative cursor-pointer"
 														onClick={() =>
 															setCrosshairToolActive((prev) => !prev)
 														}
-													></IconCrosshair>
+														></IconPointer>
+													</div>
 													<span className="transition-all pointer-events-none duration-100 scale-0 group-hover:scale-100 absolute top-0 left-12 z-1 bg-gray-900 text-white rounded-md p-2">
 														Crosshair Mode
 													</span>
 												</div>
-												<div className="group hover:bg-gray-700 cursor-pointer p-2 rounded-md relative">
+												<div className="group cursor-pointer rounded-md relative">
 													{!zoomMode ? (
 														<>
+															<div className="border-gray-500 hover:bg-gray-700 border rounded-md p-2">
+
 															<IconZoom
 																onClick={() => setZoomMode(true)}
 																className="w-6 h-6 text-white relative"
-															></IconZoom>
+																></IconZoom>
+															</div>
 															<span className="transition-all pointer-events-none duration-100 scale-0 group-hover:scale-100 absolute top-0 left-12 z-1 bg-gray-900 text-white rounded-md p-2">
 																Zoom
 															</span>
 														</>
-													) : (
-														<>
-															{/* <IconWindow
-																onClick={() => setZoomMode(false)}
-																className="w-6 h-6 text-white relative"
-															></IconWindow>
-															<span className="transition-all pointer-events-none duration-100 scale-0 group-hover:scale-100 absolute top-0 left-12 z-1 bg-gray-900 text-white rounded-md p-2">
-																Display
-															</span> */}
-														</>
-													)}
+													) : null }
 												</div>
 
-												<div className="group hover:bg-gray-700 cursor-pointer p-2 rounded-md relative  ">
+												<div className="group cursor-pointer rounded-md relative">
+													<div className="border-gray-500 hover:bg-gray-700 border rounded-md p-2">
+
 													<IconDownload
 														onClick={handleDownloadClick}
 														className="w-6 h-6 text-white relative"
-													></IconDownload>
+														></IconDownload>
+													</div>
 													<span className="transition-all pointer-events-none duration-100 scale-0 group-hover:scale-100 absolute top-0 left-12 z-1 bg-gray-900 text-white rounded-md p-2">
 														Download
 													</span>
 												</div>
-												<div className="group hover:bg-gray-700 cursor-pointer p-2 rounded-md relative">
+												<div className="group cursor-pointer rounded-md relative">
+													<div className="border-gray-500 hover:bg-gray-700 border rounded-md p-2">
 													<IconReport className="w-6 h-6 text-white relative"></IconReport>
+													</div>
 													<span className="transition-all pointer-events-none duration-100 scale-0 group-hover:scale-100 absolute top-0 left-12 z-1 bg-gray-900 text-white rounded-md p-2">
 														Report
 													</span>
@@ -478,7 +473,7 @@ function VisualizationPage() {
 					style={{ overflow: "hidden" }}
 				>
 					<div
-						className="axial"
+						className={`axial ${loading ? "" : "border-b-8 border-r-8 border-gray-800"}`}
 						ref={axial_ref}
 						onMouseDown={(e) =>
 							setLastClicked({
@@ -497,7 +492,7 @@ function VisualizationPage() {
 						// }}
 					></div>
 					<div
-						className="sagittal"
+						className={`sagittal ${loading ? "" : "border-b-8 border-l-8 border-gray-800"}`}
 						ref={sagittal_ref}
 						onMouseDown={(e) =>
 							setLastClicked({
@@ -513,7 +508,7 @@ function VisualizationPage() {
 					></div>
 
 					<div
-						className="coronal"
+						className={`coronal ${loading ? "" : "border-t-8 border-r-8 border-gray-800"}`}
 						ref={coronal_ref}
 						onMouseDown={(e) =>
 							setLastClicked({
@@ -528,7 +523,7 @@ function VisualizationPage() {
 						}
 					></div>
 
-					<div className="render">
+					<div className={`render ${loading ? "" : "border-t-8 border-l-8 border-gray-800"}`}>
 						<div className="canvas">
 							<canvas ref={render_ref}></canvas>
 						</div>

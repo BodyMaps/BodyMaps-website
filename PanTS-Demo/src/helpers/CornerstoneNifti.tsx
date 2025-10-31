@@ -418,6 +418,43 @@ export function setZoom(zoomValue: number){
 // 2 up
 // 3 down
 
+export function centerOnCursor(){
+  const engine = getRenderingEngine(renderingEngineId);
+  const toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
+  if (!toolGroup) return;
+  console.log(toolGroup.getToolInstance(CrosshairsTool.toolName).toolCenter);
+  const toolCenter = toolGroup.getToolInstance(CrosshairsTool.toolName).toolCenter;
+  [viewportId1, viewportId2, viewportId3].forEach((viewportId) => {
+      if (engine){
+        const viewport = engine.getViewport(viewportId);
+        if (viewportId1 == "CT_NIFTI_AXIAL"){
+          viewport.setViewReference({
+            FrameOfReferenceUID: "1.2.3",
+            cameraFocalPoint: toolCenter
+          })
+        }
+        // if (viewportId1 == "CT_NIFTI_CORONAL"){
+        //   viewport.setPan([-toolCenter[1], toolCenter[2]]);
+        // }
+        // if (viewportId1 == "CT_NIFTI_SAGITTAL"){
+        //   viewport.setPan([toolCenter[2], toolCenter[0]]);
+        // }
+        viewport.render();
+      }
+    })
+}
+
+export function zoomToFit() {
+  const engine = getRenderingEngine(renderingEngineId);
+  [viewportId1, viewportId2, viewportId3].forEach((viewportId) => {
+      if (engine){
+        const viewport = engine.getViewport(viewportId);
+        viewport.resetCamera(true, true);
+        viewport.render();
+      }
+    })
+}
+
 export function setPan(panValue: number) {
   const engine = getRenderingEngine(renderingEngineId);
   const MULT = 20;

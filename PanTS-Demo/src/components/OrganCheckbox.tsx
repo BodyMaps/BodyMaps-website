@@ -239,6 +239,8 @@ function OrganCheckbox({
 				showOrganDetails ? "translate-x-0" : "-translate-x-full"
 			} origin-left`}
 		>
+			<div className="flex justify-between items-center w-full">
+
 			<div className="flex gap-4 items-center justify-start">
 				<IconArrowLeft
 					className="cursor-pointer text-white hover:bg-gray-700 rounded-md flex items-center justify-center"
@@ -246,12 +248,13 @@ function OrganCheckbox({
 						setShowTaskDetails(false);
 						setShowOrganDetails(false);
 					}}
-				/>
-				<div className="text-white text-2xl">Organs</div>
+					/>
+			<div className="text-white text-2xl">Organs</div>
 			</div>
-			<button className="w-full mt-3" onClick={() => toggleAll()}>
+			<button className="!p-1.5 !bg-gray-700" onClick={() => toggleAll()}>
 				Toggle all
 			</button>
+			</div>
 			<div className="flex flex-col gap-2 overflow-scroll">
 				{OrganSystemsArray.map((system: Systems, idx) => {
 					return (
