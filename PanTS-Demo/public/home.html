@@ -36,7 +36,12 @@
             margin: 0 auto;
             position: relative
         }
-
+        .hero > .container {
+            padding: 10px 12px;
+            border-radius: 14px;
+            box-shadow: 0 0 0 3px var(--accent) inset;
+            background: var(--panel);
+        }
         
 
         .segment {
@@ -816,7 +821,7 @@
 /* Hero section 單層深藍背景 */
 .hero {
     background: var(--bg);
-    padding: 22px 16px 18px;
+    padding: 22px 0px 18px;
 }
 
 /* Search Rail 調整：Search 按鈕固定在右邊 */
@@ -825,9 +830,6 @@
     align-items: center;
     gap: 8px;
     background: var(--panel);
-    border-radius: 14px;
-    padding: 6px 10px;
-    box-shadow: 0 0 0 3px var(--accent) inset;
 }
 
 /* 讓 ID 與 STA 部分撐滿 */
@@ -1198,8 +1200,6 @@ body.viewer-open .hero {
   gap: 8px;
   background: var(--panel);
   border-radius: 14px;
-  padding: 6px 10px;
-  box-shadow: 0 0 0 3px var(--accent) inset;
   position: relative;
   overflow: visible;
 }
@@ -1277,8 +1277,8 @@ body.viewer-open .hero {
     display: grid;
     grid-template-columns: 380px minmax(0, 1fr); /* 左側 Advanced 380px，可依需要改 */
     gap: 20px; /* 中間距離稍微縮小 */
-    max-width: 100%;
-    width: 100%;
+    max-width: 90%;
+    width: 90%;
     margin: 0 auto;
     padding-left: 20px;   /* 左右外邊界都縮小 */
     padding-right: 20px;
@@ -1299,14 +1299,14 @@ body.viewer-open .hero {
  /* 卡片區：桌機 3 欄、平板 2 欄、手機 1 欄；支援單筆置中 */
 #cards{
   display: grid;
-  grid-template-columns: repeat(3, minmax(320px, 1fr));
+  grid-template-columns: repeat(3, min(320px, 1fr));
   gap: 24px;
   align-items: stretch;
 }
 
 /* 窄一點的螢幕：2 欄（多筆結果時仍用 grid） */
 @media (max-width: 1200px){
-  #cards{ grid-template-columns: repeat(2, minmax(300px, 1fr)); gap: 20px; }
+  #cards{ grid-template-columns: repeat(2, min(300px, 1fr)); gap: 20px; }
 }
 
 /* 手機：1 欄 */
@@ -1328,7 +1328,7 @@ body.viewer-open .hero {
     padding-right: 40px;
   }
   #cards{
-    grid-template-columns: repeat(3, minmax(360px, 1fr));
+    grid-template-columns: repeat(3, min(360px, 1fr));
     gap: 26px;
   }
   .card .thumb{ height: 340px; }
