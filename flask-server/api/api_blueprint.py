@@ -8,7 +8,6 @@ from models.base import db
 from constants import Constants
 import zipfile
 import pandas as pd
-
 from pathlib import Path
 from io import BytesIO
 from reportlab.pdfgen import canvas
@@ -318,9 +317,6 @@ async def get_segmentations(combined_labels_id):
         print("⚠️ Detected float label map, converting to uint8 for Niivue compatibility...")
 
     try:
-        img = nib.load(nifti_path)
-        data = img.get_fdata()
-
         if img.get_data_dtype() != np.uint8:
             
             data_uint8 = data.astype(np.uint8)

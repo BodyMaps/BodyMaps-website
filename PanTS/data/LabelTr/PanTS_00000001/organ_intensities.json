@@ -1,1 +1,25 @@
-{"adrenal_gland_left.npz": 1, "adrenal_gland_right.npz": 2, "aorta.npz": 3, "bladder.npz": 4, "celiac_artery.npz": 5, "colon.npz": 6, "common_bile_duct.npz": 7, "duodenum.npz": 8, "femur_left.npz": 9, "femur_right.npz": 10, "gall_bladder.npz": 11, "kidney_left.npz": 12, "kidney_right.npz": 13, "liver.npz": 14, "lung_left.npz": 15, "lung_right.npz": 16, "pancreas": 22, "postcava.npz": 23, "prostate.npz": 24, "spleen.npz": 25, "stomach.npz": 26, "superior_mesenteric_artery.npz": 27, "veins.npz": 28}
+{
+  "adrenal_gland_left.nii.gz": 1,
+  "adrenal_gland_right.nii.gz": 2,
+  "aorta.nii.gz": 3,
+  "bladder.nii.gz": 4,
+  "celiac_artery.nii.gz": 5,
+  "colon.nii.gz": 6,
+  "common_bile_duct.nii.gz": 7,
+  "duodenum.nii.gz": 8,
+  "femur_left.nii.gz": 9,
+  "femur_right.nii.gz": 10,
+  "gall_bladder.nii.gz": 11,
+  "kidney_left.nii.gz": 12,
+  "kidney_right.nii.gz": 13,
+  "liver.nii.gz": 14,
+  "lung_left.nii.gz": 15,
+  "lung_right.nii.gz": 16,
+  "pancreas": 22,
+  "postcava.nii.gz": 23,
+  "prostate.nii.gz": 24,
+  "spleen.nii.gz": 25,
+  "stomach.nii.gz": 26,
+  "superior_mesenteric_artery.nii.gz": 27,
+  "veins.nii.gz": 28
+}
