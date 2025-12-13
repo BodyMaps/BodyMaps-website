@@ -62,7 +62,7 @@ def proxy_image():
     resp = Response(r.content, status=200, mimetype=content_type)
 
     # ⭐ 避免 COEP 再擋圖片
-    resp.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    # resp.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     resp.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
     resp.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
 
