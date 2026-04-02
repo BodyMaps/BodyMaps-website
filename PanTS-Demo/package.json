@@ -10,9 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@cornerstonejs/core": "^1.83.0",
-    "@cornerstonejs/nifti-volume-loader": "^1.83.0",
-    "@cornerstonejs/tools": "^1.83.0",
+    "@kitware/vtk.js": "34.15.1",
     "@niivue/niivue": "^0.62.1",
     "@react-three/drei": "^10.7.6",
     "@react-three/fiber": "^9.3.0",

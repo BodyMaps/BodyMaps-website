@@ -1,9 +1,6 @@
 import type { RenderingEngine } from "@cornerstonejs/core";
-import type {
-	Color,
-	ColorLUT,
-	IImageVolume,
-} from "@cornerstonejs/core/dist/types/types";
+import type { Color, ColorLUT } from "@cornerstonejs/core/types";
+import type { vtkVolumeProperty } from '@kitware/vtk.js/Rendering/Core/VolumeProperty';
 import { Niivue } from "@niivue/niivue";
 import {
 	IconDownload, IconHome, IconPointer, IconReport,
@@ -24,7 +21,7 @@ import {
 	setToolGroupOpacity,
 	setVisibilities,
 	toggleCrosshairTool,
-} from "../helpers/CornerstoneNifti";
+} from "../helpers/CornerstoneNifti2";
 import { create3DVolume, updateVisibilities } from "../helpers/NiiVueNifti";
 import {
 	API_BASE,
@@ -48,14 +45,12 @@ function VisualizationPage() {
 	const cmapRef = useRef<NColorMap>(null);
 	// const TaskMenu_ref = useRef(null);
 	const VisualizationContainer_ref = useRef(null);
-	const segmentationRef = useRef<IImageVolume>(null);
 	//   const lastClickInfoRef = useRef(null);
 
 	//   const [sliceAxial, setSliceAxial] = useState(0);
 	//   const [sliceSagittal, setSliceSagittal] = useState(0);
 	//   const [sliceCoronal, setSliceCoronal] = useState(0);
 	const [checkState, setCheckState] = useState<boolean[]>([true]);
-	const [segmentationRepresentationUIDs, setSegmentationRepresentationUIDs] =
 		useState<string[] | null>(null);
 	const [NV, setNV] = useState<Niivue | undefined>();
 	const [sessionKey, _setSessionKey] = useState<string | undefined>(undefined);
@@ -138,14 +133,11 @@ function VisualizationPage() {
 			// setLoading(false);
 			if (!result) return;
 			const {
-				segmentationVolumeArray,
-				segRepUIDs,
 				renderingEngine,
 				viewportIds,
 				volumeId,
 			} = result;
 
-			setSegmentationRepresentationUIDs(segRepUIDs);
 			setRenderingEngine(renderingEngine);
 			setViewportIds(viewportIds);
 			setVolumeId(volumeId);
@@ -157,7 +149,6 @@ function VisualizationPage() {
 			);
 			cmapRef.current = cmapCopy;
 			setNV(nv);
-			segmentationRef.current = segmentationVolumeArray;
 		};
 
 		setup();
@@ -218,20 +209,12 @@ function VisualizationPage() {
 
 		viewportIds.forEach((viewportId) => {
 			const viewport = renderingEngine.getViewport(viewportId);
-			const actors = viewport.getActors();
+			const actor = viewport.getDefaultActor();
 
-			for (const actor of actors) {
-				if (actor.uid === volumeId) {
-					try {
-						const tf = actor.actor.getProperty().getRGBTransferFunction(0);
+			const tf = (actor.actor.getProperty() as vtkVolumeProperty).getRGBTransferFunction(0);
 						tf.setMappingRange(windowLow, windowHigh);
 						tf.updateRange();
 						viewport.render();
-					} catch (e) {
-						console.warn("[VOI Error]", e);
-					}
-				}
-			}
 		});
 	};
 
@@ -244,17 +227,15 @@ function VisualizationPage() {
 
 	// Update segmentation visibility when state changes
 	useEffect(() => {
-		if (segmentationRepresentationUIDs && checkState && NV) {
+		if (checkState && NV) {
 			const checkStateArr = [
 				true, // ID=0 background 永远可见
 				...checkBoxData.map((item) => !!checkState[item.id]),
 			];
-			console.log("150", checkStateArr);
-			setVisibilities(segmentationRepresentationUIDs, checkStateArr);
+			setVisibilities(checkStateArr);
 			updateVisibilities(NV, checkStateArr, sessionKey, cmapRef.current);
 		}
 	}, [
-		segmentationRepresentationUIDs,
 		checkState,
 		NV,
 		checkBoxData,

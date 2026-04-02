@@ -1,6 +1,6 @@
 import { IconArrowLeft } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { centerOnCursor, setZoom, zoomToFit } from "../helpers/CornerstoneNifti";
+import { centerOnCursor, setZoom, zoomToFit } from "../helpers/CornerstoneNifti2";
 type Props = {
 	submitted: number;
 	setSubmitted: React.Dispatch<React.SetStateAction<number>>;
@@ -41,6 +41,7 @@ const ZoomHandle = ({ submitted, setSubmitted, setZoomMode }: Props) => {
 				<div className="flex gap-1 w-2/3 justify-end">
 				<input
 					type="text"
+					aria-label="s"
 					value={text}	
 					onChange={(e) => setText(e.target.value.replace(/[^0-9.-]/g, ""))} // allow only digits, minus, dot
 					onKeyDown={handleKeyDown}

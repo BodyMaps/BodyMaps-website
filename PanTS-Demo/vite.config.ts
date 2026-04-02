@@ -20,10 +20,10 @@ export default defineConfig({
 		// 	key: fs.readFileSync(path.resolve(__dirname, '../certs/localhost-key.pem')),
 		// 	cert: fs.readFileSync(path.resolve(__dirname, '../certs/localhost-cert.pem')),
 		// },
-		headers: {
-			'Cross-Origin-Opener-Policy': 'same-origin',
-			'Cross-Origin-Embedder-Policy': 'require-corp',
-		},
+		// headers: {
+		// 	'Cross-Origin-Opener-Policy': 'same-origin',
+		// 	'Cross-Origin-Embedder-Policy': 'require-corp',
+		// },
 		cors: true,
 		proxy: {
 			"/api": {

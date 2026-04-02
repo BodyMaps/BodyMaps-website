@@ -1,4 +1,4 @@
-import type { Color } from "@cornerstonejs/core/dist/types/types";
+import type { Color } from "@cornerstonejs/core/types";
 import { IconArrowLeft, IconChevronRight } from "@tabler/icons-react";
 import React, { useEffect, useState } from "react";
 import {
@@ -117,6 +117,7 @@ function Checked({
 						</div>
 						<input
 							type="checkbox"
+							aria-label="s"
 							className="w-4 h-4 text-blue-600 !bg-gray-700 border-gray-600 !rounded-sm focus:ring-blue-600 ring-offset-gray-800 focus:ring-2"
 							checked={partialToggled}
 							onChange={() => {

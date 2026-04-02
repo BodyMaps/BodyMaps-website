@@ -120,9 +120,9 @@ def proxy_image():
     resp = Response(r.content, status=200, mimetype=content_type)
 
     # ⭐ 避免 COEP 再擋圖片
-    # resp.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
-    resp.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
-    resp.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
+    resp.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    # resp.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+    # resp.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
 
     return resp
 
@@ -297,8 +297,8 @@ def get_main_nifti(clabel_id):
     if os.path.exists(main_nifti_path):
         response = make_response(send_file(main_nifti_path, mimetype='application/gzip'))
 
-        response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
-        response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
+        response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+        # response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
         response.headers['Content-Encoding'] = 'gzip'
 
     else:
@@ -313,7 +313,7 @@ def get_main_nifti(clabel_id):
         
         # response = make_response(send_file(main_nifti_path, mimetype='application/gzip'))
 
-        # response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+        # response.headers['Cross-Origin-Resource-Policy'] = 'same-origin'
         # response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
         # response.headers['Content-Encoding'] = 'gzip'
 
@@ -431,8 +431,9 @@ async def get_segmentations(combined_labels_id):
             converted_path = nifti_path
 
         response = make_response(send_file(converted_path, mimetype='application/gzip'))
-        response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
-        response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
+        response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+        # response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+        # response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
         response.headers['Content-Encoding'] = 'gzip'
 
         return response

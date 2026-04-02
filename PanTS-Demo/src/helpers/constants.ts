@@ -1,4 +1,4 @@
-import type { Color } from "@cornerstonejs/core/dist/types/types";
+import type { Color } from "@cornerstonejs/core/types";
 import type {
 	APP_CONSTANTS_TYPE,
 	cornerstoneCustomColorLUTType, MiscColorMapType,
@@ -17,6 +17,7 @@ const apiBaseLooksLocalhost = /https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test
 export const API_BASE = configuredApiBase
 	? (apiBaseLooksLocalhost && !isBrowserLocalhost ? "" : configuredApiBase.replace(/\/$/, ""))
 	: "";
+// export const API_BASE = "http://localhost:5001";
 
 // old
 // const x = {

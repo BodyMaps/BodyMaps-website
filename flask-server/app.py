@@ -44,11 +44,12 @@ app = create_app()
 print(app.url_map)
 
 # ✅ SharedArrayBuffer Compatibility
-@app.after_request
-def add_security_headers(response):
-    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
-    return response
+# @app.after_request
+# def add_security_headers(response):
+#     response.headers["Cross-Origin-Opener-Policy"] = "cross-origin"
+#     response.headers["Access-Control-Allow-Origin"] = "http://localhost:5173"
+#     response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+#     return response
 
 def find_watch_files():
     watch_dirs = ['api', 'models', 'services']

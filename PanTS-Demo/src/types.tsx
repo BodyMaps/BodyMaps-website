@@ -1,5 +1,5 @@
 import type { RenderingEngine } from "@cornerstonejs/core";
-import type { IImageVolume } from "@cornerstonejs/core/dist/types/types";
+import type { IImageVolume } from "@cornerstonejs/core/types";
 import type { SetStateAction } from "react";
 
 export type metadataType = {

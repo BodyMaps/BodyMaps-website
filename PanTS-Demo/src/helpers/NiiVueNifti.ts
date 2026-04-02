@@ -1,4 +1,4 @@
-import type { Color } from '@cornerstonejs/core/dist/types/types';
+import type { Color } from '@cornerstonejs/core/types';
 import { Niivue, NVImage, SLICE_TYPE } from '@niivue/niivue';
 import type { NColorMap } from '../types';
 import { APP_CONSTANTS } from './constants';
