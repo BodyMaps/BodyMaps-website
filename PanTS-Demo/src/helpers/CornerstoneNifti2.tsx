@@ -90,11 +90,13 @@ export async function renderVisualization(ref1: HTMLDivElement, ref2: HTMLDivEle
         getReferenceLineControllable,
         getReferenceLineDraggableRotatable,
         getReferenceLineSlabThicknessControlsOn,
+        // viewportIndicators: true,
         mobile: {
             enabled: false,
             opacity: 0.8,
-            handleRadius: 9,
-        }
+            handleRadius: 16,
+        },
+        handleRadius:8
     })
     if (currentRenderingEngine) {
         currentRenderingEngine.destroy();
@@ -244,7 +246,7 @@ export function setToolGroupOpacity(opacityValue: number) {
 export function toggleCrosshairTool(value: boolean) {
   const toolGroup = ToolGroupManager.getToolGroup(toolGroupId);
   if (!toolGroup) return;
-  if (value) {
+  if (!value) {
     toolGroup.setToolActive(CrosshairsTool.toolName, {
       bindings: [{ mouseButton: csToolsEnums.MouseBindings.Primary }],
     });
@@ -252,7 +254,7 @@ export function toggleCrosshairTool(value: boolean) {
     toolGroup.setToolDisabled(PanTool.toolName);
     return;
   }
-  if (!value) {
+  if (value) {
     toolGroup.setToolDisabled(CrosshairsTool.toolName);
     toolGroup.setToolActive(PanTool.toolName, {
       bindings: [{ mouseButton: csToolsEnums.MouseBindings.Primary }],

@@ -4,8 +4,7 @@ import type { vtkVolumeProperty } from '@kitware/vtk.js/Rendering/Core/VolumePro
 import { Niivue } from "@niivue/niivue";
 import {
 	IconDownload, IconHome, IconPointer, IconReport,
-	IconSettings,
-	IconZoom
+	IconSettings
 } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -314,15 +313,14 @@ function VisualizationPage() {
 							{/* ) : null} */}
 						</div>
 						<div
-							className={`text-black bg-[#0f0824] m-4 z-3 rounded-lg w-64 p-4 pt-3 gap-3 flex flex-col relative transition-all duration-100 origin-top-left ${
-								showTaskDetails ? "scale-0" : "scale-100"
+							className={`text-black bg-[#0f0824] z-3 rounded-lg w-64 h-dvh p-4 pt-14 gap-3 flex flex-col absolute top-0 left-0 transition-all duration-300 ease-in-out origin-left ${
+								showTaskDetails ? "translate-x-[-64rem]" : "translate-x-0"
 							}`}
 						>
 							{/* Toggle dropdown */}
 
 							{!showTaskDetails && (
 								<>
-									{!zoomMode &&
 									<div className="grid grid-cols-6 items-center justify-center">
 										<div>
 										
@@ -334,14 +332,6 @@ function VisualizationPage() {
 										<div></div>
 									</div>
 
-									}
-									{zoomMode ? (
-										<ZoomHandle
-											submitted={zoomLevel}
-											setSubmitted={setZoomLevel}
-											setZoomMode={setZoomMode}
-										/>
-									) : (
 										<>
 											<OpacitySlider
 												opacityValue={opacityValue}
@@ -349,6 +339,8 @@ function VisualizationPage() {
 													handleOpacityOnSliderChange
 												}
 												handleOpacityOnFormSubmit={handleOpacityOnFormSubmit}
+												setShowOrganDetails={setShowOrganDetails}
+												setShowTaskDetails={setShowTaskDetails}
 											/>
 
 											<WindowingSlider
@@ -356,21 +348,18 @@ function VisualizationPage() {
 												windowCenter={windowCenter}
 												onWindowChange={handleWindowChange}
 											/>
+											<ZoomHandle
+											submitted={zoomLevel}
+											setSubmitted={setZoomLevel}
+											setZoomMode={setZoomMode}
+										/>
 										</>
-									)}
+									
 									{/* Report Download Zoom Buttons */}
 									{/* Opacity & Windowing Sliders */}
-									{!zoomMode ? (
+									{/* {!zoomMode ? ( */}
 										<>
-											<button
-												className="text-white relative pt-3 !bg-blue-900 hover:!border-white"
-												onClick={() => {
-													setShowOrganDetails((prev) => !prev);
-													setShowTaskDetails((prev) => !prev);
-												}}
-											>
-												Class Map
-											</button>
+										
 											<div className="flex gap-3 items-center justify-center">
 												<div
 													className={`group cursor-pointer rounded-md relative border `}
@@ -390,7 +379,7 @@ function VisualizationPage() {
 														Crosshair Mode
 													</span>
 												</div>
-												<div className="group cursor-pointer rounded-md relative">
+												{/* <div className="group cursor-pointer rounded-md relative">
 													{!zoomMode ? (
 														<>
 															<div className="border-gray-500 hover:bg-gray-700 border rounded-md p-2">
@@ -405,7 +394,7 @@ function VisualizationPage() {
 															</span>
 														</>
 													) : null }
-												</div>
+												</div> */}
 
 												<div className="group cursor-pointer rounded-md relative">
 													<div className="border-gray-500 hover:bg-gray-700 border rounded-md p-2">
@@ -429,7 +418,7 @@ function VisualizationPage() {
 												</div>
 											</div>
 										</>
-									) : null}
+									{/* ) : null} */}
 								</>
 							)}
 						</div>
@@ -447,7 +436,7 @@ function VisualizationPage() {
           :
           null
         } */}
-				{loading ? <div className="flex flex-col gap-40 items-center justify-center">
+				{loading ? <div className="flex flex-col gap-20 items-center justify-center">
 					<div className="w-fit z-99">
 					<SnakeGame />
 					</div>
@@ -459,7 +448,7 @@ function VisualizationPage() {
 					style={{ overflow: "hidden" }}
 				>
 					<div
-						className={`axial ${loading ? "" : "border-b-8 border-r-8 border-gray-800"}`}
+						className={`axial ${loading ? "" : "border-b-4 border-r-4 border-t-4 border-l-4 border-red-900"}`}
 						ref={axial_ref}
 						onMouseDown={(e) =>
 							setLastClicked({
@@ -478,7 +467,7 @@ function VisualizationPage() {
 						// }}
 					></div>
 					<div
-						className={`sagittal ${loading ? "" : "border-b-8 border-l-8 border-gray-800"}`}
+						className={`sagittal ${loading ? "" : "border-b-4 border-r-4 border-t-4 border-l-4 border-yellow-700"}`}
 						ref={sagittal_ref}
 						onMouseDown={(e) =>
 							setLastClicked({
@@ -494,7 +483,7 @@ function VisualizationPage() {
 					></div>
 
 					<div
-						className={`coronal ${loading ? "" : "border-t-8 border-r-8 border-gray-800"}`}
+						className={`coronal ${loading ? "" : "border-b-4 border-r-4 border-t-4 border-l-4 border-green-800"}`}
 						ref={coronal_ref}
 						onMouseDown={(e) =>
 							setLastClicked({
@@ -509,7 +498,7 @@ function VisualizationPage() {
 						}
 					></div>
 
-					<div className={`render ${loading ? "" : "border-t-8 border-l-8 border-gray-800"}`}>
+					<div className={`render`}>
 						<div className="canvas">
 							<canvas ref={render_ref}></canvas>
 						</div>

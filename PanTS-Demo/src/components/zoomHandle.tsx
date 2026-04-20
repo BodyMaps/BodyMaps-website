@@ -1,4 +1,3 @@
-import { IconArrowLeft } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { centerOnCursor, setZoom, zoomToFit } from "../helpers/CornerstoneNifti2";
 type Props = {
@@ -6,80 +5,74 @@ type Props = {
 	setSubmitted: React.Dispatch<React.SetStateAction<number>>;
 	setZoomMode: React.Dispatch<React.SetStateAction<boolean>>;
 };
-const ZoomHandle = ({ submitted, setSubmitted, setZoomMode }: Props) => {
-	const [text, setText] = useState(submitted.toString());
+const ZoomHandle = ({ submitted, setSubmitted, setZoomMode: _setZoomMode }: Props) => {
+	const [_text, setText] = useState(submitted.toString());
 	// const [submitted, setSubmitted] = useState(1);
 	useEffect(() => {
 		setZoom(submitted);
 		setText(submitted.toFixed(2));
 	}, [submitted]);
 
-	const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-		if (e.key === "Enter") {
-			const num = Math.min(Math.max(Number(text), 0.5), 2);
+	// const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+	// 	if (e.key === "Enter") {
+	// 		const num = Math.min(Math.max(Number(text), 0.5), 2);
 
-			if (!isNaN(num)) {
-				setSubmitted(num);
-				setText(num.toFixed(2)); // clear input if you want
-			} else {
-				setText(submitted.toFixed(2));
-			}
-		}
-	};
+	// 		if (!isNaN(num)) {
+	// 			setSubmitted(num);
+	// 			setText(num.toFixed(2)); // clear input if you want
+	// 		} else {
+	// 			setText(submitted.toFixed(2));
+	// 		}
+	// 	}
+	// };
 	return (
-		<div className="flex flex-col gap-2 items-center">
-			<div className="flex flex-start w-full">
-				<IconArrowLeft className="cursor-pointer text-white" onClick={() => setZoomMode(false)}>
+		<div className="windowing-slider w-full flex flex-col gap-2 border-2 rounded-sm bg-gray-900 shadow-md">
+		<div className="bg-gray-600 w-full h-8 flex items-center justify-center text-center rounded-t-sm text-white">Zoom Settings</div>
+		<div className="pb-2 pl-4 pr-4 flex flex-col gap-2">
 
-				</IconArrowLeft>
-			</div>
-			<div className="flex flex-col items-center gap-3">
+			<div className="flex flex-col gap-1 justify-between w-full">
+				<div className="flex justify-between w-full items-center">
 
-			<div className="flex gap-2 items-center justify-between w-full">
-				<div className="text-white">Zoom</div>
+					<div style={{ color: 'white' }}>Zoom</div>
+				</div>
+				<input
+				type="range"
+				min="0.5"
+				max="2"
+				step="0.11"
+				className="w-full"
+				value={submitted}
+				onChange={(e) => setSubmitted(Number(e.target.value))}
+				/>
 
 				<div className="flex gap-1 w-2/3 justify-end">
-				<input
+				{/* <input
 					type="text"
 					aria-label="s"
 					value={text}	
 					onChange={(e) => setText(e.target.value.replace(/[^0-9.-]/g, ""))} // allow only digits, minus, dot
 					onKeyDown={handleKeyDown}
 					className="border text-white p-1 rounded-md w-1/3"
-					/>
-				<div  className="flex gap-0.5 text-white">
-					<button className="text-white !bg-blue-950 w-8 h-8 !p-1" onClick={() => setSubmitted(Math.max(submitted - 0.1, 0.5))}>
-						-
-					</button>
-					<button className="text-white !bg-blue-950 w-8 h-8 !p-1" onClick={() => setSubmitted(Math.min(submitted + 0.1, 3))}>
-						+
-					</button>
-				</div>
-				</div>
+					/> */}
 			</div>
-			<div className="flex flex-col gap-2 w-full">
+			</div>
+			<div className="grid grid-cols-2 gap-1 w-full">
 
-			<button className="text-white !font-medium text-xl !p-1.5" onClick={() => {
+			<button className="text-white !bg-gray-700 !font-medium text-nowrap !text-xs !p-1" onClick={() => {
 				centerOnCursor();
 			}}>
-				Center on cursor
+				Center Cursor
 			</button>
-			<button className="text-white !font-medium text-xl !p-1.5" onClick={() => {
+			<button className="text-white  !bg-gray-700 !font-medium text-nowrap !text-xs !p-1" onClick={() => {
 				zoomToFit();
 				setText("1.0");
 			}}>
-				Zoom to fit
+				Reset
 			</button>
 
 			</div>
-			</div>
-			{/* <div className="flex gap-2 text-white">
-				{[0.75, 1, 1.5].map((el, idx) => (
-					<button key={idx} onClick={() => setSubmitted(el)} className="!bg-blue-950 h-10 !text-sm">
-					{el}x
-					</button>
-					))}
-					</div> */}
+
+		</div>
 		</div>
 	);
 };
