@@ -512,7 +512,6 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
     )
 
     def do_segmentation_and_zip():
-        time.sleep(10)
         try:
             output_mask_dir = run_auto_segmentation(input_path, session_dir=session_path, model=model_name)
 

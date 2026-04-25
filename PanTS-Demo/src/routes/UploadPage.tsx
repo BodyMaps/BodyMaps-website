@@ -114,7 +114,7 @@ const UploadPage: React.FC<UploadPageProps> = () => {
   }, []);
 
   // Step 0: Upload files to server
-  const CHUNK_SIZE = 512 * 1024; // 512 KB per chunk (safer for strict proxy limits)
+  const CHUNK_SIZE = 256 * 1024; // 256 KB per chunk
 
   const handleUploadClick = async () => {
     if (selectedFiles.length === 0) return alert("No files selected!");
@@ -192,6 +192,12 @@ const UploadPage: React.FC<UploadPageProps> = () => {
     setInferenceProgress(0);
     setIsInferencing(true);
 
+    if (!sessionId && !serverPath.trim()) {
+      alert("Please upload a file first before running inference.");
+      setIsInferencing(false);
+      return;
+    }
+
     const formData = new FormData();
     formData.append("session_id", sessionId || crypto.randomUUID());
 
@@ -199,8 +205,6 @@ const UploadPage: React.FC<UploadPageProps> = () => {
       formData.append("INPUT_SERVER_PATH", serverPath.trim());
     } else if (uploadedFilename) {
       formData.append("uploaded_filename", uploadedFilename);
-    } else if (selectedFiles.length > 0) {
-      formData.append("MAIN_NIFTI", selectedFiles[0]);
     }
 
     try {

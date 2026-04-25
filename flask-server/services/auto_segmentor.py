@@ -293,16 +293,12 @@ def _run_epai_inference(input_path: str, session_dir: str, conda_path: str, epai
                 shell=True,
                 executable="/bin/bash",
                 check=True,
-                text=True,
-                capture_output=True,
             )
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
                 "ePAI inference command failed"
                 f"\nCommand: {full_cmd}"
                 f"\nExit code: {e.returncode}"
-                f"\nSTDOUT:\n{(e.stdout or '').strip()}"
-                f"\nSTDERR:\n{(e.stderr or '').strip()}"
             ) from e
 
     case_pred = os.path.join(save_dir, f"{case_id}.nii.gz")
