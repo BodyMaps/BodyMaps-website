@@ -207,7 +207,7 @@ function SnakeGame() {
 
             let className = "w-5 h-5 flex justify-center items-center border-l border-t border-white border-dotted";
             if (isFood) {
-                className += " bg-red-600 z-10 border-red-600 rounded-md shadow-md";
+                className += " bg-[#E76F51] z-10 border-[#E76F51] rounded-md shadow-md";
             }
             if (isSnakeBody) {
                 className += " bg-[#3842ff] border-[#3842ff]";

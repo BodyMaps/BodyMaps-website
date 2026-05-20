@@ -4,7 +4,9 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>CT Finder · Search + Viewer (Dark)</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <title>PanTS Viewer · BodyMaps</title>
+    <meta name="description" content="Interactive viewer for the PanTS pancreatic-imaging dataset — 9,901 multi-organ CT volumes with expert segmentations. Hosted by BodyMaps." />
     <style>
         :root {
             --bg: #0e1a2b;
@@ -13,9 +15,9 @@
             --ink: #e8eff9;
             --sub: #a9b7cc;
             --line: #243a57;
-            --brand: #2a6cff;
+            --brand: #E76F51;
             --brand-ink: #fff;
-            --accent: #febb02;
+            --accent: #E76F51;
             --good: #16a34a;
             --bad: #ef4444;
             --control-h: 44px
@@ -1908,8 +1910,126 @@ section#recBar {           /* ⭐ 把 Browse 也拉進來一起對齊 */
     width: 100%;
     padding-left: 0 !important;
   }
+
+  /* ───────── BodyMaps branding additions ───────── */
+  .bm-header {
+    background: #08111e;
+    border-bottom: 1px solid var(--line);
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .bm-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .bm-brand img {
+    height: 28px;
+    width: 28px;
+  }
+  .bm-brand span {
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  .bm-brand .bm-dot {
+    opacity: 0.4;
+    margin: 0 6px;
+  }
+  .bm-nav {
+    display: flex;
+    gap: 18px;
+    font-size: 13px;
+  }
+  .bm-nav a {
+    color: var(--ink);
+    opacity: 0.75;
+    text-decoration: none;
+    transition: opacity .2s;
+  }
+  .bm-nav a:hover {
+    opacity: 1;
+  }
+  .bm-hero {
+    padding: 56px 20px 40px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .bm-eyebrow {
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--sub);
+    font-weight: 500;
+    margin-bottom: 12px;
+  }
+  .bm-h1 {
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 500;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin: 0 0 16px;
+    color: var(--ink);
+  }
+  .bm-accent {
+    color: var(--brand);
+  }
+  .bm-lead {
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--sub);
+    max-width: 640px;
+    margin: 0;
+  }
+  .bm-lead strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .bm-footer {
+    background: #08111e;
+    border-top: 1px solid var(--line);
+    padding: 24px 20px;
+    text-align: center;
+    color: var(--sub);
+    font-size: 13px;
+    margin-top: 48px;
+  }
+  .bm-footer a {
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .bm-footer a:hover {
+    color: var(--brand);
+    border-bottom-color: var(--brand);
+  }
 </style>
 
+
+    <!-- BodyMaps header -->
+    <header class="bm-header">
+      <a class="bm-brand" href="/">
+        <img src="/logo-light.png" alt="BodyMaps" />
+        <span><strong>BodyMaps</strong><span class="bm-dot">·</span>PanTS Viewer</span>
+      </a>
+      <nav class="bm-nav">
+        <a href="https://thebodymaps.com" target="_blank" rel="noopener">thebodymaps.com</a>
+      </nav>
+    </header>
+
+    <!-- BodyMaps hero -->
+    <section class="bm-hero">
+      <div class="bm-eyebrow">Interactive dataset viewer</div>
+      <h1 class="bm-h1">Browse the <span class="bm-accent">PanTS</span> pancreatic-imaging dataset.</h1>
+      <p class="bm-lead"><strong>9,901</strong> publicly browseable CT cases with expert-annotated multi-organ segmentations. Search by case ID, filter by metadata, or upload your own NIfTI scan to run auto-segmentation.</p>
+    </section>
 
     <!-- Inference Upload -->
     <section class="panel container" id="inferenceSection" style="margin:12px auto;padding:20px 24px;max-width:520px;">
@@ -2171,6 +2291,11 @@ section#recBar {           /* ⭐ 把 Browse 也拉進來一起對齊 */
             </section>
         </main>
     </section>
+
+    <!-- BodyMaps footer -->
+    <footer class="bm-footer">
+      This viewer is hosted by <a href="https://thebodymaps.com" target="_blank" rel="noopener"><strong>BodyMaps</strong></a> — a working example of what our platform makes possible.
+    </footer>
 
     <!-- Report Modal -->
     <div id="reportModal" class="modal" aria-hidden="true">
