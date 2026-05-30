@@ -4,6 +4,7 @@ import { default as RotatingHeartLoader } from "./components/Loading";
 import { AnnotationProvider } from "./contexts/annotationContexts";
 import { FileProvider } from "./contexts/fileContexts";
 import Homepage from "./routes/Homepage";
+import SynapsePage from "./routes/SynapsePage";
 import UploadPage from "./routes/UploadPage";
 import VisualizationPage from "./routes/VisualizationPage";
 
@@ -25,6 +26,7 @@ function App() {
 							<Route path="/reconstruction/:reconstructionId" element={<VisualizationPage />} />
 							<Route path="/test" element={<RotatingHeartLoader />} />
 							<Route path="/upload" element={<UploadPage />} />
+							<Route path="/synapse-ct" element={<SynapsePage />} />
 						</Routes>
 					</BrowserRouter>
 				</div>
