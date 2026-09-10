@@ -410,11 +410,16 @@ const UploadPage: React.FC = () => {
   const sessionFileSizeRef = useRef<Map<string, number>>(new Map());
   // Re-renders ProcessingCard once a second while anything is running, purely
   // so the "About N min left" text advances - nothing else here depends on it.
+  // Gated on there actually being a running scan: an unconditional 1s re-render
+  // of the whole page while idle is wasted work, and it kept the dropzone in a
+  // constant reflow (see the transition note in UploadPage.css).
   const [, setEtaTick] = useState(0);
+  const anyRunning = recentUploads.some((u) => u.status === "Processing");
   useEffect(() => {
+    if (!anyRunning) return;
     const timer = setInterval(() => setEtaTick((t) => t + 1), 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [anyRunning]);
 
   // Picks the model picker's real default once the account's plan is known:
   // ePAI for a plan that actually includes it, LesionSegmenter (the one real
