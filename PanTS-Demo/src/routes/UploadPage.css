@@ -71,7 +71,15 @@
   border: 1px dashed rgba(0,0,0,.15);
   border-radius: 12px;
   background: rgba(0,0,0,.015);
-  padding: 72px 24px;
+  /* Fixed box. It is the SAME height whether it's empty, holding a file chip,
+     or showing an in-flight run - content just centres inside it. Previously
+     the padding collapsed 72px -> 20px the moment a file was picked, so the
+     box visibly halved in height and grew back when the file was removed.
+     box-sizing:border-box so min-height already accounts for the padding.
+     It only grows past this if several files are queued at once. */
+  box-sizing: border-box;
+  min-height: 280px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -85,14 +93,6 @@
   transition: border-color 0.25s ease, background-color 0.25s ease;
   margin-bottom: 24px;
   position: relative;
-}
-/* Once a file is selected, the box holds a file list instead of the empty-state
-   icon/text - the tall centered padding made sense for that icon, not for a
-   list of rows, so it collapses to match the content instead of leaving a big
-   gap above/below the file-chips list. */
-.dropzone:has(.file-chips),
-.dropzone:has(.dropzone-inflight) {
-  padding: 20px 24px;
 }
 /* An in-flight run isn't something to "drop a file onto" - drop the dashed
    affordance so the box reads as a status card, not an active picker. */
