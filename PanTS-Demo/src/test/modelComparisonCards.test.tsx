@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -54,12 +54,25 @@ describe("model comparison cards", () => {
     expect(screen.getByText(/View only — files never leave your browser/)).toBeInTheDocument();
   });
 
-  it("hides the comparison once a model card is clicked", async () => {
+  it("stays put after a pick and moves the Selected badge to the clicked card", async () => {
     const user = userEvent.setup();
     await renderPage();
     await screen.findByText("Choose a model");
-    // Click the Atlas-Net card (via its description text -> nearest card).
-    await user.click(screen.getByText(/anatomically consistent/));
-    await waitFor(() => expect(screen.queryByText("Choose a model")).not.toBeInTheDocument());
+
+    // Default (pro) is ePAI - its card carries the Selected badge.
+    const epaiCard = screen.getByText(/Full abdominal organ segmentation/).closest("[role=radio]")!;
+    const atlasCard = screen.getByText(/anatomically consistent/).closest("[role=radio]")!;
+    expect(within(epaiCard as HTMLElement).getByText("Selected")).toBeInTheDocument();
+
+    await user.click(atlasCard);
+
+    // The section is still there and every card is still shown; the badge just
+    // moved to Atlas-Net.
+    expect(screen.getByText("Choose a model")).toBeInTheDocument();
+    expect(screen.getByText(/Full abdominal organ segmentation/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(atlasCard as HTMLElement).getByText("Selected")).toBeInTheDocument(),
+    );
+    expect(within(epaiCard as HTMLElement).queryByText("Selected")).not.toBeInTheDocument();
   });
 });
