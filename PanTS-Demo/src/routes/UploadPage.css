@@ -78,7 +78,7 @@
      box-sizing:border-box so min-height already accounts for the padding.
      It only grows past this if several files are queued at once. */
   box-sizing: border-box;
-  min-height: 280px;
+  min-height: 350px;
   padding: 24px;
   display: flex;
   flex-direction: column;
