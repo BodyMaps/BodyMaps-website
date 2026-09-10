@@ -355,6 +355,12 @@ const UploadPage: React.FC = () => {
   // same default), this goes false and the plan-aware default effect below
   // stops touching selectedModel, so it can never clobber a real choice.
   const modelTouchedRef = useRef(false);
+  // Whether the user has actively picked a model yet (from the dropdown or a
+  // comparison card) - distinct from modelTouchedRef, which the plan-aware
+  // default effect also flips. While this is false the "Choose a model"
+  // comparison of every model's info card is shown; once the user picks, it
+  // has served its purpose and is hidden.
+  const [modelChosen, setModelChosen] = useState(false);
   const [modelDropOpen, setModelDropOpen] = useState(false);
   // LesionSegmenter computes liver/pancreatic/kidney/colon lesions in one pass;
   // this selects which lesion to feature.
@@ -2193,6 +2199,7 @@ const UploadPage: React.FC = () => {
                           }
                           track("upload_select_model");
                           modelTouchedRef.current = true;
+                          setModelChosen(true);
                           setSelectedModel(m.id as typeof selectedModel);
                           setModelDropOpen(false);
                         }}
@@ -2265,6 +2272,7 @@ const UploadPage: React.FC = () => {
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   modelTouchedRef.current = true;
+                                  setModelChosen(true);
                                   setSelectedModel("LesionSegmenter");
                                   setLesionTarget(l.id);
                                   setModelDropOpen(false);
@@ -2662,56 +2670,54 @@ const UploadPage: React.FC = () => {
             );
           };
 
-          // ── Model info card: always visible, describes whichever model is
-          // currently selected in the picker - not just an empty-state filler
-          // for when there are no completed scans yet. Sits above Completed
-          // Uploads regardless of upload state. ──
-          const selectedModelLabel =
-            selectedModel === "None"
-              ? "None (view scan)"
-              : selectedModel === "LesionSegmenter"
-                ? `LesionSegmenter — ${
-                    LESION_OPTIONS.find((l) => l.id === lesionTarget)?.label ??
-                    "Pancreatic lesion"
-                  }`
-                : MODEL_OPTIONS.find((m) => m.id === selectedModel)?.label ?? null;
-          const selectedModelInfo = MODEL_OPTIONS.find((m) =>
-            m.id === (selectedModel === "" ? "None" : selectedModel),
-          );
-
-          // Steps the card to the previous/next entry in MODEL_OPTIONS (same
-          // list + same order the dropdown uses), wrapping at both ends. A
-          // locked target mirrors the dropdown's own click behavior - it opens
-          // the upgrade dialog instead of switching, rather than silently
-          // skipping past it.
-          const cycleModel = (dir: 1 | -1) => {
-            const currentId = selectedModel === "" ? "None" : selectedModel;
-            const idx = MODEL_OPTIONS.findIndex((m) => m.id === currentId);
-            const next =
-              MODEL_OPTIONS[
-                ((idx === -1 ? 0 : idx) + dir + MODEL_OPTIONS.length) % MODEL_OPTIONS.length
-              ];
-            if (modelLocked(next.id)) {
-              setUpgradeBlock({ reason: "model_locked", feature: next.label, plan: plan as PlanId });
+          // ── Model comparison: one info card per model so the user can weigh
+          // them against each other and pick. Clicking a card selects that
+          // model. The whole section is hidden once a pick is made (see
+          // modelChosen) - it's a decision aid, not a permanent panel; the
+          // pipeline dropdown above stays available to change models later. ──
+          const pickModelFromCard = (id: string) => {
+            if (!ensureAccount()) return;
+            const opt = MODEL_OPTIONS.find((m) => m.id === id);
+            if (modelLocked(id)) {
+              setUpgradeBlock({ reason: "model_locked", feature: opt?.label ?? id, plan: plan as PlanId });
               return;
             }
             track("upload_select_model");
             modelTouchedRef.current = true;
-            setSelectedModel(next.id as typeof selectedModel);
+            setModelChosen(true);
+            setSelectedModel(id as typeof selectedModel);
           };
-          const modelArrowBtn = {
-            width: "26px", height: "26px", borderRadius: "50%", flexShrink: 0,
-            background: "#ffffff", border: "1px solid rgba(0,0,0,0.14)", color: "#111111",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer", padding: 0,
-          } as const;
-
-          const modelCard = selectedModelInfo && (
-            <div style={{
-              background: "#f5f5f5", border: "1px solid rgba(0,0,0,0.08)", borderRadius: "12px",
-              padding: "20px", display: "flex", flexDirection: "column", gap: "14px",
-            }}>
-              <div style={{ display: "flex", gap: "16px" }}>
+          const currentModelId = selectedModel === "" ? "None" : selectedModel;
+          const modelBadge = (text: string, color: string) => (
+            <span style={{
+              fontFamily: "'Space Grotesk', sans-serif", fontSize: "9px", fontWeight: 700,
+              letterSpacing: "0.08em", textTransform: "uppercase", color,
+              border: `1px solid ${color}`, borderRadius: "4px", padding: "2px 5px", flexShrink: 0,
+            }}>{text}</span>
+          );
+          const modelCards = MODEL_OPTIONS.map((m) => {
+            const isCurrent = currentModelId === m.id;
+            const locked = modelLocked(m.id);
+            return (
+              <div
+                key={m.id}
+                role="radio"
+                aria-checked={isCurrent}
+                aria-label={`Select the ${m.label} model`}
+                tabIndex={0}
+                onClick={() => pickModelFromCard(m.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickModelFromCard(m.id); }
+                }}
+                style={{
+                  background: "#f5f5f5",
+                  border: isCurrent ? "1px solid #002d72" : "1px solid rgba(0,0,0,0.08)",
+                  boxShadow: isCurrent ? "0 0 0 3px rgba(0,45,114,0.10)" : "none",
+                  borderRadius: "12px", padding: "20px", display: "flex", gap: "16px",
+                  cursor: "pointer", textAlign: "left",
+                  transition: "border-color 0.15s, box-shadow 0.15s",
+                }}
+              >
                 <div style={{
                   width: "40px", height: "40px", borderRadius: "8px", flexShrink: 0,
                   background: "rgba(0,0,0,0.06)", border: "1px solid rgba(0,0,0,0.12)",
@@ -2722,16 +2728,21 @@ const UploadPage: React.FC = () => {
                     <circle cx="12" cy="12" r="2.5" />
                   </svg>
                 </div>
-                <div style={{ minWidth: 0, textAlign: "left" }}>
-                  <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "13px", fontWeight: 600, color: "#111111" }}>
-                    {selectedModelLabel}
+                <div style={{ minWidth: 0 }}>
+                  <div style={{
+                    fontFamily: "'Space Grotesk', sans-serif", fontSize: "13px", fontWeight: 600, color: "#111111",
+                    display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap",
+                  }}>
+                    {m.label}
+                    {isCurrent && modelBadge("Selected", "#002d72")}
+                    {locked && modelBadge("Donate", "#8f6a00")}
                   </div>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "#8f8f8f", marginTop: "3px" }}>
-                    {selectedModelInfo.desc}
+                    {m.desc}
                   </div>
-                  {selectedModelInfo.details && (
+                  {m.details && (
                     <ul style={{ margin: "10px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: "4px" }}>
-                      {selectedModelInfo.details.map((line, i) => (
+                      {m.details.map((line, i) => (
                         <li key={i} style={{
                           fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "#6a6a6a",
                           lineHeight: 1.5, paddingLeft: "12px", position: "relative",
@@ -2744,29 +2755,22 @@ const UploadPage: React.FC = () => {
                   )}
                 </div>
               </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                <button type="button" aria-label="Previous model" title="Previous model"
-                  onClick={() => cycleModel(-1)} style={modelArrowBtn}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M15 18l-6-6 6-6" />
-                  </svg>
-                </button>
-                <button type="button" aria-label="Next model" title="Next model"
-                  onClick={() => cycleModel(1)} style={modelArrowBtn}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 18l6-6-6-6" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          );
+            );
+          });
 
           return (
             <>
-              <div style={{ marginTop: "32px" }}>
-                <SectionLabel>Model</SectionLabel>
-                {modelCard}
-              </div>
+              {!modelChosen && (
+                <div style={{ marginTop: "32px" }}>
+                  <SectionLabel>Choose a model</SectionLabel>
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "#8f8f8f", marginTop: "-8px", marginBottom: "12px" }}>
+                    Compare what each model does and click one to pick it. This goes away once you choose - use the Model dropdown above to change it later.
+                  </div>
+                  <div role="radiogroup" aria-label="Segmentation model" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {modelCards}
+                  </div>
+                </div>
+              )}
 
               {finished.length > 0 && (
                 <div style={{ marginTop: "32px" }}>
