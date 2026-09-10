@@ -13,7 +13,6 @@ import {
 	IconCopy,
 	IconWaveSine,
 	IconCircleDashed,
-	IconCheck,
 } from "@tabler/icons-react";
 import "./AnnotationToolbar.css";
 import NumberSliderField from "../NumberSliderField";
@@ -26,45 +25,11 @@ import type { GuidedFlowControls } from "../segmentation/SliceAnchorPickerUI";
 // re-appear on every fresh page load/reload, not just once ever per browser.
 const OVERVIEW_WALKTHROUGH_SEEN_KEY = "mm_annotation_walkthrough_seen";
 const FIRST_TARGET_HINT_SEEN_KEY = "mm_annotation_first_target_hint_seen";
-const SHORTCUTS_INTRO_SEEN_KEY = "mm_annotation_shortcuts_intro_seen";
 // Guided-flow (Continue / Start over / Exit) explainer. Each guided tool
 // (Grow from Seeds, Copy across slices, Fill between slices, Islands) gets
 // its OWN "seen" flag — so seeing the explainer for one doesn't suppress it
 // for the others — even though several of them share the same wording.
 const GUIDED_HINT_SEEN_KEY_PREFIX = "mm_annotation_guided_hint_seen_";
-
-// Grouped keyboard shortcuts shown once, the moment the annotation toolbar
-// itself is opened (see SHORTCUTS_INTRO_SEEN_KEY below). Kept as plain data
-// rather than JSX so the popup's layout stays entirely in one component.
-const SHORTCUT_GROUPS: Array<{ label: string; rows: Array<{ label: string; keys: string[] }> }> = [
-	{
-		label: "Navigation",
-		rows: [
-			{ label: "Step one slice", keys: ["["] },
-			{ label: "Step 10 slices", keys: ["Shift", "["] },
-			{ label: "Zoom in to cursor", keys: ["+"] },
-			{ label: "Zoom out from cursor", keys: ["-"] },
-			{ label: "Reset zoom to fit", keys: ["Ctrl", "0"] },
-			{ label: "First / last slice", keys: ["Home"] },
-		],
-	},
-	{
-		label: "While drawing a shape",
-		rows: [
-			{ label: "Close the shape", keys: ["Enter"] },
-			{ label: "Cancel the shape", keys: ["Esc"] },
-			{ label: "Undo last point", keys: ["Ctrl", "Z"] },
-		],
-	},
-	{
-		label: "Editing",
-		rows: [
-			{ label: "Undo / redo edit", keys: ["Ctrl", "Z"] },
-			{ label: "Redo edit", keys: ["Shift", "Ctrl", "Z"] },
-			{ label: "Resize brush ±2mm", keys: ["Shift", "["] },
-		],
-	},
-];
 
 export type PrimaryEditTool =
 	| "paint" | "erase" | "scissors" | "levelTracing"
@@ -343,57 +308,6 @@ function IconTooltip({
 	);
 }
 
-/** First-use popup listing the annotation keyboard shortcuts, portaled to
- *  <body> and centered over the whole viewer (not anchored to the ribbon —
- *  it's a one-time orientation card, not a per-tool flyout). Shown once
- *  (see SHORTCUTS_INTRO_SEEN_KEY) the moment the annotation toolbar opens. */
-function ShortcutsIntroPopup({ onDismiss }: { onDismiss: () => void }) {
-	return createPortal(
-		<div
-			className="atb-shortcuts-overlay"
-			onMouseDown={(e) => { if (e.target === e.currentTarget) onDismiss(); }}
-		>
-			<div className="atb-shortcuts-card" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
-				<div className="atb-shortcuts-card__header">
-					<div>
-						<p className="atb-shortcuts-card__title">Keyboard shortcuts</p>
-						<p className="atb-shortcuts-card__subtitle">Some shortcuts to help you while annotating.</p>
-					</div>
-					<button type="button" className="atb-shortcuts-card__close" onClick={onDismiss} aria-label="Close">
-						<IconCheck size={0} style={{ display: "none" }} />
-						×
-					</button>
-				</div>
-				<div className="atb-shortcuts-card__body">
-					{SHORTCUT_GROUPS.map((group) => (
-						<div className="atb-shortcuts-group" key={group.label}>
-							<p className="atb-shortcuts-group__label">{group.label}</p>
-							{group.rows.map((row) => (
-								<div className="atb-shortcuts-row" key={row.label}>
-									<span className="atb-shortcuts-row__label">{row.label}</span>
-									<span className="atb-shortcuts-row__keys">
-										{row.keys.map((k, i) => (
-											<span key={k + i} style={{ display: "inline-flex", alignItems: "center" }}>
-												{i > 0 && <span className="atb-shortcuts-row__keys-sep">+</span>}
-												<span className="atb-kbd">{k}</span>
-											</span>
-										))}
-									</span>
-								</div>
-							))}
-						</div>
-					))}
-				</div>
-				<div className="atb-shortcuts-card__footer">
-					<button type="button" className="atb-shortcuts-card__got-it" onClick={onDismiss}>
-						Got it
-					</button>
-				</div>
-			</div>
-		</div>,
-		document.body
-	);
-}
 export default function AnnotationToolbar({
 	open, hasSegments, hasActiveTarget, activeTool, onToolChange,
 	diameterMm, onDiameterChange, onDiameterPreviewChange, scissorsOptions, onScissorsOptionsChange,
@@ -426,10 +340,6 @@ export default function AnnotationToolbar({
 	const [firstTargetHintOpen, setFirstTargetHintOpen] = useState(false);
 	const [firstTargetHintRect, setFirstTargetHintRect] = useState<DOMRect | null>(null);
 	const prevHasActiveTargetRef = useRef(hasActiveTarget);
-	// First-use shortcuts popup — shown the first time any tool icon in the
-	// ribbon is clicked (once a target class is already active, since a
-	// disabled icon click goes through pickClassHintOpen instead).
-	const [shortcutsIntroOpen, setShortcutsIntroOpen] = useState(false);
 	// "Explain Continue/Start over/Exit" — shown the first time a guided flow
 	// (Grow from Seeds, Copy/Fill-across-slices, Islands' pick ops) actually
 	// surfaces those controls, once per flow family per session.
@@ -674,25 +584,6 @@ export default function AnnotationToolbar({
 		if (!alreadySeen) setOverviewWalkthroughOpen(true);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [open]);
-
-	// Shortcuts popup: fires the moment the annotation toolbar itself is
-	// opened (the "Annotate" button in the main topbar, alongside
-	// Measurements/AI) — not tied to picking a class or clicking a tool
-	// icon. Once per session via SHORTCUTS_INTRO_SEEN_KEY.
-	useEffect(() => {
-		if (!open) return;
-		let alreadySeen = false;
-		try {
-			alreadySeen = typeof window !== "undefined" && window.sessionStorage.getItem(SHORTCUTS_INTRO_SEEN_KEY) === "1";
-		} catch { /* sessionStorage unavailable — just show it */ }
-		if (alreadySeen) return;
-		setShortcutsIntroOpen(true);
-		try {
-			if (typeof window !== "undefined") window.sessionStorage.setItem(SHORTCUTS_INTRO_SEEN_KEY, "1");
-		} catch { /* not worth blocking on */ }
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [open]);
-
 
 	// Same reasoning as the overview walkthrough's own measuring effect just
 	// above: the popup can be dragged, so there's no single event to hook —
@@ -1273,8 +1164,6 @@ export default function AnnotationToolbar({
 			</>
 		)}
 
-
-		{shortcutsIntroOpen && <ShortcutsIntroPopup onDismiss={() => setShortcutsIntroOpen(false)} />}
 
 		{open && guidedHintOpen && guidedHintRect && (
 			<>

@@ -77,7 +77,12 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.25s ease;
+  /* Only the hover/drag-over colour cues animate. NEVER transition size
+     (padding/width/height): the page re-renders on a 1s ticker while a run is
+     in flight, and `transition: all` turned every sub-pixel reflow between
+     renders into a 250ms height animation - the box looked like it was
+     perpetually breathing. */
+  transition: border-color 0.25s ease, background-color 0.25s ease;
   margin-bottom: 24px;
   position: relative;
 }
