@@ -355,12 +355,6 @@ const UploadPage: React.FC = () => {
   // same default), this goes false and the plan-aware default effect below
   // stops touching selectedModel, so it can never clobber a real choice.
   const modelTouchedRef = useRef(false);
-  // Whether the user has actively picked a model yet (from the dropdown or a
-  // comparison card) - distinct from modelTouchedRef, which the plan-aware
-  // default effect also flips. While this is false the "Choose a model"
-  // comparison of every model's info card is shown; once the user picks, it
-  // has served its purpose and is hidden.
-  const [modelChosen, setModelChosen] = useState(false);
   const [modelDropOpen, setModelDropOpen] = useState(false);
   // LesionSegmenter computes liver/pancreatic/kidney/colon lesions in one pass;
   // this selects which lesion to feature.
@@ -2199,7 +2193,6 @@ const UploadPage: React.FC = () => {
                           }
                           track("upload_select_model");
                           modelTouchedRef.current = true;
-                          setModelChosen(true);
                           setSelectedModel(m.id as typeof selectedModel);
                           setModelDropOpen(false);
                         }}
@@ -2272,7 +2265,6 @@ const UploadPage: React.FC = () => {
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   modelTouchedRef.current = true;
-                                  setModelChosen(true);
                                   setSelectedModel("LesionSegmenter");
                                   setLesionTarget(l.id);
                                   setModelDropOpen(false);
@@ -2670,11 +2662,11 @@ const UploadPage: React.FC = () => {
             );
           };
 
-          // ── Model comparison: one info card per model so the user can weigh
-          // them against each other and pick. Clicking a card selects that
-          // model. The whole section is hidden once a pick is made (see
-          // modelChosen) - it's a decision aid, not a permanent panel; the
-          // pipeline dropdown above stays available to change models later. ──
+          // ── Model comparison: one info card per model, always shown, so the
+          // models can be weighed against each other. Clicking a card selects
+          // it (the pipeline dropdown does the same); the selected card is
+          // outlined + badged. The section stays put - it doesn't collapse or
+          // rearrange based on what's been picked. ──
           const pickModelFromCard = (id: string) => {
             if (!ensureAccount()) return;
             const opt = MODEL_OPTIONS.find((m) => m.id === id);
@@ -2684,7 +2676,6 @@ const UploadPage: React.FC = () => {
             }
             track("upload_select_model");
             modelTouchedRef.current = true;
-            setModelChosen(true);
             setSelectedModel(id as typeof selectedModel);
           };
           const currentModelId = selectedModel === "" ? "None" : selectedModel;
@@ -2760,17 +2751,16 @@ const UploadPage: React.FC = () => {
 
           return (
             <>
-              {!modelChosen && (
-                <div style={{ marginTop: "32px" }}>
-                  <SectionLabel>Choose a model</SectionLabel>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "#8f8f8f", marginTop: "-8px", marginBottom: "12px" }}>
-                    Compare what each model does and click one to pick it. This goes away once you choose - use the Model dropdown above to change it later.
-                  </div>
-                  <div role="radiogroup" aria-label="Segmentation model" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                    {modelCards}
-                  </div>
+              <div style={{ marginTop: "32px" }}>
+                <SectionLabel>Choose a model</SectionLabel>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "#8f8f8f", marginTop: "-8px", marginBottom: "12px" }}>
+                  Compare what each model does and click one to pick it - or use the Model dropdown above.
                 </div>
-              )}
+                <div role="radiogroup" aria-label="Segmentation model" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  {modelCards}
+                </div>
+              </div>
+
 
               {finished.length > 0 && (
                 <div style={{ marginTop: "32px" }}>
