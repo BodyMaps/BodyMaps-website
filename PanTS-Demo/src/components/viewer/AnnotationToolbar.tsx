@@ -24,7 +24,6 @@ import type { GuidedFlowControls } from "../segmentation/SliceAnchorPickerUI";
 // Deliberately sessionStorage rather than localStorage — these are meant to
 // re-appear on every fresh page load/reload, not just once ever per browser.
 const OVERVIEW_WALKTHROUGH_SEEN_KEY = "mm_annotation_walkthrough_seen";
-const FIRST_TARGET_HINT_SEEN_KEY = "mm_annotation_first_target_hint_seen";
 // Guided-flow (Continue / Start over / Exit) explainer. Each guided tool
 // (Grow from Seeds, Copy across slices, Fill between slices, Islands) gets
 // its OWN "seen" flag — so seeing the explainer for one doesn't suppress it
@@ -335,11 +334,6 @@ export default function AnnotationToolbar({
 	// (disabled buttons don't fire onClick, so this replaces that silent no-op).
 	const [pickClassHintOpen, setPickClassHintOpen] = useState(false);
 	const [pickClassHintRect, setPickClassHintRect] = useState<DOMRect | null>(null);
-	// One-off nudge shown the first time a target class gets picked, separate
-	// from the overview tour (which may already be dismissed by then).
-	const [firstTargetHintOpen, setFirstTargetHintOpen] = useState(false);
-	const [firstTargetHintRect, setFirstTargetHintRect] = useState<DOMRect | null>(null);
-	const prevHasActiveTargetRef = useRef(hasActiveTarget);
 	// "Explain Continue/Start over/Exit" — shown the first time a guided flow
 	// (Grow from Seeds, Copy/Fill-across-slices, Islands' pick ops) actually
 	// surfaces those controls, once per flow family per session.
@@ -611,40 +605,6 @@ export default function AnnotationToolbar({
 	}, [hasActiveTarget]);
 
 	const dismissPickClassHint = useCallback(() => setPickClassHintOpen(false), []);
-
-	// Fires on the false -> true transition only (a ref, not state, tracks
-	// "previous" so this doesn't re-fire on every render while already
-	// true). Marks itself seen immediately on trigger — not on dismiss —
-	// so it can never show a second time even if the tab closes before
-	// "Got it" is pressed.
-	useEffect(() => {
-		const wasActive = prevHasActiveTargetRef.current;
-		prevHasActiveTargetRef.current = hasActiveTarget;
-		if (wasActive || !hasActiveTarget) return;
-		let alreadySeen = false;
-		try {
-			alreadySeen = typeof window !== "undefined" && window.sessionStorage.getItem(FIRST_TARGET_HINT_SEEN_KEY) === "1";
-		} catch { /* sessionStorage unavailable — just show it */ }
-		if (alreadySeen) return;
-		setFirstTargetHintOpen(true);
-		try {
-			if (typeof window !== "undefined") window.sessionStorage.setItem(FIRST_TARGET_HINT_SEEN_KEY, "1");
-		} catch { /* not worth blocking on */ }
-	}, [hasActiveTarget]);
-
-	useLayoutEffect(() => {
-		if (!firstTargetHintOpen) return;
-		const measure = () => setFirstTargetHintRect(dockElRef.current ? dockElRef.current.getBoundingClientRect() : null);
-		measure();
-		window.addEventListener("resize", measure);
-		const id = window.setInterval(measure, 200);
-		return () => {
-			window.removeEventListener("resize", measure);
-			window.clearInterval(id);
-		};
-	}, [firstTargetHintOpen]);
-
-	const dismissFirstTargetHint = useCallback(() => setFirstTargetHintOpen(false), []);
 
 	const enabled = hasSegments && hasActiveTarget;
 
@@ -1104,66 +1064,6 @@ export default function AnnotationToolbar({
 				</div>
 			</>
 		)}
-
-		{open && firstTargetHintOpen && firstTargetHintRect && (
-			<>
-				<div
-					aria-hidden="true"
-					style={{
-						position: "fixed",
-						top: firstTargetHintRect.top,
-						left: firstTargetHintRect.left,
-						width: firstTargetHintRect.width,
-						height: firstTargetHintRect.height,
-						border: "2px dashed var(--jhu-blue-accent, #68ACE5)",
-						borderRadius: 8,
-						pointerEvents: "none",
-						zIndex: 120,
-						boxShadow: "0 0 0 4000px rgba(0,0,0,0.35)",
-					}}
-				/>
-				<div
-					role="dialog"
-					aria-label="Start annotating"
-					style={{
-						position: "fixed",
-						top: firstTargetHintRect.bottom + 10,
-						left: firstTargetHintRect.left,
-						width: 260,
-						background: "#16181d",
-						border: "1px solid rgba(255,255,255,0.14)",
-						borderRadius: 12,
-						boxShadow: "0 18px 44px -12px rgba(0,0,0,0.75)",
-						padding: "14px 16px",
-						zIndex: 121,
-						color: "#fff",
-					}}
-				>
-					<div style={{ fontSize: 13, lineHeight: 1.5, color: "rgba(255,255,255,0.9)" }}>
-						Click any of these icons to start annotating.
-					</div>
-					<button
-						type="button"
-						onClick={dismissFirstTargetHint}
-						style={{
-							marginTop: 12,
-							width: "100%",
-							background: "#fff",
-							color: "#08090b",
-							border: "none",
-							borderRadius: 8,
-							fontSize: 12.5,
-							fontWeight: 700,
-							padding: "8px 0",
-							cursor: "pointer",
-						}}
-					>
-						Got it
-					</button>
-				</div>
-			</>
-		)}
-
 
 		{open && guidedHintOpen && guidedHintRect && (
 			<>
