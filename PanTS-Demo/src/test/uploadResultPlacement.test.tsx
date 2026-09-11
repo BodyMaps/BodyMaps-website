@@ -105,6 +105,10 @@ describe("completed inference actions", () => {
     expect(doneBar.closest(".dropzone")).toBe(dropzone);
     // No Cancel button left once there's nothing to cancel.
     expect(screen.queryByRole("button", { name: "Cancel all" })).not.toBeInTheDocument();
+    // The spinning icon next to the status line stops once nothing is running -
+    // it was previously left spinning forever alongside "Inference complete".
+    expect(dropzone.querySelector(".upload-spinner")).toBeNull();
+    expect(dropzone.querySelector(".proc-done-icon")).not.toBeNull();
 
     // Viewing it releases the slot - the box goes back to normal instead of
     // holding onto a finished batch forever.
