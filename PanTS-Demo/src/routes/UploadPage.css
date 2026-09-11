@@ -119,6 +119,9 @@
   border-color: rgba(22, 163, 74, .5);
   background: rgba(22, 163, 74, .07);
 }
+.dropzone.dropzone--has-result {
+  padding: 48px 24px 24px;
+}
 .dropzone-icon {
   width: 48px;
   height: 48px;
@@ -802,25 +805,52 @@
 
 /* ── Result actions ── */
 .result-section {
-  margin-top: 20px;
-  padding: 16px 20px;
-  background: rgba(0,0,0,.03);
-  border: 1px solid rgba(0,0,0,.08);
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 24px;
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid rgba(22, 163, 74, .24);
   border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .04);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  text-align: left;
+  cursor: default;
 }
 .result-title {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #111111;
-  margin-bottom: 12px;
+  color: #166534;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+}
+.result-title-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(22, 163, 74, .1);
+  color: #15803d;
+}
+.result-title-icon svg {
+  width: 14px;
+  height: 14px;
 }
 .result-btns {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .result-btn {
   padding: 9px 20px;
@@ -848,6 +878,22 @@
   background: #1B2436;
   border-color: #1B2436;
   color: #ffffff;
+}
+
+@media (max-width: 720px) {
+  .dropzone.dropzone--has-result {
+    padding: 32px 16px 16px;
+  }
+
+  .result-section {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .result-btns {
+    justify-content: flex-start;
+  }
 }
 
 /* ── Status messages ── */
