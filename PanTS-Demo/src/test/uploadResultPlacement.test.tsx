@@ -6,6 +6,7 @@ import { AuthProvider } from "../contexts/authContext";
 import UploadPage from "../routes/UploadPage";
 
 const USER = { id: "u1", email: "test.user@example.com", name: null, plan: "pro" };
+const CHUNK_SIZE = 512 * 1024;
 
 const json = (body: unknown) => ({
   ok: true,
@@ -14,6 +15,9 @@ const json = (body: unknown) => ({
   text: async () => "",
   headers: { get: () => "application/json" },
 });
+
+const makeFile = (name: string) =>
+  new File([new Uint8Array(CHUNK_SIZE)], name, { type: "application/gzip" });
 
 describe("completed inference actions", () => {
   beforeEach(() => {
@@ -39,13 +43,13 @@ describe("completed inference actions", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  // A finished run used to render its "Inference Complete" panel AS A CHILD of
-  // the drop zone - that made the box's own rendered size depend on whether a
-  // run had finished (undoing the "drop zone is always the same size"
-  // fix) and visually overlapped the dashed border. It's now a sibling card
-  // directly beneath the drop zone instead: same prominent spot, but the
-  // drop zone itself never changes shape.
-  it("renders the completed panel as its own card below the drop zone, not nested inside it", async () => {
+  // The panel used to render as a stand-alone card below the drop zone (added
+  // there, then it visibly overlapped the box while also making the box's own
+  // size depend on whether a run had finished). It's back to living INSIDE the
+  // drop zone now - but in the SAME slot that showed the file chip and then
+  // the progress card, replacing them in place rather than a new box
+  // appearing anywhere else on the page.
+  it("replaces the file chip / progress card in place, doesn't add a panel elsewhere", async () => {
     const user = userEvent.setup();
     const { container } = render(
       <AuthProvider>
@@ -69,9 +73,44 @@ describe("completed inference actions", () => {
 
     const completedPanel = await screen.findByRole("status");
     expect(completedPanel).toHaveTextContent("Inference Complete");
-    // Not nested inside the drop zone...
-    expect(completedPanel.closest(".dropzone")).toBeNull();
-    // ...and the drop zone's own classes are unaffected by the result existing.
+    // In the drop zone's own slot...
+    expect(completedPanel.closest(".dropzone")).toBe(dropzone);
+    // ...one panel only, and the drop zone's class list is unaffected (no
+    // has-result-style modifier reappearing to resize the box by state).
+    expect(screen.getAllByRole("status")).toHaveLength(1);
     expect(dropzone.className).toBe(dropzoneClassBefore);
+  });
+
+  it("relabels the batch progress bar to Inference complete in the same slot, once all scans finish", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <AuthProvider>
+        <MemoryRouter>
+          <UploadPage />
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByText(/to run inference/)).not.toBeInTheDocument(),
+    );
+
+    const dropzone = container.querySelector(".dropzone")!;
+    const input = container.querySelector<HTMLInputElement>('input[accept=".nii,.gz"]')!;
+    await user.upload(input, [makeFile("a.nii.gz"), makeFile("b.nii.gz")]);
+    await waitFor(() => expect(screen.getAllByText(/ready/).length).toBe(2));
+    await user.click(screen.getByRole("button", { name: "Run" }));
+
+    const doneBar = await screen.findByText("Inference complete", {}, { timeout: 5000 });
+    expect(doneBar.closest(".dropzone")).toBe(dropzone);
+    // No Cancel button left once there's nothing to cancel.
+    expect(screen.queryByRole("button", { name: "Cancel all" })).not.toBeInTheDocument();
+
+    // Viewing it releases the slot - the box goes back to normal instead of
+    // holding onto a finished batch forever.
+    await user.click(screen.getByRole("button", { name: "View details" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Inference complete")).not.toBeInTheDocument(),
+    );
   });
 });

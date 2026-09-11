@@ -283,6 +283,14 @@ const UploadPage: React.FC = () => {
   const uploadAbortRef = useRef<Map<string, AbortController>>(new Map());
   // Which session currently drives the foreground upload progress bar.
   const foregroundUploadSidRef = useRef<string | null>(null);
+  // The batch (if any) claiming the drop zone's status slot right now. Set the
+  // moment a batch run starts, cleared when a different run starts or the
+  // finished batch is dismissed (View details) - so a just-finished batch
+  // keeps showing "Inference complete" in the SAME box that showed its
+  // progress, instead of the box going empty while a new panel appears
+  // elsewhere. Single-scan runs use sessionId/inferenceCompleted for the same
+  // purpose (see the drop zone render below).
+  const trackedBatchIdRef = useRef<string | null>(null);
   // Uploads run ONE FILE AT A TIME through this chain. Total upload time is
   // bandwidth-bound either way, but serializing makes the first file land at
   // ~T/N instead of ~T - and since each file is dispatched to the server's job
@@ -1605,6 +1613,11 @@ const UploadPage: React.FC = () => {
       items.length > 1
         ? { batchId: crypto.randomUUID(), batchLabel: `${items.length} scans` }
         : undefined;
+    // This run claims the drop zone's status slot - a single scan uses
+    // sessionId/inferenceCompleted for that (set inside startScanRun), a
+    // batch uses this ref. Either way, starting a new run releases whatever
+    // the slot was previously showing.
+    trackedBatchIdRef.current = batch ? batch.batchId : null;
 
     // Snapshot then clear the selection, and queue every scan's run. Each lands
     // on the upload chain in selection order and is dispatched to the GPU queue
@@ -1736,12 +1749,45 @@ const UploadPage: React.FC = () => {
   // page - the same box that took the upload keeps showing its status.
   const groups = groupUploads(recentUploads);
   const inFlight = groups.filter(isGroupInFlight);
-  const { recent: finished, older } = splitByAge(groups.filter(g => !isGroupInFlight(g)));
   const closeNote = closeInfo.active
     ? closeInfo.eta === null
       ? "keep tab open"
       : `safe to close in ${formatEta(closeInfo.eta)}`
     : "safe to close";
+
+  // The batch currently claiming the drop zone's status slot (see
+  // trackedBatchIdRef), once it's fully resolved (no scan in it still
+  // Processing). Single-scan completion uses sessionId/inferenceCompleted
+  // instead - resolved separately below, right where it's rendered.
+  const trackedBatchId = trackedBatchIdRef.current;
+  const activeBatchGroup = trackedBatchId
+    ? groups.find((g) => g.kind === "batch" && g.batchId === trackedBatchId)
+    : undefined;
+  const activeBatchCompleted =
+    activeBatchGroup && activeBatchGroup.kind === "batch" && !isGroupInFlight(activeBatchGroup)
+      ? activeBatchGroup
+      : undefined;
+  // finishSession sets sessionId/inferenceCompleted for EVERY finished scan,
+  // batch members included (the last one to finish wins) - so this only
+  // counts as "a single scan just finished" when that session isn't part of
+  // a batch, letting the batch branch above take it instead.
+  const singleCompletedVisible =
+    inferenceCompleted &&
+    !!sessionId &&
+    !recentUploads.find((u) => u.sessionId === sessionId)?.batchId;
+
+  // Completed Uploads (below) lists everything finished-and-unviewed - EXCEPT
+  // whatever the drop zone itself is currently showing as just-completed, so
+  // that scan/batch doesn't appear twice on the page at once. It reappears
+  // there normally once its drop-zone slot is released.
+  const { recent: finished, older } = splitByAge(
+    groups.filter((g) => {
+      if (isGroupInFlight(g)) return false;
+      if (activeBatchCompleted && g.kind === "batch" && g.batchId === activeBatchCompleted.batchId) return false;
+      if (singleCompletedVisible && g.kind === "single" && g.upload.sessionId === sessionId) return false;
+      return true;
+    }),
+  );
 
   // ── A single in-flight scan (not part of a batch) ──
   const ProcessingCard = ({ u }: { u: RecentUpload }) => {
@@ -1824,6 +1870,85 @@ const UploadPage: React.FC = () => {
     </div>
   );
 
+  // ── A single scan's finished state, shown in the SAME drop-zone slot that
+  // showed its progress (and its file chip before that) - not a separate
+  // panel appearing elsewhere on the page. ──
+  const singleCompletedCard = singleCompletedVisible && (
+    <div
+      className="result-section dropzone-completed"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="result-title" role="status">
+        <span className="result-title-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+        </span>
+        <span>Inference Complete</span>
+      </div>
+      <div className="result-btns">
+        {selectedModel === "OpenVAE" ? (
+          <>
+            <button
+              className="result-btn"
+              onClick={() => {
+                setRecentUploads(markRecentUploadViewed(sessionId));
+                navigate(`/reconstruction/${sessionId}`);
+              }}
+            >
+              View Reconstruction
+            </button>
+            <button className="result-btn" onClick={handleRunEpaiOnReconstruction}>
+              Run ePAI on Result
+            </button>
+            <button className="result-btn" onClick={() => downloadResult(sessionId)}>
+              Download
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="result-btn result-btn-primary"
+              onClick={() => {
+                setRecentUploads(markRecentUploadViewed(sessionId));
+                navigate(`/session/${sessionId}`);
+              }}
+            >
+              View Visualization
+            </button>
+            <button className="result-btn" onClick={() => downloadResult(sessionId)}>
+              Download Results
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  // ── A batch's finished state, same idea: the ProcessingSummaryBar that
+  // showed its progress just relabels itself instead of being replaced by
+  // something else. No Cancel button (nothing left to cancel); View details
+  // also releases the slot, so the box returns to normal once it's been seen. ──
+  const batchCompletedCard = activeBatchCompleted && (
+    <div className="dropzone-completed" onClick={(e) => e.stopPropagation()} style={{ width: "100%" }}>
+      <ProcessingSummaryBar
+        title={activeBatchCompleted.label}
+        running={0}
+        done={activeBatchCompleted.uploads.filter((u) => u.status === "Completed").length}
+        statusLabel={
+          activeBatchCompleted.uploads.every((u) => u.status === "Completed")
+            ? "Inference complete"
+            : `Completed - ${activeBatchCompleted.uploads.filter((u) => u.status === "Failed" || u.status === "Cancelled").length} failed`
+        }
+        onViewDetails={() => {
+          track("upload_open_batch_details");
+          setDetailsBatchId(activeBatchCompleted.batchId);
+          trackedBatchIdRef.current = null;
+        }}
+      />
+    </div>
+  );
+
   return (
     <div className="upload-page-wrapper">
       {/* Ambient glow */}
@@ -1840,10 +1965,14 @@ const UploadPage: React.FC = () => {
           <div
             className={`dropzone${isDragOver ? " drag-over" : ""}${allUploadsDone ? " dropzone--all-done" : ""}`}
             onClick={() => {
-              // While a run is in-flight and nothing new is selected yet, this
-              // box is showing status, not the picker - a stray click on the
-              // card's own padding shouldn't pop the file dialog.
-              if (selectedItems.length === 0 && inFlight.length > 0) return;
+              // While a run is in-flight, or just finished and still showing
+              // its result here, this box is showing status, not the picker -
+              // a stray click on the card's own padding shouldn't pop the
+              // file dialog.
+              if (
+                selectedItems.length === 0 &&
+                (inFlight.length > 0 || singleCompletedVisible || activeBatchCompleted)
+              ) return;
               if (ensureAccount()) fileInputRef.current?.click();
             }}
             onDrop={handleDrop}
@@ -1893,6 +2022,13 @@ const UploadPage: React.FC = () => {
               // watch it instead of reverting to the empty picker while a
               // separate card appears elsewhere on the page.
               inFlightCards
+            ) : selectedItems.length === 0 && singleCompletedVisible ? (
+              // The run that WAS showing progress in this box just finished -
+              // it keeps the same slot rather than the box going empty while a
+              // result panel pops up elsewhere.
+              singleCompletedCard
+            ) : selectedItems.length === 0 && activeBatchCompleted ? (
+              batchCompletedCard
             ) : selectedItems.length === 0 ? (
               <>
                 <svg
@@ -2016,79 +2152,6 @@ const UploadPage: React.FC = () => {
               </button>
             </div>
           </div>
-
-          {/* ── Result actions: its own card directly under the drop zone, NOT
-              inside it - nesting this here previously made the dropzone's
-              rendered size depend on whether a run had finished (the exact
-              thing #235 fixed the box to stop doing), and visually the card
-              overlapped the dashed border. ── */}
-          {inferenceCompleted && sessionId && (
-            <div
-              className="result-section"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="result-title" role="status">
-                <span className="result-title-icon" aria-hidden="true">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                </span>
-                <span>Inference Complete</span>
-              </div>
-              <div className="result-btns">
-                {selectedModel === "OpenVAE" ? (
-                  <>
-                    <button
-                      className="result-btn"
-                      onClick={() => {
-                        setRecentUploads(markRecentUploadViewed(sessionId));
-                        navigate(`/reconstruction/${sessionId}`);
-                      }}
-                    >
-                      View Reconstruction
-                    </button>
-                    <button
-                      className="result-btn"
-                      onClick={handleRunEpaiOnReconstruction}
-                    >
-                      Run ePAI on Result
-                    </button>
-                    <button
-                      className="result-btn"
-                      onClick={() => downloadResult(sessionId)}
-                    >
-                      Download
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      className="result-btn result-btn-primary"
-                      onClick={() => {
-                        setRecentUploads(markRecentUploadViewed(sessionId));
-                        navigate(`/session/${sessionId}`);
-                      }}
-                    >
-                      View Visualization
-                    </button>
-                    <button
-                      className="result-btn"
-                      onClick={() => downloadResult(sessionId)}
-                    >
-                      Download Results
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* ── Pre-inference preview: inspect the selected scan before running a model ── */}
           {previewItem && !isUploading && (
