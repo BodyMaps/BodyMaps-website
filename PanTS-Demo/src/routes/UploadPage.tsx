@@ -71,6 +71,16 @@ const MODEL_OPTIONS: {
       "Optimized for speed over the broader organ coverage ePAI or Atlas-Net provide.",
     ],
   },
+  {
+    id: "AtlasNet-Organs",
+    label: "AtlasNet-Organs",
+    desc: "For liver segments and detailed anatomy",
+  },
+  {
+    id: "AtlasNet-Tumors",
+    label: "AtlasNet-Tumors",
+    desc: "For tumors located to a liver segment",
+  },
 ];
 import { useNavigate } from "react-router-dom";
 import "./UploadPage.css";
@@ -347,6 +357,8 @@ const UploadPage: React.FC = () => {
     | "MedFormer"
     | "R-Super"
     | "Atlas-Net"
+    | "AtlasNet-Organs"
+    | "AtlasNet-Tumors"
     | "LesionSegmenter"
     | ""
   >("None");

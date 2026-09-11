@@ -246,6 +246,18 @@ def run_auto_segmentation(input_path, session_dir, model, session_id=None, on_st
                 conda_path=conda_path,
                 atlasnet_env_name=os.getenv("CONDA_ENV_ATLASNET", "epai"),
             )
+        elif model == 'AtlasNet-Organs':
+            return _run_atlasnet_organs_inference(
+                input_path=input_path,
+                session_dir=session_dir,
+                atlasnet_organs_env_name=os.getenv("CONDA_ENV_ATLASNET_ORGANS", "atlasnet"),
+            )
+        elif model == 'AtlasNet-Tumors':
+            return _run_atlasnet_tumors_inference(
+                input_path=input_path,
+                session_dir=session_dir,
+                atlasnet_env_name=os.getenv("CONDA_ENV_ATLASNET_TUMORS", "atlasnet"),
+            )
         elif model == 'ShapeKit':
             return _run_shapekit_inference(input_dir=input_path, session_dir=session_dir)
         elif model == 'LesionSegmenter':
@@ -275,6 +287,15 @@ _VIEWER_LABELS = {
     "intestine": 29, "renal_vein_left": 30, "renal_vein_right": 31, "cbd_stent": 32,
     # LesionSegmenter extra lesion classes (pancreatic_lesion already at 22)
     "liver_lesion": 33, "kidney_lesion": 34, "colon_lesion": 35,
+    # AtlasNet-Organs additions. The Couinaud segments are why this model is
+    # here: combined_labels is a flat volume, so a voxel is either "liver" or
+    # "liver_segment_N", never both, and AtlasNet-Organs has no whole-liver
+    # class at all. Segments win; the plain "liver" slot stays empty for it.
+    "esophagus": 36, "rectum": 37,
+    "hepatic_vessel": 38, "portal_vein_and_splenic_vein": 39,
+    "liver_segment_1": 40, "liver_segment_2": 41, "liver_segment_3": 42,
+    "liver_segment_4": 43, "liver_segment_5": 44, "liver_segment_6": 45,
+    "liver_segment_7": 46, "liver_segment_8": 47,
 }
 
 # ePAI model label → viewer label (all 25 classes from dataset.json)
@@ -333,6 +354,88 @@ _ATLASNET_TO_VIEWER = {
     23: _VIEWER_LABELS["pancreatic_lesion"],  # pancreatic_pdac
     24: _VIEWER_LABELS["pancreatic_lesion"],  # pancreatic_cyst
     25: _VIEWER_LABELS["pancreatic_lesion"],  # pancreatic_pnet
+}
+
+# AtlasNet-Organs (AbdomenAtlas 3.0, RadGPT/ICCV 2025) label → viewer label.
+# Distinct from Atlas-Net above, which is an unrelated 25-class model that just
+# shares the name. Source: Dataset224_AbdomenAtlas1.1 dataset.json, 34 classes,
+# flat labels (no regions_class_order), so 1..34 map straight through.
+_ATLASNET_ORGANS_TO_VIEWER = {
+    1:  _VIEWER_LABELS["aorta"],
+    2:  _VIEWER_LABELS["gall_bladder"],
+    3:  _VIEWER_LABELS["kidney_left"],
+    4:  _VIEWER_LABELS["kidney_right"],
+    5:  _VIEWER_LABELS["postcava"],
+    6:  _VIEWER_LABELS["spleen"],
+    7:  _VIEWER_LABELS["stomach"],
+    8:  _VIEWER_LABELS["adrenal_gland_left"],
+    9:  _VIEWER_LABELS["adrenal_gland_right"],
+    10: _VIEWER_LABELS["bladder"],
+    11: _VIEWER_LABELS["celiac_artery"],       # celiac_trunk
+    12: _VIEWER_LABELS["colon"],
+    13: _VIEWER_LABELS["duodenum"],
+    14: _VIEWER_LABELS["esophagus"],
+    15: _VIEWER_LABELS["femur_left"],
+    16: _VIEWER_LABELS["femur_right"],
+    17: _VIEWER_LABELS["hepatic_vessel"],
+    18: _VIEWER_LABELS["intestine"],
+    19: _VIEWER_LABELS["lung_left"],
+    20: _VIEWER_LABELS["lung_right"],
+    21: _VIEWER_LABELS["portal_vein_and_splenic_vein"],
+    22: _VIEWER_LABELS["prostate"],
+    23: _VIEWER_LABELS["rectum"],
+    24: _VIEWER_LABELS["liver_segment_1"],
+    25: _VIEWER_LABELS["liver_segment_2"],
+    26: _VIEWER_LABELS["liver_segment_3"],
+    27: _VIEWER_LABELS["liver_segment_4"],
+    28: _VIEWER_LABELS["liver_segment_5"],
+    29: _VIEWER_LABELS["liver_segment_6"],
+    30: _VIEWER_LABELS["liver_segment_7"],
+    31: _VIEWER_LABELS["liver_segment_8"],
+    32: _VIEWER_LABELS["pancreas_head"],
+    33: _VIEWER_LABELS["pancreas_body"],
+    34: _VIEWER_LABELS["pancreas_tail"],
+}
+
+# AtlasNet-Tumors (AbdomenAtlas 3.0) label -> viewer label.
+#
+# Unlike AtlasNet-Organs this checkpoint is REGION-BASED: dataset.json defines
+# overlapping regions rather than exclusive classes, and nnU-Net converts them
+# using regions_class_order. The emitted values are therefore the sparse set
+# below (no 4, 5, 11, 12, 13), not a dense 1..N. Assuming dense labels here
+# would silently paint the wrong organs.
+#
+# Order matters in that conversion: later regions overwrite earlier ones, so a
+# lesion voxel inside a liver segment is emitted as liver_lesion (23), not as
+# the segment. The upshot is one volume carrying both -- segments everywhere,
+# lesion where they overlap -- which is what lets the viewer say which segment
+# a lesion sits in.
+#
+# Every target already exists in the viewer; this model needs no new slots.
+#
+# Verified against real output on an A100 across 7 scans (MSI jobs 16369107,
+# 16370136): every emitted value was in this map and none of 4, 5, 11, 12 or 13
+# ever appeared, confirming the sparse set rather than assuming it. All three
+# lesion classes fired on at least one scan.
+_ATLASNET_TUMORS_TO_VIEWER = {
+    1:  _VIEWER_LABELS["kidney_right"],
+    2:  _VIEWER_LABELS["kidney_left"],
+    3:  _VIEWER_LABELS["kidney_lesion"],
+    6:  _VIEWER_LABELS["pancreas"],
+    7:  _VIEWER_LABELS["pancreas_head"],
+    8:  _VIEWER_LABELS["pancreas_body"],
+    9:  _VIEWER_LABELS["pancreas_tail"],
+    10: _VIEWER_LABELS["pancreatic_lesion"],
+    14: _VIEWER_LABELS["liver"],
+    15: _VIEWER_LABELS["liver_segment_1"],
+    16: _VIEWER_LABELS["liver_segment_2"],
+    17: _VIEWER_LABELS["liver_segment_3"],
+    18: _VIEWER_LABELS["liver_segment_4"],
+    19: _VIEWER_LABELS["liver_segment_5"],
+    20: _VIEWER_LABELS["liver_segment_6"],
+    21: _VIEWER_LABELS["liver_segment_7"],
+    22: _VIEWER_LABELS["liver_segment_8"],
+    23: _VIEWER_LABELS["liver_lesion"],
 }
 
 # SuPreM model label → viewer label
@@ -954,6 +1057,164 @@ def _run_atlasnet_inference(input_path: str, session_dir: str, conda_path: str, 
     combined_label_path = os.path.join(output_ct_dir, "combined_labels.nii.gz")
     shutil.copy2(case_pred, combined_label_path)
     _remap_combined_labels(combined_label_path, _ATLASNET_TO_VIEWER)
+
+    return output_ct_dir
+
+
+def _run_atlasnet_organs_inference(input_path: str, session_dir: str, atlasnet_organs_env_name: str) -> str:
+    """AtlasNet-Organs (AbdomenAtlas 3.0): 34 abdominal classes including the
+    eight Couinaud liver segments, which no other model here produces.
+
+    Unlike Atlas-Net, the released checkpoint is a bare nnU-Net model folder
+    (trainer dir with fold_all/ + plans.json + dataset.json) rather than an
+    nnUNet_results tree, so ATLASNET_ORGANS_MODEL_PATH points straight at it.
+    """
+    case_id = _normalize_case_id(input_path)
+
+    workspace = os.path.join(session_dir, "atlasnet_organs")
+    input_dir = os.path.join(workspace, "eval")
+    save_dir = os.path.join(workspace, "out")
+    os.makedirs(input_dir, exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
+
+    nnunet_input = os.path.join(input_dir, f"{case_id}_0000.nii.gz")
+    if os.path.lexists(nnunet_input):
+        os.remove(nnunet_input)
+    os.symlink(input_path, nnunet_input)
+
+    model_path = os.getenv(
+        "ATLASNET_ORGANS_MODEL_PATH",
+        "/home/visitor/atlasnet_organs/nnUNetTrainer__nnUNetPlannerResEncL_torchres_isotropic__3d_fullres",
+    )
+    if not os.path.isdir(model_path):
+        raise RuntimeError(
+            f"AtlasNet-Organs model folder not found at {model_path}. "
+            f"Set ATLASNET_ORGANS_MODEL_PATH to the unzipped AbdomenAtlasNetOrgans folder."
+        )
+
+    nnunet_raw = os.getenv("ATLASNET_ORGANS_NNUNET_RAW", "/home/visitor/atlasnet_organs/nnUNet/raw")
+    nnunet_preprocessed = os.getenv(
+        "ATLASNET_ORGANS_NNUNET_PREPROCESSED", "/home/visitor/atlasnet_organs/nnUNet/preprocessed"
+    )
+    nnunet_results = os.getenv(
+        "ATLASNET_ORGANS_NNUNET_RESULTS", "/home/visitor/atlasnet_organs/nnUNet/results"
+    )
+
+    selected_gpu = get_least_used_gpu()
+    predict = _env_command(atlasnet_organs_env_name, "nnUNetv2_predict_from_modelfolder")
+
+    full_cmd = (
+        f"nnUNet_raw={shlex.quote(nnunet_raw)} "
+        f"nnUNet_preprocessed={shlex.quote(nnunet_preprocessed)} "
+        f"nnUNet_results={shlex.quote(nnunet_results)} "
+        f"CUDA_VISIBLE_DEVICES={shlex.quote(selected_gpu)} "
+        f"{predict} "
+        f"-i {shlex.quote(input_dir)} "
+        f"-o {shlex.quote(save_dir)} "
+        f"-m {shlex.quote(model_path)} "
+        f"-f all "
+        f"-npp 2 -nps 2 "
+        f"-chk checkpoint_final.pth"
+    )
+
+    print(f"[INFO] Running AtlasNet-Organs command for case {case_id}")
+    print(full_cmd)
+    try:
+        _tracked_run(full_cmd, shell=True, executable="/bin/bash", check=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"AtlasNet-Organs inference command failed\nCommand: {full_cmd}\nExit code: {e.returncode}"
+        ) from e
+
+    case_pred = os.path.join(save_dir, f"{case_id}.nii.gz")
+    if not os.path.exists(case_pred):
+        raise RuntimeError(f"Expected AtlasNet-Organs output not found: {case_pred}")
+
+    output_ct_dir = os.path.join(session_dir, "outputs", "ct")
+    os.makedirs(output_ct_dir, exist_ok=True)
+    combined_label_path = os.path.join(output_ct_dir, "combined_labels.nii.gz")
+    shutil.copy2(case_pred, combined_label_path)
+    _remap_combined_labels(combined_label_path, _ATLASNET_ORGANS_TO_VIEWER)
+
+    return output_ct_dir
+
+
+def _run_atlasnet_tumors_inference(input_path: str, session_dir: str, atlasnet_env_name: str) -> str:
+    """AtlasNet-Tumors (AbdomenAtlas 3.0): liver, kidney and pancreatic tumors.
+
+    Same release and the same bare-model-folder layout as AtlasNet-Organs, but a
+    region-based checkpoint, so its output is the sparse label set described on
+    _ATLASNET_TUMORS_TO_VIEWER rather than a dense range. nnU-Net does the
+    region conversion itself during prediction; all we do is remap the result.
+
+    Lighter than the Organs checkpoint (ResEnc-M rather than ResEnc-L).
+    """
+    case_id = _normalize_case_id(input_path)
+
+    workspace = os.path.join(session_dir, "atlasnet_tumors")
+    input_dir = os.path.join(workspace, "eval")
+    save_dir = os.path.join(workspace, "out")
+    os.makedirs(input_dir, exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
+
+    nnunet_input = os.path.join(input_dir, f"{case_id}_0000.nii.gz")
+    if os.path.lexists(nnunet_input):
+        os.remove(nnunet_input)
+    os.symlink(input_path, nnunet_input)
+
+    model_path = os.getenv(
+        "ATLASNET_TUMORS_MODEL_PATH",
+        "/home/visitor/atlasnet_tumors/nnUnet_resencM_trained_lesion_3_organs",
+    )
+    if not os.path.isdir(model_path):
+        raise RuntimeError(
+            f"AtlasNet-Tumors model folder not found at {model_path}. "
+            f"Set ATLASNET_TUMORS_MODEL_PATH to the unzipped AbdomenAtlasNetTumors folder."
+        )
+
+    nnunet_raw = os.getenv("ATLASNET_TUMORS_NNUNET_RAW", "/home/visitor/atlasnet_tumors/nnUNet/raw")
+    nnunet_preprocessed = os.getenv(
+        "ATLASNET_TUMORS_NNUNET_PREPROCESSED", "/home/visitor/atlasnet_tumors/nnUNet/preprocessed"
+    )
+    nnunet_results = os.getenv(
+        "ATLASNET_TUMORS_NNUNET_RESULTS", "/home/visitor/atlasnet_tumors/nnUNet/results"
+    )
+
+    selected_gpu = get_least_used_gpu()
+    predict = _env_command(atlasnet_env_name, "nnUNetv2_predict_from_modelfolder")
+
+    full_cmd = (
+        f"nnUNet_raw={shlex.quote(nnunet_raw)} "
+        f"nnUNet_preprocessed={shlex.quote(nnunet_preprocessed)} "
+        f"nnUNet_results={shlex.quote(nnunet_results)} "
+        f"CUDA_VISIBLE_DEVICES={shlex.quote(selected_gpu)} "
+        f"{predict} "
+        f"-i {shlex.quote(input_dir)} "
+        f"-o {shlex.quote(save_dir)} "
+        f"-m {shlex.quote(model_path)} "
+        f"-f all "
+        f"-npp 2 -nps 2 "
+        f"-chk checkpoint_final.pth"
+    )
+
+    print(f"[INFO] Running AtlasNet-Tumors command for case {case_id}")
+    print(full_cmd)
+    try:
+        _tracked_run(full_cmd, shell=True, executable="/bin/bash", check=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"AtlasNet-Tumors inference command failed\nCommand: {full_cmd}\nExit code: {e.returncode}"
+        ) from e
+
+    case_pred = os.path.join(save_dir, f"{case_id}.nii.gz")
+    if not os.path.exists(case_pred):
+        raise RuntimeError(f"Expected AtlasNet-Tumors output not found: {case_pred}")
+
+    output_ct_dir = os.path.join(session_dir, "outputs", "ct")
+    os.makedirs(output_ct_dir, exist_ok=True)
+    combined_label_path = os.path.join(output_ct_dir, "combined_labels.nii.gz")
+    shutil.copy2(case_pred, combined_label_path)
+    _remap_combined_labels(combined_label_path, _ATLASNET_TUMORS_TO_VIEWER)
 
     return output_ct_dir
 
