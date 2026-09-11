@@ -94,9 +94,11 @@
   margin-bottom: 24px;
   position: relative;
 }
-/* An in-flight run isn't something to "drop a file onto" - drop the dashed
-   affordance so the box reads as a status card, not an active picker. */
-.dropzone:has(.dropzone-inflight) {
+/* An in-flight run (or one that just finished, still showing here) isn't
+   something to "drop a file onto" - drop the dashed affordance so the box
+   reads as a status card, not an active picker. */
+.dropzone:has(.dropzone-inflight),
+.dropzone:has(.dropzone-completed) {
   border-style: solid;
   cursor: default;
 }
@@ -800,11 +802,13 @@
   color: #111111;
 }
 
-/* ── Result actions ── */
+/* ── Result actions - rendered inside the drop zone (its own slot, replacing
+   whatever was shown while the run was in flight), so no extra top margin:
+   the box's own centering places it, the same way file-chips/dropzone-inflight
+   already work. ── */
 .result-section {
   width: 100%;
   box-sizing: border-box;
-  margin-top: 24px;
   padding: 14px 16px;
   background: #ffffff;
   border: 1px solid rgba(22, 163, 74, .24);
