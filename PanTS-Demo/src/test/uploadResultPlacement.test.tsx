@@ -39,7 +39,13 @@ describe("completed inference actions", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it("renders the completed panel inside the upload drop zone", async () => {
+  // A finished run used to render its "Inference Complete" panel AS A CHILD of
+  // the drop zone - that made the box's own rendered size depend on whether a
+  // run had finished (undoing the "drop zone is always the same size"
+  // fix) and visually overlapped the dashed border. It's now a sibling card
+  // directly beneath the drop zone instead: same prominent spot, but the
+  // drop zone itself never changes shape.
+  it("renders the completed panel as its own card below the drop zone, not nested inside it", async () => {
     const user = userEvent.setup();
     const { container } = render(
       <AuthProvider>
@@ -53,6 +59,9 @@ describe("completed inference actions", () => {
       expect(screen.queryByText(/to run inference/)).not.toBeInTheDocument(),
     );
 
+    const dropzone = container.querySelector(".dropzone")!;
+    const dropzoneClassBefore = dropzone.className;
+
     const input = container.querySelector<HTMLInputElement>('input[accept=".nii,.gz"]')!;
     await user.upload(input, new File([new Uint8Array([1, 2, 3])], "scan.nii.gz"));
     await screen.findByText(/ready/);
@@ -60,6 +69,9 @@ describe("completed inference actions", () => {
 
     const completedPanel = await screen.findByRole("status");
     expect(completedPanel).toHaveTextContent("Inference Complete");
-    expect(completedPanel.closest(".dropzone")).not.toBeNull();
+    // Not nested inside the drop zone...
+    expect(completedPanel.closest(".dropzone")).toBeNull();
+    // ...and the drop zone's own classes are unaffected by the result existing.
+    expect(dropzone.className).toBe(dropzoneClassBefore);
   });
 });
