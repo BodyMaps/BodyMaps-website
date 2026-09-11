@@ -1838,7 +1838,7 @@ const UploadPage: React.FC = () => {
         <div className="upload-card">
           {/* ── Drop zone ── */}
           <div
-            className={`dropzone${isDragOver ? " drag-over" : ""}${allUploadsDone ? " dropzone--all-done" : ""}`}
+            className={`dropzone${isDragOver ? " drag-over" : ""}${allUploadsDone ? " dropzone--all-done" : ""}${inferenceCompleted && sessionId ? " dropzone--has-result" : ""}`}
             onClick={() => {
               // While a run is in-flight and nothing new is selected yet, this
               // box is showing status, not the picker - a stray click on the
@@ -2015,6 +2015,76 @@ const UploadPage: React.FC = () => {
                 Select DICOM
               </button>
             </div>
+
+            {/* Keep the finished state with the scan controls instead of
+                introducing a second, disconnected panel below the pipeline. */}
+            {inferenceCompleted && sessionId && (
+              <div
+                className="result-section"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="result-title" role="status">
+                  <span className="result-title-icon" aria-hidden="true">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M20 6 9 17l-5-5" />
+                    </svg>
+                  </span>
+                  <span>Inference Complete</span>
+                </div>
+                <div className="result-btns">
+                  {selectedModel === "OpenVAE" ? (
+                    <>
+                      <button
+                        className="result-btn"
+                        onClick={() => {
+                          setRecentUploads(markRecentUploadViewed(sessionId));
+                          navigate(`/reconstruction/${sessionId}`);
+                        }}
+                      >
+                        View Reconstruction
+                      </button>
+                      <button
+                        className="result-btn"
+                        onClick={handleRunEpaiOnReconstruction}
+                      >
+                        Run ePAI on Result
+                      </button>
+                      <button
+                        className="result-btn"
+                        onClick={() => downloadResult(sessionId)}
+                      >
+                        Download
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="result-btn result-btn-primary"
+                        onClick={() => {
+                          setRecentUploads(markRecentUploadViewed(sessionId));
+                          navigate(`/session/${sessionId}`);
+                        }}
+                      >
+                        View Visualization
+                      </button>
+                      <button
+                        className="result-btn"
+                        onClick={() => downloadResult(sessionId)}
+                      >
+                        Download Results
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── Pre-inference preview: inspect the selected scan before running a model ── */}
@@ -2426,58 +2496,6 @@ const UploadPage: React.FC = () => {
               dedicated progress bar here was rarely seen and added a layout jump
               when it briefly appeared. The Active card below still reflects
               "Uploading…" phase for anyone who clicks Run while it's in flight. */}
-
-          {/* ── Results ── */}
-          {inferenceCompleted && sessionId && (
-            <div className="result-section">
-              <div className="result-title">✓ Inference Complete</div>
-              <div className="result-btns">
-                {selectedModel === "OpenVAE" ? (
-                  <>
-                    <button
-                      className="result-btn"
-                      onClick={() => {
-                        setRecentUploads(markRecentUploadViewed(sessionId));
-                        navigate(`/reconstruction/${sessionId}`);
-                      }}
-                    >
-                      View Reconstruction
-                    </button>
-                    <button
-                      className="result-btn"
-                      onClick={handleRunEpaiOnReconstruction}
-                    >
-                      Run ePAI on Result
-                    </button>
-                    <button
-                      className="result-btn"
-                      onClick={() => downloadResult(sessionId)}
-                    >
-                      Download
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      className="result-btn result-btn-primary"
-                      onClick={() => {
-                        setRecentUploads(markRecentUploadViewed(sessionId));
-                        navigate(`/session/${sessionId}`);
-                      }}
-                    >
-                      View Visualization
-                    </button>
-                    <button
-                      className="result-btn"
-                      onClick={() => downloadResult(sessionId)}
-                    >
-                      Download Results
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* ── Status messages (errors / transient feedback only) ── */}
           {message && <div className="status-msg">{message}</div>}
