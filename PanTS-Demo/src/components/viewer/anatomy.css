@@ -1,0 +1,13 @@
+.anatomy-controls { position:absolute; left:8px; top:30px; z-index:5; width: min(220px, calc(100% - 80px)); max-height:calc(100% - 80px); overflow:auto; color:#e8eef6; background:rgba(13,24,34,.94); border:1px solid #344b5b; border-radius:8px; font-size:12px; }
+.anatomy-controls summary { cursor:pointer; padding:8px 10px; font-weight:600; }
+.anatomy-controls__body { display:grid; gap:8px; padding:0 10px 10px; }
+.anatomy-controls label { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px; }
+.anatomy-controls input[type=range] { width:100%; accent-color:#68c9c0; }
+.anatomy-controls select, .anatomy-controls button { color:#e8eef6; background:#213442; border:1px solid #476273; border-radius:4px; padding:4px 6px; font:inherit; cursor:pointer; }
+.anatomy-controls button:focus-visible, .anatomy-controls select:focus-visible { outline:2px solid #68c9c0; }
+.anatomy-controls__steps { display:flex; align-items:center; gap:8px; }
+.anatomy-controls__steps button { min-width:30px; }
+.anatomy-controls p { margin:0; line-height:1.4; color:#b6c5cf; }
+.anatomy-plane-label { white-space:nowrap; background:#10212bea; font:11px system-ui; padding:3px 5px; border-radius:3px; }
+.anatomy-focus { position:absolute; bottom:50px; left:10px; z-index:5; color:#fff; background:#10212bee; border-left:3px solid #68c9c0; padding:6px 10px; font-size:13px; }
+.anatomy-focus button { margin-left:10px; color:#bdebe6; border:0; background:none; cursor:pointer; }

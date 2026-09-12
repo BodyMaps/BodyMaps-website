@@ -872,6 +872,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 		return () => window.clearTimeout(handle);
 	}, [viewerReady, pantsCase, isLocal, isCvCase, isLiveRoom, isSoloChallenge, isQuizPractice]);
 	const [crosshairMm, setCrosshairMm] = useState<[number, number, number] | null>(null);
+	const [anatomyFocus, setAnatomyFocus] = useState<{ caseId: string; id: number } | null>(null);
 	const [labelColorMap, setLabelColorMap] = useState<{ [key: number]: Color }>(
 		segmentation_category_colors
 	);
@@ -2872,6 +2873,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	// (NiiVue) crosshair — the Cornerstone move suppresses its change event, so the 3D
 	// view has to be synced explicitly — and make sure the organ is visible there.
 	const handleJumpToOrgan = (label: number) => {
+		setAnatomyFocus({ caseId, id: label });
 		const centroid = getOrganCentroids()?.[label];
 		if (!centroid) return; // organ not present in this scan
 		moveCornerstoneCrosshairToMm(centroid);
@@ -4768,7 +4770,25 @@ const aiAvailableOrgans = useMemo(() => {
 									<span>(switch to Volume rendering above)</span>
 								</div>
 											) : (
-								<SegmentationMeshViewer caseId={caseId} isSession={!!sessionId && !pantsCase} crosshairMm={crosshairMm} checkState={meshCheckState} loading={loading} opacity={opacityValue} customOrgans={customOrgans} labelColorMap={labelColorMap} />
+								<SegmentationMeshViewer
+                                    key={caseId}
+                                    caseId={caseId}
+                                    isSession={!!sessionId && !pantsCase}
+                                    renderingEngine={renderingEngine}
+                                    focusedOrgan={anatomyFocus?.caseId === caseId ? anatomyFocus.id : null}
+                                    onClearFocus={() => setAnatomyFocus(null)}
+                                    onSelectOrgan={handleJumpToOrgan}
+                                    onPickPoint={(point) => {
+                                        moveCornerstoneCrosshairToMm(point);
+                                        setCrosshairMm(point);
+                                    }}
+                                    crosshairMm={crosshairMm}
+                                    checkState={meshCheckState}
+                                    loading={loading}
+                                    opacity={opacityValue}
+                                    customOrgans={customOrgans}
+                                    labelColorMap={labelColorMap}
+                                />
 							)}
 						</div>
 						{!loading && (

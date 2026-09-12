@@ -9,6 +9,7 @@ type LiveSegmentMeshProps = {
   visible: boolean;
   opacity: number;
   manifestCenter: [number, number, number];
+  onSelect?: () => void;
 };
 
 // Client-side isosurface for a custom/edited class, built once from the
@@ -33,6 +34,7 @@ export function LiveSegmentMesh({
   visible,
   opacity,
   manifestCenter,
+  onSelect,
 }: LiveSegmentMeshProps) {
   // Cache extraction results per segmentIndex so switching targets back and
   // forth within one mount doesn't blow away a mesh we already built, and so
@@ -78,11 +80,15 @@ export function LiveSegmentMesh({
   const [r, g, b, a = 255] = color;
 
   return (
-    <mesh geometry={geometry} visible={visible}>
+    <mesh geometry={geometry} visible={visible} onClick={event => {
+      if (event.delta > 3) return;
+      event.stopPropagation(); onSelect?.();
+    }}>
       <meshStandardMaterial
         color={new THREE.Color(r / 255, g / 255, b / 255)}
         transparent
         opacity={opacity * (a / 255)}
+        depthWrite={opacity * (a / 255) >= 1}
         side={THREE.DoubleSide}
       />
     </mesh>

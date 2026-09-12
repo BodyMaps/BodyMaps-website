@@ -9,12 +9,13 @@ type OrganMeshProps = {
   visible: boolean;
   opacity?: number;
   color?: Color;
+  onSelect?: () => void;
 };
 
 export const rgbToHex = (r: number, g: number, b: number, _a: number) => 
   '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
 
-export function OrganMesh({ organ, visible, opacity = 1, color }: OrganMeshProps) {
+export function OrganMesh({ organ, visible, opacity = 1, color, onSelect }: OrganMeshProps) {
   const gltf = useGLTF(organ.url);
   const object = useMemo(() => {
     return gltf.scene.clone(true);
@@ -31,6 +32,7 @@ export function OrganMesh({ organ, visible, opacity = 1, color }: OrganMeshProps
         metalness: 0.0,
         transparent: opacity < 1,
         opacity,
+        depthWrite: opacity >= 1,
         side: THREE.DoubleSide,
       });
       child.material = material;
@@ -43,5 +45,9 @@ export function OrganMesh({ organ, visible, opacity = 1, color }: OrganMeshProps
     };
   }, [object, organ.id, opacity, color]);
 
-  return <primitive object={object} visible={visible} />;
+  return <primitive object={object} visible={visible} onClick={(event: import("@react-three/fiber").ThreeEvent<MouseEvent>) => {
+    if (event.delta > 3) return;
+    event.stopPropagation();
+    onSelect?.();
+  }} />;
 }
