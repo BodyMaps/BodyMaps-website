@@ -15,7 +15,7 @@ The CT plane is the actual Cornerstone output, including any visible segmentatio
 
 ## Verification
 
-- Ten targeted tests passed: physical coordinate inversion, patient axes, orthonormal oblique cameras, pivot-preserving camera updates, control behavior/subscription cleanup, and the existing viewer page smoke tests.
+- All 332 frontend tests passed across 53 test files. The ten targeted tests cover: physical coordinate inversion, patient axes, orthonormal oblique cameras, pivot-preserving camera updates, control behavior/subscription cleanup, and the existing viewer page smoke tests.
 - TypeScript and production build passed. Build reports the existing codec externalization and chunk-size warnings.
 - ESLint passed for changed rendering files (zero errors; existing warnings in the mesh components remain).
 - The [browser harness](../tests/browser/README.md) ran the real Cornerstone and Three.js renderers against two local TotalSegmentator CT/spleen pairs (`s1989`, `s1737`), subsampled with an affine update. These are supplied reference masks, not model predictions.

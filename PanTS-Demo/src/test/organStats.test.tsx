@@ -27,7 +27,9 @@ vi.mock("../helpers/CornerstoneNifti2", async (importOriginal) => {
 		// The page destructures { renderingEngine, viewportIds, volumeId } off the result,
 		// so resolve that shape (not undefined) to avoid a post-test unhandled rejection.
 		renderVisualization: vi.fn().mockResolvedValue({
-			renderingEngine: {},
+			// The anatomy pane now reads the engine's CT viewports. This statistics
+			// test has no WebGL viewports, but keeps the real engine method shape.
+			renderingEngine: { getViewport: vi.fn(() => undefined) },
 			viewportIds: [],
 			volumeId: "test-volume",
 		}),
