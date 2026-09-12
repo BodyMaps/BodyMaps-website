@@ -3,6 +3,7 @@ import type { RenderingEngine, Types } from "@cornerstonejs/core";
 import { LinkedSlicePlanes, type SliceSource } from "./LinkedSlicePlanes";
 import { AnatomyControls, type PlaneMode } from "./AnatomyControls";
 import "./anatomy.css";
+import { createPortal } from "react-dom";
 import { Canvas } from "@react-three/fiber";
 import { registerMeshRoot } from "../../helpers/viewer/meshCapture";
 import { Suspense, useEffect, useMemo, useState } from "react";
@@ -35,6 +36,7 @@ type SegmentationMeshViewerProps = {
   onSelectOrgan?: (id: number) => void;
   focusedOrgan?: number | null;
   onClearFocus?: () => void;
+  controlsContainer?: HTMLElement | null;
 };
 
 export async function fetchMeshManifest(caseId: string, isSession = false): Promise<MeshManifest> {
@@ -50,7 +52,7 @@ export async function fetchMeshManifest(caseId: string, isSession = false): Prom
   return data as MeshManifest;
 }
 
-export function SegmentationMeshViewer({ caseId, checkState, loading, opacity, crosshairMm, customOrgans = [], labelColorMap = {}, isSession = false, renderingEngine, onPickPoint, onSelectOrgan, focusedOrgan, onClearFocus }: SegmentationMeshViewerProps) {
+export function SegmentationMeshViewer({ caseId, checkState, loading, opacity, crosshairMm, customOrgans = [], labelColorMap = {}, isSession = false, renderingEngine, onPickPoint, onSelectOrgan, focusedOrgan, onClearFocus, controlsContainer }: SegmentationMeshViewerProps) {
   const [manifest, setManifest] = useState<MeshManifest | null>(null);
   const [manifestError, setManifestError] = useState(false);
   const [loaded, setLoaded] = useState<Record<number, boolean>>({});
@@ -112,9 +114,11 @@ export function SegmentationMeshViewer({ caseId, checkState, loading, opacity, c
   if (!manifest || loading || !checkState || checkState.length === 0) {
     return <div>Loading 3D segmentation...</div>;
   }
+  const controls = <AnatomyControls mode={planeMode} setMode={setPlaneMode} axial={sources[0]?.viewport} activeViewport={activeSource?.viewport} pivot={crosshairMm} onReset={() => { clearFocus(); setResetCount(n => n + 1); }} />;
   return (
     <div style={{ display: "flex", width: "100%", height: "100%", position: "relative" }}>
-      <AnatomyControls mode={planeMode} setMode={setPlaneMode} axial={sources[0]?.viewport} activeViewport={activeSource?.viewport} pivot={crosshairMm} onReset={() => { clearFocus(); setResetCount(n => n + 1); }} />
+      {controlsContainer ? createPortal(controls, controlsContainer)
+        : controlsContainer === undefined ? <div className="anatomy-controls-standalone">{controls}</div> : null}
       {selectedOrgan !== null && <div className="anatomy-focus" role="status">
         {organs.find(o => o.id === selectedOrgan)?.name ?? customOrgans.find(o => o.id === selectedOrgan)?.label}
         <button onClick={clearFocus}>Clear focus</button>

@@ -32,6 +32,7 @@ if not mask.any():
 out = args.output / args.case
 out.mkdir(parents=True, exist_ok=True)
 nib.save(ct, out / 'ct.nii.gz')
+nib.save(nib.Nifti1Image(mask.astype(np.uint8) * 25, seg.affine), out / 'seg.nii.gz')
 vertices, faces, _, _ = marching_cubes(np.pad(mask, 1).astype(np.float32), .5)
 ras = nib.affines.apply_affine(seg.affine, vertices - 1)
 three = ras[:, [0, 2, 1]].copy()

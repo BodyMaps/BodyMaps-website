@@ -872,6 +872,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 		return () => window.clearTimeout(handle);
 	}, [viewerReady, pantsCase, isLocal, isCvCase, isLiveRoom, isSoloChallenge, isQuizPractice]);
 	const [crosshairMm, setCrosshairMm] = useState<[number, number, number] | null>(null);
+	const [anatomyControlsContainer, setAnatomyControlsContainer] = useState<HTMLSpanElement | null>(null);
 	const [anatomyFocus, setAnatomyFocus] = useState<{ caseId: string; id: number } | null>(null);
 	const [labelColorMap, setLabelColorMap] = useState<{ [key: number]: Color }>(
 		segmentation_category_colors
@@ -4775,6 +4776,7 @@ const aiAvailableOrgans = useMemo(() => {
                                     caseId={caseId}
                                     isSession={!!sessionId && !pantsCase}
                                     renderingEngine={renderingEngine}
+                                    controlsContainer={anatomyControlsContainer}
                                     focusedOrgan={anatomyFocus?.caseId === caseId ? anatomyFocus.id : null}
                                     onClearFocus={() => setAnatomyFocus(null)}
                                     onSelectOrgan={handleJumpToOrgan}
@@ -4810,6 +4812,7 @@ const aiAvailableOrgans = useMemo(() => {
 								>
 									Volume
 								</button>
+								{threeDMode === "mesh" && !isLocal && <span ref={setAnatomyControlsContainer} className="vp-3dbar__anatomy" />}
 								{threeDMode === "volume" && !volume3DFailed && (
 									<span className="vp-3dbar__presets">
 										{volume3DPresets.map((preset) => (

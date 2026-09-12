@@ -36,8 +36,8 @@ export function AnatomyControls({ mode, setMode, axial, activeViewport = axial, 
     else if (mode === "oblique") orient(0, 0);
     setMode(next);
   };
-  return <details className="anatomy-controls" open>
-    <summary>Explore anatomy</summary>
+  return <details className="anatomy-controls">
+    <summary className="vp-3dbar__btn">CT planes</summary>
     <div className="anatomy-controls__body">
       <label>CT planes <select value={mode} disabled={!axial} onChange={e => changeMode(e.target.value as PlaneMode)}>
         <option value="off">Hidden</option><option value="axial">Axial</option>

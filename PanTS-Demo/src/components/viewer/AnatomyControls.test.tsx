@@ -22,6 +22,9 @@ describe("anatomy controls", () => {
       return <AnatomyControls axial={viewport} mode={mode} setMode={setMode} pivot={[12, -4, 90]} onReset={reset} />;
     }
     const { unmount } = render(<Harness />);
+    const summary = screen.getByText("CT planes", { selector: "summary" });
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(summary);
     fireEvent.click(screen.getByRole("button", { name: "Next anatomy slice" }));
     expect(scroll).toHaveBeenLastCalledWith(1);
     expect(screen.getByRole("slider", { name: "Anatomy slice position" })).toHaveValue("5");
