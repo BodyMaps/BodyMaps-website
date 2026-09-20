@@ -2099,7 +2099,15 @@ async def get_segmentations(combined_labels_id):
 
 
 @api_blueprint.route('/download/<id>', methods=['GET'])
+@require_auth
 def download_segmentation_zip(id):
+    # Segmentation archives contain dataset-derived data and are not part of
+    # the public viewer. Keep this server-side even though the viewer no
+    # longer renders a download button; only an authenticated site admin may
+    # use the legacy endpoint for maintenance.
+    user = current_user()
+    if not role_store.has_role(user["id"], role_store.ROLE_ADMIN):
+        return jsonify({"error": "Segmentation downloads are disabled."}), 403
     try:
         if not _is_safe_id(id):
             return jsonify({"error": "Invalid id"}), 400
