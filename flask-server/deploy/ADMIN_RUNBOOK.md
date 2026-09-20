@@ -1,8 +1,8 @@
 ﻿# BodyMaps production administrator runbook
 
-This runbook is for a JHU administrator who can use `sudo` on `bdmap1`. It installs a root-managed Gunicorn service with application queue limits and conservative CPU, memory, and process limits. It also installs the repository Nginx configuration without changing the dataset files.
+This is for Professor Zongwei Zhou who can use `sudo` on `bdmap1`. It installs a root managed Gunicorn service with application queue limits and conservative CPU, memory, and process limits. It also installs the repository Nginx configuration without changing the dataset files.
 
-Run the steps in order. If a command prints an error, stop and send the output before continuing.
+Run the steps in order. If a command prints an error, stop and send the output before continuing. Send to me(Ahmad Durre Rehman) in Teams
 
 ## 1. Log in and update the checkout
 
@@ -35,9 +35,9 @@ sudo cp -a /etc/systemd/system/pants-flask.service "$BACKUP/" 2>/dev/null || tru
 echo "Backup saved in $BACKUP"
 ```
 
-This copies the current Nginx and Gunicorn configuration so it can be restored if needed.
+This copies the current Nginx and Gunicorn configuration so it can be restored if needed.(In case but I'm sure it will work throughout).
 
-## 4. Install the resource-limited Gunicorn service
+## 4. Install the resource limited Gunicorn service
 
 ```bash
 sudo install -o root -g root -m 0644 \
@@ -46,7 +46,7 @@ sudo install -o root -g root -m 0644 \
 sudo systemctl daemon-reload
 ```
 
-The service file runs one Gunicorn worker as `visitor`, loads the existing `.env`, allows four in-process inference requests, allows eight queued jobs, limits numerical-library CPU threads, limits the service to four CPU cores, and caps memory at 48 GB. It automatically restarts if Gunicorn crashes.
+The service file runs one Gunicorn worker as `visitor`, loads the existing `.env`, allows four in-process inference requests, allows eight queued jobs, limits numerical-library CPU threads, limits the service to four CPU cores, and caps memory at 48 GB. It automatically restarts if Gunicorn crashes.(The most Important one)
 
 ## 5. Replace the old nohup Gunicorn process
 
@@ -58,7 +58,7 @@ sudo systemctl enable --now pants-flask.service
 sudo systemctl status pants-flask.service --no-pager
 ```
 
-The first command stops a service if one already exists. The second stops the old manually-started Gunicorn process. The final commands start the managed service and make it start automatically after reboot.
+The first command stops a service if one already exists. The second stops the old manually started Gunicorn process. The final commands start the managed service and make it start automatically after reboot.
 
 ## 6. Install the BodyMaps Nginx configuration
 
