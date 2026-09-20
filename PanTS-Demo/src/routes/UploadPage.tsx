@@ -250,7 +250,7 @@ const UploadPage: React.FC = () => {
   // out opens the auth popup instead of proceeding. It opens on sign-in: most
   // people hitting this already have an account, and the popup switches to
   // sign-up in one click for the ones who don't.
-  const { isAuthenticated, promptAuth, user, refreshUsage } = useAuth();
+  const { isAuthenticated, promptAuth, user, refreshUsage, redeemAdminCoupon } = useAuth();
   const ensureAccount = (): boolean => {
     if (isAuthenticated) return true;
     promptAuth();
@@ -364,12 +364,34 @@ const UploadPage: React.FC = () => {
   // stops touching selectedModel, so it can never clobber a real choice.
   const modelTouchedRef = useRef(false);
   const [modelDropOpen, setModelDropOpen] = useState(false);
+  const [couponOpen, setCouponOpen] = useState(false);
+  const [couponValue, setCouponValue] = useState("");
+  const [couponBusy, setCouponBusy] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
   // LesionSegmenter computes liver/pancreatic/kidney/colon lesions in one pass;
   // this selects which lesion to feature.
   const [lesionTarget, setLesionTarget] = useState<
     "pancreatic" | "liver" | "kidney" | "colon"
   >("pancreatic");
   const modelDropRef = useRef<HTMLDivElement>(null);
+
+  const submitAdminCoupon = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const coupon = couponValue.trim();
+    if (!coupon || couponBusy) return;
+    setCouponBusy(true);
+    setCouponError(null);
+    try {
+      await redeemAdminCoupon(coupon);
+      setCouponValue("");
+      setCouponOpen(false);
+      setMessage("Sponsored access enabled. All models are now available.");
+    } catch (error) {
+      setCouponError(error instanceof Error ? error.message : "That access coupon could not be redeemed.");
+    } finally {
+      setCouponBusy(false);
+    }
+  };
   const [preDropOpen, setPreDropOpen] = useState(false);
   const preDropRef = useRef<HTMLDivElement>(null);
   const [preValue, setPreValue] = useState("");
@@ -2435,6 +2457,41 @@ const UploadPage: React.FC = () => {
                       </div>
                       );
                     })}
+                    {isAuthenticated && modelLocked("ePAI") && (
+                      <div className="model-dropdown-access" onClick={(event) => event.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="model-dropdown-access__toggle"
+                          onClick={() => {
+                            setCouponOpen((open) => !open);
+                            setCouponError(null);
+                          }}
+                        >
+                          Have an admin access coupon?
+                        </button>
+                        {couponOpen && (
+                          <form className="model-dropdown-access__form" onSubmit={submitAdminCoupon}>
+                            <label htmlFor="admin-access-coupon">Access coupon</label>
+                            <div className="model-dropdown-access__row">
+                              <input
+                                id="admin-access-coupon"
+                                type="password"
+                                value={couponValue}
+                                onChange={(event) => setCouponValue(event.target.value)}
+                                placeholder="Enter coupon"
+                                autoComplete="off"
+                                disabled={couponBusy}
+                              />
+                              <button type="submit" disabled={couponBusy || !couponValue.trim()}>
+                                {couponBusy ? "Checking…" : "Unlock"}
+                              </button>
+                            </div>
+                            {couponError && <p role="alert">{couponError}</p>}
+                            <small>Access is verified by the server and does not grant admin controls.</small>
+                          </form>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
