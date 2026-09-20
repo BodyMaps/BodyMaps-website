@@ -18,7 +18,6 @@ import {
     IconChevronDown,
     IconCircle,
     IconClick,
-    IconDownload,
     IconEye,
     IconFlipHorizontal,
     IconGrid3x3,
@@ -176,7 +175,6 @@ import { useFocusedPane } from "../helpers/viewer/useFocusedPane";
 import { useKeyboardShortcuts } from "../helpers/viewer/useKeyboardShortcuts";
 import { type MaskingArea } from "../components/segmentation/MaskingSelect";
 import { getLocalDicomFiles, loadLocalDicomSeries } from "../helpers/dicomLocal";
-import { downloadUrlAsFile } from "../helpers/downloadFile";
 import { loadLocalNiftiAsRawBlobUrl } from "../helpers/localNifti";
 import {
     describeBasis,
@@ -3487,18 +3485,6 @@ const aiAvailableOrgans = useMemo(() => {
 		: checkBoxData.map((organ) => organ.label);
 }, [organStats, checkBoxData]);
 
-	const handleDownloadClick = async () => {
-		const downloadUrl = sessionId
-			? `${API_BASE}/api/get_result/${sessionId}`
-			: `${API_BASE}/api/download/${pantsCase}`;
-		try {
-			await downloadUrlAsFile(downloadUrl, `${caseId}_segmentations.zip`);
-		} catch (e) {
-			console.error("Segmentation download failed:", e);
-			alert("Could not download segmentations. Please try again.");
-		}
-	};
-
 	// hex "#rrggbb" convert to Cornerstone's [r,g,b,a] Color (0 to 255)
 	const hexToColor = (hex: string): Color => {
 		const n = parseInt(hex.slice(1), 16);
@@ -4336,16 +4322,6 @@ const aiAvailableOrgans = useMemo(() => {
 
 											{/* Report and Download stay standalone and separate (not grouped with
 											    each other) — distinct export actions users reach for independently. */}
-											{!isLocal && !soloChallenge && !quizPractice && !liveRoom && (
-												<button
-													className="vp-tool"
-													onClick={() => { closeAnnotationToolbarIfOpen(); handleDownloadClick(); }}
-													aria-label="Download segmentations"
-												>
-													<IconDownload size={20} color="white" />
-													<span className="vp-tool__tip">Download</span>
-												</button>
-											)}
 											{!isLocal && !soloChallenge && !quizPractice && !liveRoom && (
 												<button
 													className="vp-tool"
