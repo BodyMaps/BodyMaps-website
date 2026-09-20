@@ -77,6 +77,17 @@ def test_login_wrong_password(client):
     assert good.status_code == 200
 
 
+def test_admin_coupon_requires_authentication(client, monkeypatch):
+    monkeypatch.setenv(
+        "BODYMAPS_ADMIN_COUPON_SHA256",
+        hashlib.sha256(b"local-admin-coupon").hexdigest(),
+    )
+    response = client.post(
+        "/api/auth/redeem-admin-coupon", json={"coupon": "local-admin-coupon"}
+    )
+    assert response.status_code == 401
+
+
 def test_admin_coupon_grants_unlimited_plan_without_admin_role(client, monkeypatch):
     """The coupon unlocks model limits server-side but is not an admin role."""
     coupon = "local-admin-coupon"
@@ -104,7 +115,69 @@ def test_admin_coupon_grants_unlimited_plan_without_admin_role(client, monkeypat
     assert usage["limits"]["models"] is None
 
 
-def test_admin_coupon_requires_server_configuration(client):
+def test_admin_coupon_keeps_plan_unchanged_for_malformed_input(client, monkeypatch):
+    coupon = "local-admin-coupon"
+    monkeypatch.setenv(
+        "BODYMAPS_ADMIN_COUPON_SHA256",
+        hashlib.sha256(coupon.encode("utf-8")).hexdigest(),
+    )
+    client.post("/api/auth/register", json={
+        "email": "malformed-coupon@example.com", "password": "password1",
+    })
+
+    for payload in ({}, {"coupon": 123}, {"coupon": ""}, {"coupon": "x" * 257}):
+        response = client.post("/api/auth/redeem-admin-coupon", json=payload)
+        assert response.status_code == 400
+        assert client.get("/api/auth/me").get_json()["user"]["plan"] == "free"
+
+
+def test_admin_coupon_rate_limits_failed_attempts(client, monkeypatch):
+    coupon = "local-admin-coupon"
+    monkeypatch.setenv(
+        "BODYMAPS_ADMIN_COUPON_SHA256",
+        hashlib.sha256(coupon.encode("utf-8")).hexdigest(),
+    )
+    client.post("/api/auth/register", json={
+        "email": "rate-limited-coupon@example.com", "password": "password1",
+    })
+
+    responses = [
+        client.post("/api/auth/redeem-admin-coupon", json={"coupon": "wrong"})
+        for _ in range(6)
+    ]
+    assert [response.status_code for response in responses[:5]] == [403] * 5
+    assert responses[5].status_code == 429
+    assert client.get("/api/auth/me").get_json()["user"]["plan"] == "free"
+
+
+def test_admin_coupon_persists_and_unblocks_both_media_models_without_admin_role(
+    client, monkeypatch
+):
+    coupon = "local-admin-coupon"
+    monkeypatch.setenv(
+        "BODYMAPS_ADMIN_COUPON_SHA256",
+        hashlib.sha256(coupon.encode("utf-8")).hexdigest(),
+    )
+    response = client.post("/api/auth/register", json={
+        "email": "media-coupon@example.com", "password": "password1",
+    })
+    user_id = response.get_json()["user"]["id"]
+    assert client.post(
+        "/api/auth/redeem-admin-coupon", json={"coupon": coupon}
+    ).status_code == 200
+
+    from services import plan_store, role_store
+
+    me = client.get("/api/auth/me").get_json()["user"]
+    assert me["plan"] == "enterprise"
+    assert me["roles"] == []
+    assert not role_store.has_role(user_id, role_store.ROLE_ADMIN)
+    assert plan_store.check_inference(user_id, "cads551") is None
+    assert plan_store.check_inference(user_id, "cads552") is None
+
+
+def test_admin_coupon_requires_server_configuration(client, monkeypatch):
+    monkeypatch.delenv("BODYMAPS_ADMIN_COUPON_SHA256", raising=False)
     client.post("/api/auth/register", json={
         "email": "unconfigured@example.com", "password": "password1",
     })
