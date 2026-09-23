@@ -645,16 +645,25 @@ def get_mask_data():
     if not session_key:
         return jsonify({"error": "Missing sessionKey"}), 400
 
-    result = get_mask_data_internal(session_key)
-
-    # For numeric PanTS cases, fall back to the robust label-based computation
-    # (with HuggingFace download) when the local dataset path is unavailable,
-    # so organ statistics resolve even without a full local PanTS install.
+    # get_mask_data_internal() is PanTS-catalog-only (int(id) is its first
+    # line): calling it with a fresh-upload session's UUID always raised and
+    # was silently swallowed into an {"error": ...} dict, so the viewer never
+    # got real organ stats for an auto-segmented scan. Route those through the
+    # session-based lookup instead; only numeric catalog ids still go through
+    # get_mask_data_internal.
     if str(session_key).strip().isdigit():
+        result = get_mask_data_internal(session_key)
+
+        # For numeric PanTS cases, fall back to the robust label-based computation
+        # (with HuggingFace download) when the local dataset path is unavailable,
+        # so organ statistics resolve even without a full local PanTS install.
         if not isinstance(result, dict) or result.get("error") or not result.get("organ_metrics"):
             robust = _ai_compute_organ_metrics_from_labels(str(session_key).strip())
             if robust and robust.get("organ_metrics"):
                 result = robust
+    else:
+        job = _get_inference_job(session_key)
+        result = get_session_mask_data(session_key, job)
 
     return jsonify(result)
 
