@@ -62,21 +62,26 @@ const MODEL_OPTIONS: {
       { value: "Abdominal", label: "Best for" },
     ],
     details: [
-      "Segments 25 structures in one pass: major abdominal organs (liver, spleen, kidneys, stomach, etc.), the surrounding vasculature, and the pancreas region in particular.",
-      "Within the pancreas, it separately identifies the gland, duct, and three tumor subtypes (PDAC, cyst, PNET) - this is its main focus, not an afterthought.",
-      "Best suited to a standard abdominal CT; not a whole-body scanner.",
+      "25 structures in one pass",
+      "Major organs, vasculature, pancreas region",
+      "Pancreas gland, duct, and 3 tumor subtypes (PDAC, cyst, PNET)",
+      "Built for abdominal CT, not whole-body scans",
     ],
   },
   {
     id: "Atlas-Net",
     label: "Atlas-Net",
-    desc: "For anatomically consistent results",
+    desc: "For anatomically consistent results, with the same organ and tumor coverage as ePAI",
     quickFacts: [
-      { value: "Atlas-matched", label: "Shape accuracy" },
+      { value: "25", label: "Structures segmented" },
+      { value: "3", label: "Pancreas tumor subtypes" },
       { value: "Plausibility", label: "Optimized for" },
     ],
     details: [
-      "Segments organs against an anatomical atlas, favoring shapes and positions that are physically plausible over raw per-voxel accuracy.",
+      "25 structures in one pass, same nnU-Net-based coverage as ePAI",
+      "Major organs, vasculature, pancreas region",
+      "Pancreas gland, duct, and 3 tumor subtypes (PDAC, cyst, PNET)",
+      "Matches segmentations to a known anatomical atlas",
     ],
   },
   {
@@ -89,9 +94,10 @@ const MODEL_OPTIONS: {
       { value: "Fast", label: "Speed" },
     ],
     details: [
-      "Computes lesions in four organs in one pass - pancreatic, liver, kidney, and colon - you pick which one to feature as the primary result.",
-      "Pancreatic lesion detection is validated against ground truth; the other three are not yet.",
-      "Optimized for speed over the broader organ coverage ePAI or Atlas-Net provide.",
+      "Lesions in 4 organs in one pass",
+      "Pick which organ to feature as the primary result",
+      "Pancreatic lesion detection validated against ground truth",
+      "Optimized for speed over broader organ coverage",
     ],
   },
 ];
@@ -2871,7 +2877,15 @@ const UploadPage: React.FC = () => {
                   background: "#fff",
                   border: isCurrent ? "1.5px solid #002d72" : "1px solid rgba(0,0,0,0.08)",
                   boxShadow: isCurrent ? "0 6px 24px rgba(0,45,114,0.12)" : "0 1px 2px rgba(0,0,0,0.04)",
-                  borderRadius: "16px", padding: "24px 20px", display: "flex", flexDirection: "column",
+                  borderRadius: "18px", padding: "32px 28px",
+                  // subgrid: each row below (icon, name, badge, desc, button,
+                  // divider, stats, divider, bullets) shares its height with the
+                  // same row in the other cards, sized to the tallest one - so a
+                  // 3-line description in one card doesn't just push that card's
+                  // own button down, it grows the desc row for every card and
+                  // everything below stays aligned. The parent grid declares the
+                  // 9 row tracks; grid-row: span 9 hands them all to this card.
+                  display: "grid", gridTemplateRows: "subgrid", gridRow: "span 9", rowGap: 0,
                   cursor: "pointer", textAlign: "center", minWidth: 0, height: "100%",
                   transition: "border-color 0.15s, box-shadow 0.15s",
                 }}
@@ -2881,7 +2895,7 @@ const UploadPage: React.FC = () => {
                   background: isCurrent ? "rgba(0,45,114,0.08)" : "rgba(0,0,0,0.05)",
                   border: `1px solid ${isCurrent ? "rgba(0,45,114,0.18)" : "rgba(0,0,0,0.1)"}`,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  margin: "0 auto 16px",
+                  margin: "0 auto 20px",
                 }}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={isCurrent ? "#002d72" : "#111111"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M9.5 2h5l.5 4.5 3.5 2-1 5-3 2.5-.5 4.5h-5l-.5-4.5-3-2.5-1-5 3.5-2z" />
@@ -2889,15 +2903,15 @@ const UploadPage: React.FC = () => {
                   </svg>
                 </div>
 
-                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "17px", fontWeight: 700, color: "#111111" }}>
+                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "18px", fontWeight: 700, color: "#111111", alignSelf: "start" }}>
                   {m.label}
                 </div>
-                <div style={{ display: "flex", justifyContent: "center", gap: "6px", flexWrap: "wrap", minHeight: "20px", marginTop: "6px" }}>
+                <div style={{ display: "flex", justifyContent: "center", alignItems: "start", gap: "6px", flexWrap: "wrap", marginTop: "8px" }}>
                   {isCurrent && modelBadge("Selected", "#002d72")}
                   {locked && modelBadge("Donate", "#8f6a00")}
                 </div>
 
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: "#6a6a6a", lineHeight: 1.5, marginTop: "10px", minHeight: "36px" }}>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: "#6a6a6a", lineHeight: 1.6, marginTop: "14px", alignSelf: "start" }}>
                   {m.desc}
                 </div>
 
@@ -2905,7 +2919,7 @@ const UploadPage: React.FC = () => {
                   type="button"
                   tabIndex={-1}
                   style={{
-                    marginTop: "16px", width: "100%", padding: "9px 16px", borderRadius: "999px",
+                    alignSelf: "start", marginTop: "24px", width: "100%", padding: "11px 16px", borderRadius: "999px",
                     fontFamily: "'Space Grotesk', sans-serif", fontSize: "13px", fontWeight: 600,
                     background: isCurrent ? "#002d72" : "#fff",
                     color: isCurrent ? "#fff" : "#002d72",
@@ -2915,37 +2929,42 @@ const UploadPage: React.FC = () => {
                   {isCurrent ? "Currently selected" : locked ? "Donate to unlock" : "Select this model"}
                 </button>
 
-                {m.quickFacts && (
-                  <>
-                    <div style={{ height: "1px", background: "rgba(0,0,0,0.08)", margin: "20px 0 18px" }} />
-                    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div style={{ height: "1px", background: "rgba(0,0,0,0.08)", margin: "28px 0 0", alignSelf: "start", width: "100%" }} />
+
+                <div style={{ alignSelf: "start", marginTop: "24px" }}>
+                  {m.quickFacts && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "22px" }}>
                       {m.quickFacts.map((f) => (
                         <div key={f.label}>
-                          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "20px", fontWeight: 700, color: "#111111" }}>
+                          <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "21px", fontWeight: 700, color: "#111111" }}>
                             {f.value}
                           </div>
-                          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", color: "#8f8f8f", marginTop: "3px" }}>
+                          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "10px", color: "#8f8f8f", marginTop: "4px" }}>
                             {f.label}
                           </div>
                         </div>
                       ))}
                     </div>
-                  </>
-                )}
+                  )}
+                </div>
 
-                {m.details && (
-                  <ul style={{ margin: "20px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: "6px", textAlign: "left" }}>
-                    {m.details.map((line, i) => (
-                      <li key={i} style={{
-                        fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "#6a6a6a",
-                        lineHeight: 1.5, paddingLeft: "12px", position: "relative",
-                      }}>
-                        <span style={{ position: "absolute", left: 0 }}>·</span>
-                        {line}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <div style={{ height: "1px", background: "rgba(0,0,0,0.08)", margin: "24px 0 0", alignSelf: "start", width: "100%" }} />
+
+                <div style={{ alignSelf: "start", marginTop: "20px" }}>
+                  {m.details && (
+                    <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: "12px", textAlign: "left" }}>
+                      {m.details.map((line, i) => (
+                        <li key={i} style={{
+                          fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", color: "#6a6a6a",
+                          lineHeight: 1.5, paddingLeft: "14px", position: "relative",
+                        }}>
+                          <span style={{ position: "absolute", left: 0, color: "#002d72" }}>·</span>
+                          {line}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
             );
           });
@@ -2954,13 +2973,13 @@ const UploadPage: React.FC = () => {
             <>
               <div style={{ marginTop: "32px" }}>
                 <SectionLabel>Choose a model</SectionLabel>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "#8f8f8f", marginTop: "-8px", marginBottom: "12px" }}>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "11px", color: "#8f8f8f", marginTop: "-8px", marginBottom: "20px" }}>
                   Compare what each model does and click one to pick it - or use the Model dropdown above.
                 </div>
                 <div
                   role="radiogroup"
                   aria-label="Segmentation model"
-                  style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "16px" }}
+                  style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gridTemplateRows: "repeat(9, auto)", gap: "28px" }}
                 >
                   {modelCards}
                 </div>
