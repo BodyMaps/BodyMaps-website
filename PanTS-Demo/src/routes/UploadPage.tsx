@@ -2850,7 +2850,10 @@ const UploadPage: React.FC = () => {
               border: `1px solid ${color}`, borderRadius: "4px", padding: "2px 5px", flexShrink: 0,
             }}>{text}</span>
           );
-          const modelCards = MODEL_OPTIONS.map((m) => {
+          // "None" (view-only, no inference) is a real dropdown option but isn't
+          // a model to compare against the other three, so it's left out of the
+          // comparison grid.
+          const modelCards = MODEL_OPTIONS.filter((m) => m.id !== "None").map((m) => {
             const isCurrent = currentModelId === m.id;
             const locked = modelLocked(m.id);
             return (
@@ -2869,7 +2872,7 @@ const UploadPage: React.FC = () => {
                   border: isCurrent ? "1.5px solid #002d72" : "1px solid rgba(0,0,0,0.08)",
                   boxShadow: isCurrent ? "0 6px 24px rgba(0,45,114,0.12)" : "0 1px 2px rgba(0,0,0,0.04)",
                   borderRadius: "16px", padding: "24px 20px", display: "flex", flexDirection: "column",
-                  cursor: "pointer", textAlign: "center", minWidth: 0,
+                  cursor: "pointer", textAlign: "center", minWidth: 0, height: "100%",
                   transition: "border-color 0.15s, box-shadow 0.15s",
                 }}
               >
@@ -2957,7 +2960,7 @@ const UploadPage: React.FC = () => {
                 <div
                   role="radiogroup"
                   aria-label="Segmentation model"
-                  style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "16px", alignItems: "start" }}
+                  style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "16px" }}
                 >
                   {modelCards}
                 </div>
