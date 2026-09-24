@@ -81,7 +81,7 @@ export type SegmentationAnnotations = {
 };
 
 export type Systems = "Vascular System" | "Lymphatic System" | "Reproductive System" | "Urinary System" | "Digestive System" | "Skeletal System" | "Respiratory System" | "Endocrine System";
-export type SubSystems = "Pancreas" | "Kidneys"
+export type SubSystems = "Pancreas" | "Kidneys" | "Liver Segments"
 
 export type AllSystems = Systems | SubSystems;
 
@@ -125,7 +125,19 @@ export type SegmentationCategories =
 	| "cbd_stent"
 	| "liver_lesion"
 	| "kidney_lesion"
-	| "colon_lesion";
+	| "colon_lesion"
+	| "esophagus"
+	| "rectum"
+	| "hepatic_vessel"
+	| "portal_vein_and_splenic_vein"
+	| "liver_segment_1"
+	| "liver_segment_2"
+	| "liver_segment_3"
+	| "liver_segment_4"
+	| "liver_segment_5"
+	| "liver_segment_6"
+	| "liver_segment_7"
+	| "liver_segment_8";
 
 export type OrganMeshInfo = {
   id: number;
