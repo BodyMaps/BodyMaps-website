@@ -1,0 +1,42 @@
+[Unit]
+Description=BodyMaps approved dataset reads for local development
+After=network.target
+
+[Service]
+Type=simple
+User=bodymaps-data-ro
+Group=bodymaps-data-ro
+WorkingDirectory=/opt/bodymaps-readonly/current/flask-server
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHON_DOTENV_DISABLED=1
+Environment=BODYMAPS_RO_DATA_ROOT=/srv/bodymaps-readonly/PanTS
+Environment=BODYMAPS_RO_TOKENS_FILE=/etc/bodymaps-readonly/tokens.json
+# Existing meshes are optional. Verify the actual production path before enabling.
+# Environment=BODYMAPS_RO_MESH_ROOT=/srv/bodymaps-readonly/meshes
+# BindReadOnlyPaths=/home/visitor/data/render_only:/srv/bodymaps-readonly/meshes
+BindReadOnlyPaths=/mnt/bodymaps/zzhou82/data/PanTS:/srv/bodymaps-readonly/PanTS
+ExecStart=/opt/bodymaps-readonly/venv/bin/gunicorn --workers 1 --threads 2 --bind 127.0.0.1:8766 --timeout 120 --worker-tmp-dir /tmp --access-logfile - readonly_data.service:create_app()
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=tmpfs
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+CPUQuota=50%
+MemoryMax=512M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

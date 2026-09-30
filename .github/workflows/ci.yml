@@ -69,7 +69,7 @@ jobs:
       # tests need. numpy is required because constants.py imports it; requests
       # because Authlib's Flask client imports it.
       - name: Install test deps
-        run: python -m pip install --upgrade pip pytest werkzeug SQLAlchemy Flask-SQLAlchemy alembic argon2-cffi Authlib requests flask-cors numpy scipy nibabel openpyxl pillow python-dotenv reportlab websockets scikit-image pandas trimesh
+        run: python -m pip install --upgrade pip pytest SQLAlchemy Flask-SQLAlchemy alembic argon2-cffi Authlib flask-cors numpy scipy nibabel pillow python-dotenv reportlab websockets scikit-image pandas trimesh -r readonly_data/requirements.txt
 
       # Catches syntax errors anywhere in the backend (api_blueprint.py etc.)
       # without installing the heavy runtime deps - nothing else in CI parses
@@ -79,6 +79,9 @@ jobs:
 
       - name: Path-safety unit tests
         run: python -m pytest tests/unit/test_path_safety.py -v
+
+      - name: Read-only development data boundary and snapshot tests
+        run: python -m pytest tests/unit/test_readonly_data.py -v
 
       # User-dataset admission gatekeeper: quotas, dedup, CT/segmentation validity,
       # promotion into the PanTS-mirroring layout.

@@ -1,5 +1,10 @@
 # Backend
 
+For local frontend/backend development using approved JHU cases, follow
+[read-only development setup](flask-server/deploy/READONLY_DEVELOPMENT.md).
+It uses a restricted data service and a local database; server provisioning is a
+separate reviewed step. Do not point development writes at the production API.
+
 The viewer's AI assistant also needs its model service running. See
 [AI model setup and persistent Ollama service](PanTS-Demo/src/components/AIAssistant/README_AI_MODEL_SETUP.md#hosting-the-bodymaps-ai-models-ollama-on-the-server)
 for installation, restart, and health checks. Restarting Flask alone does not
