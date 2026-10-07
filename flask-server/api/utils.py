@@ -2,7 +2,7 @@ from werkzeug.datastructures import MultiDict, FileStorage
 from werkzeug.utils import secure_filename
 from flask import Blueprint, send_file, make_response, request, jsonify
 from services.nifti_processor import NiftiProcessor
-from services.session_manager import SessionManager, generate_uuid
+from services.session_manager import generate_uuid
 from services.auto_segmentor import run_auto_segmentation
 from services.case_quality import load_case_quality_manifest, merge_case_quality
 from services.manufacturer_normalization import canonicalize_manufacturer
@@ -302,7 +302,6 @@ def assign_colors_with_high_contrast(label_ids, adjacency_graph, min_initial_col
     Assign colors to labels such that adjacent labels have different colors,
     maximizing contrast and balance.
     """
-    from itertools import combinations
     import colorsys
 
     def generate_distinct_colors(n):
