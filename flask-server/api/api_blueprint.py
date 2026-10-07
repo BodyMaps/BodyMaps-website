@@ -1,6 +1,6 @@
 from flask import Blueprint, send_file, make_response, request, jsonify, Response, current_app, stream_with_context
 from werkzeug.utils import secure_filename
-from services.session_manager import SessionManager, generate_uuid
+from services.session_manager import generate_uuid
 from services.auto_segmentor import run_auto_segmentation, cancel_session, cancel_all_inference, max_parallel_jobs, pop_run_info
 from services import job_run_log
 from services.mesh_generation import (
@@ -47,7 +47,6 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import cm
 
-from sqlalchemy.orm import aliased
 import os
 import io
 import re
