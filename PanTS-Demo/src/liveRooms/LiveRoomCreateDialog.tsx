@@ -18,6 +18,10 @@ type Props = {
 // A create request that has not answered by now is given up so the dialog can be dismissed.
 const CREATE_TIMEOUT_MS = 30000;
 
+// The pack Solo VQA Practice opens when the catalog has none of its own for the case:
+// case 35's reviewed pack.
+const DEFAULT_QUIZ_PACK_ID = "radworld-case-35-v1";
+
 type QuizPlaylist = {
 	playlist_id: string;
 	title: string;
@@ -82,6 +86,24 @@ export default function LiveRoomCreateDialog({ caseId, open, onClose }: Props) {
 		if (open && mode === "choose" && liveAvailable) firstModeRef.current?.focus({ preventScroll: true });
 	}, [liveAvailable, mode, open]);
 
+	// The catalog's own quiz pack for this case, which Solo VQA Practice opens when
+	// there is one. It is a solo activity, so it is looked up whether or not live
+	// rooms are on. Case 35's pack is the default, so case 35 needs no lookup. Until
+	// the answer arrives, and when the case has no pack or the lookup fails, the card
+	// opens the default pack.
+	const [casePack, setCasePack] = useState<{ caseId: string; packId: string | null } | null>(null);
+	const caseKey = String(caseId);
+	const quizPackId = (casePack?.caseId === caseKey && casePack.packId) || DEFAULT_QUIZ_PACK_ID;
+	useEffect(() => {
+		if (!open || caseKey === "35") return;
+		let active = true;
+		fetch(`${API_BASE}/api/education/quiz-packs?case_id=${encodeURIComponent(caseKey)}`)
+			.then((response) => response.ok ? response.json() : Promise.reject(new Error("Quiz pack lookup failed")))
+			.then((body) => { if (active) setCasePack({ caseId: caseKey, packId: typeof body?.pack?.pack_id === "string" ? body.pack.pack_id : null }); })
+			.catch(() => { if (active) setCasePack({ caseId: caseKey, packId: null }); });
+		return () => { active = false; };
+	}, [caseKey, open]);
+
 	useEffect(() => {
 		if (!open || !liveAvailable) return;
 		let active = true;
@@ -115,7 +137,7 @@ export default function LiveRoomCreateDialog({ caseId, open, onClose }: Props) {
 							<button type="button" className="lr-mode-card lr-mode-card--quiz" disabled={!liveAvailable} onClick={() => { setError(null); setMode("quiz"); }}>
 								<span><IconBolt size={21} /></span><strong>Individual Race</strong><small>Live linked-question race with private answers.</small>
 							</button>
-							<button type="button" className="lr-mode-card" onClick={() => navigate("/learn/quiz/radworld-case-35-v1")}>
+							<button type="button" className="lr-mode-card" onClick={() => navigate(`/learn/quiz/${encodeURIComponent(quizPackId)}`)}>
 								<span><IconClipboardCheck size={21} /></span><strong>Solo VQA Practice</strong><small>Untimed linked-question pack with answer review.</small>
 						</button>
 					</div>
