@@ -1079,13 +1079,8 @@ async function buildCompare(els: CompareElements, src: CompareSources, gen: numb
 	// re-triggers the first — a visible flicker as the two fight. One shared flag means
 	// whichever mechanism is actively applying a change silences the other's reaction to it.
 	let syncing = false;
-	const mirror = (
-		srcId: string,
-		dstId: string,
-		zMapFn: ((p: Vec3) => Vec3) | null,
-		active: () => boolean = () => true
-	) => () => {
-		if (!linked || syncing || !active()) return;
+	// Moves the destination pane to the slice that matches the source pane's.
+	const mirrorNow = (srcId: string, dstId: string, zMapFn: ((p: Vec3) => Vec3) | null) => {
 		const s = engine.getViewport(srcId) as SliceViewport;
 		const d = engine.getViewport(dstId) as SliceViewport;
 		if (!s || !d) return;
@@ -1132,6 +1127,20 @@ async function buildCompare(els: CompareElements, src: CompareSources, gen: numb
 			// Always clear it: a stuck flag would silently switch off Link scroll and Sync cursor.
 			setTimeout(() => { syncing = false; }, 0);
 		}
+	};
+	const mirror = (
+		srcId: string,
+		dstId: string,
+		zMapFn: ((p: Vec3) => Vec3) | null,
+		active: () => boolean = () => true
+	) => () => {
+		if (!linked || syncing || !active()) return;
+		mirrorNow(srcId, dstId, zMapFn);
+	};
+	// Each case opens at its own middle slice, which in two patients is rarely the same
+	// anatomy; without this the first scroll would make case B jump to catch up with A.
+	const alignAxialBToA = () => {
+		if (linked) mirrorNow(A.ax, B.ax, zOnlyAtoB);
 	};
 	const onA = mirror(A.ax, B.ax, zOnlyAtoB);
 	const onB = mirror(B.ax, A.ax, zOnlyBtoA);
@@ -1341,7 +1350,9 @@ async function buildCompare(els: CompareElements, src: CompareSources, gen: numb
 
 	return {
 		setLinked(next) {
+			const turnedOn = next && !linked;
 			linked = next;
+			if (turnedOn) alignAxialBToA();
 		},
 		setSyncCursor(next) {
 			syncCursor = next;
@@ -1498,6 +1509,7 @@ async function buildCompare(els: CompareElements, src: CompareSources, gen: numb
 				for (const vpId of allVps) {
 					(engine.getViewport(vpId) as Pane | undefined)?.resetCamera?.();
 				}
+				alignAxialBToA();
 			}
 			setTimeout(() => { syncing = false; }, 0);
 			// A resize dropped for a queued render frame changes nothing, so the caller needs
@@ -1524,6 +1536,7 @@ async function buildCompare(els: CompareElements, src: CompareSources, gen: numb
 				vp?.resetCamera();
 				vp?.render();
 			}
+			alignAxialBToA();
 			repaintPaneAnnotations(allVps);
 		},
 		setFocusedViewport(viewportId) {
