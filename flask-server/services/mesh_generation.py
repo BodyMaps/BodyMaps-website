@@ -25,6 +25,44 @@ LABELS = VIEWER_LABELS
 
 _mesh_generation_lock = threading.Lock()
 
+# Marching cubes over a 0/1 mask leaves a step on every voxel edge, which reads
+# as blocky on small structures such as a 2 mL lesion or a vessel.
+SURFACE_SMOOTHING_ITERATIONS = 10
+
+# The CancerVerse tumor types keep the surface they have always had, unsmoothed and
+# stored without normals, wherever they appear. Meshes baked from a CancerVerse tumor
+# mask are built the same way for every label (smooth=False).
+UNSMOOTHED_LABELS = frozenset(range(36, 45))
+
+
+def smooths_label(label_id: int, smooth: bool = True) -> bool:
+    """Whether a label's mesh is smoothed and stored with its vertex normals."""
+    return smooth and label_id not in UNSMOOTHED_LABELS
+
+
+def smooth_organ_surface(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """Take the voxel staircase off a marching-cubes surface, in place, keeping its volume.
+
+    Taubin smoothing alone still pulls a small structure inward (a ball eight voxels
+    across loses a third of its volume), so the surface is then moved along its
+    normals by the one distance that gives back the volume it had. That distance is
+    capped at the mesh's mean edge length: smoothing shrinks a label of a voxel or
+    two to almost nothing, and an uncapped push would blow it up to metres.
+    """
+    target = abs(mesh.volume)
+    max_offset = float(mesh.edges_unique_length.mean()) if len(mesh.edges_unique) else 0.0
+    trimesh.smoothing.filter_taubin(
+        mesh, lamb=0.5, nu=-0.53, iterations=SURFACE_SMOOTHING_ITERATIONS
+    )
+    for _ in range(2):
+        volume = mesh.volume
+        if not mesh.area > 0:
+            break
+        offset = np.clip((target - abs(volume)) / mesh.area, -max_offset, max_offset)
+        # The winding, and so the normals' direction, depends on the affine.
+        mesh.vertices = mesh.vertices + np.sign(volume) * offset * mesh.vertex_normals
+    return mesh
+
 
 def safe_filename(s: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_\\-]+", "_", s).lower()
@@ -228,8 +266,10 @@ def load_clean_label_data(label_nifti_path: str):
     return img, data
 
 
-def mesh_to_glb_bytes(mesh: trimesh.Trimesh) -> bytes:
-    exported = mesh.export(file_type="glb")
+def mesh_to_glb_bytes(mesh: trimesh.Trimesh, include_normals: bool = False) -> bytes:
+    # A smoothed surface is stored with its vertex normals so three.js shades it
+    # smoothly. Without them three.js shades every triangle flat.
+    exported = mesh.export(file_type="glb", include_normals=include_normals)
 
     if isinstance(exported, bytes):
         return exported
@@ -245,8 +285,10 @@ def _build_organ_mesh(
     affine: np.ndarray,
     label_id: int,
     global_center: np.ndarray,
+    smooth: bool = True,
 ) -> trimesh.Trimesh | None:
-    """Marching-cubes one organ label into a cleaned, centered trimesh.
+    """Marching-cubes one organ label into a cleaned, centered trimesh, smoothed
+    unless smooth is False.
 
     Returns None when the label has no voxels in this case.
     """
@@ -287,12 +329,13 @@ def _build_organ_mesh(
     mesh.remove_unreferenced_vertices()
     mesh.merge_vertices()
 
-    return mesh
+    return smooth_organ_surface(mesh) if smooth else mesh
 
 
 def generate_organ_glb_bytes(
     organ_key: str,
     label_nifti_path: str,
+    smooth: bool = True,
 ) -> bytes:
 
     img, data = load_clean_label_data(label_nifti_path)
@@ -308,11 +351,12 @@ def generate_organ_glb_bytes(
 
     global_center = compute_global_center(data, img.affine)
 
-    mesh = _build_organ_mesh(data, img.affine, label_id, global_center)
+    smoothed = smooths_label(label_id, smooth)
+    mesh = _build_organ_mesh(data, img.affine, label_id, global_center, smooth=smoothed)
     if mesh is None:
         raise ValueError(f"Organ {organ_key} with label {label_id} has no voxels.")
 
-    return mesh_to_glb_bytes(mesh)
+    return mesh_to_glb_bytes(mesh, include_normals=smoothed)
 
 
 def _write_atomic(path: str, payload: bytes) -> None:
@@ -328,6 +372,7 @@ def bake_case_meshes(
     label_nifti_path: str,
     out_dir: str,
     route_base: str = "cases",
+    smooth: bool = True,
 ) -> dict:
     """Generate EVERY organ GLB plus manifest.json for one case in a single
     pass over the labelmap, writing atomically into out_dir.
@@ -337,6 +382,7 @@ def bake_case_meshes(
     of the memory of answering each organ's GLB request independently.
     Returns the manifest dict (same shape the pre-bake scripts produce,
     including "bounds", which the viewer's 3D crosshair requires).
+    smooth=False bakes every label unsmoothed and without normals.
     """
     img, data = load_clean_label_data(label_nifti_path)
 
@@ -361,12 +407,13 @@ def bake_case_meshes(
         if label_id not in present_labels:
             continue
 
-        mesh = _build_organ_mesh(data, img.affine, label_id, global_center)
+        smoothed = smooths_label(label_id, smooth)
+        mesh = _build_organ_mesh(data, img.affine, label_id, global_center, smooth=smoothed)
         if mesh is None:
             continue
 
         filename = f"{safe_filename(meta['key'])}.glb"
-        _write_atomic(os.path.join(out_dir, filename), mesh_to_glb_bytes(mesh))
+        _write_atomic(os.path.join(out_dir, filename), mesh_to_glb_bytes(mesh, include_normals=smoothed))
 
         manifest["organs"].append(
             {

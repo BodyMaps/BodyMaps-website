@@ -586,7 +586,8 @@ def _cancerverse_mesh_manifest(case_id):
             manifest = fresh()
             if manifest is None:
                 try:
-                    manifest = bake_case_meshes(folder, seg_path, case_dir, route_base="cases")
+                    # The tumor meshes keep their unsmoothed surface.
+                    manifest = bake_case_meshes(folder, seg_path, case_dir, route_base="cases", smooth=False)
                 except Exception as error:
                     # Log the cause here; the browser only gets a fixed message.
                     print(f"[cv-mesh] baking failed for {folder}: {type(error).__name__}: {error}", flush=True)
@@ -692,7 +693,11 @@ def get_mesh_file(display_id, filename):
         if seg_path is None:
             return jsonify({"error": f"No labelmap available for {display_id}"}), 404
         try:
-            glb_bytes = generate_organ_glb_bytes(organ_key, seg_path)
+            if display_id.startswith("CV_"):
+                # A CancerVerse tumor mesh keeps its unsmoothed surface, as its bake does.
+                glb_bytes = generate_organ_glb_bytes(organ_key, seg_path, smooth=False)
+            else:
+                glb_bytes = generate_organ_glb_bytes(organ_key, seg_path)
         except Exception as e:
             if display_id.startswith("CV_"):
                 # CancerVerse: never send exception text to the browser, log it here instead.
