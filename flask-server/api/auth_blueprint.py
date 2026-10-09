@@ -626,6 +626,12 @@ def delete_my_jobs():
             return jsonify({"error": "Cancel active scans and wait for processing to stop before deleting history.",
                             "code": "inference_active"}), 409
         result = job_store.delete_jobs_for_user(user_id)
+        # The run folders under tmp/ and CTs uploaded ahead of Run sit outside
+        # what delete_jobs_for_user may remove; this lock is already held.
+        result["runs"] = (
+            api.delete_inference_runs_for_user(user_id) if api
+            else len(job_store.delete_run_folders_for_user(user_id))
+        )
         if api:
             with api._inference_jobs_lock:
                 for job in jobs:

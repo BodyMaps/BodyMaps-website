@@ -514,11 +514,14 @@ def test_export_returns_only_the_account_basics(client):
 
 # ---- deletion -------------------------------------------------------------
 
-def test_delete_jobs_keeps_the_account(client):
+def test_delete_jobs_keeps_the_account(client, tmp_path, monkeypatch):
+    import api.api_blueprint as api_routes
+    # Upload page runs are looked for in their own folder; keep it in the test's.
+    monkeypatch.setattr(api_routes, "SESSIONS_DIR", str(tmp_path / "runs"))
     client.post("/api/auth/register", json={"email": "v@w.com", "password": "password1"})
     r = client.delete("/api/me/jobs")
     assert r.status_code == 200
-    assert r.get_json()["deleted"] == {"jobs": 0, "files": 0}
+    assert r.get_json()["deleted"] == {"jobs": 0, "files": 0, "runs": 0}
     assert client.get("/api/auth/me").status_code == 200  # still signed in
 
 
