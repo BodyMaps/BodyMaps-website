@@ -69,13 +69,16 @@ jobs:
       # tests need. numpy is required because constants.py imports it; requests
       # because Authlib's Flask client imports it.
       - name: Install test deps
-        run: python -m pip install --upgrade pip pytest werkzeug SQLAlchemy Flask-SQLAlchemy alembic argon2-cffi Authlib requests flask-cors numpy scipy nibabel openpyxl pillow python-dotenv reportlab websockets scikit-image pandas trimesh
+        run: python -m pip install --upgrade pip pytest werkzeug SQLAlchemy Flask-SQLAlchemy alembic argon2-cffi Authlib requests flask-cors numpy scipy nibabel openpyxl pillow python-dotenv reportlab PyPDF2 websockets scikit-image pandas trimesh
 
       # Catches syntax errors anywhere in the backend (api_blueprint.py etc.)
       # without installing the heavy runtime deps - nothing else in CI parses
       # these files, so a bad merge could otherwise ship an unimportable app.
       - name: Python syntax check
         run: python -m compileall -q .
+
+      - name: Automatic report evidence and source preservation
+        run: python -m pytest tests/unit/test_report_evidence.py tests/unit/test_quiz_report_questions.py -v
 
       - name: Path-safety unit tests
         run: python -m pytest tests/unit/test_path_safety.py -v
