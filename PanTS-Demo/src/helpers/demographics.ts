@@ -14,14 +14,17 @@ export function formatTumor(tumor: number | null | undefined): string {
   return tumor === 1 ? "Tumor" : tumor === 0 ? "No tumor" : "Tumor status unknown";
 }
 
-/** A row value in the viewer's case metadata panel. */
-export function formatCaseMetaValue(key: string, v: unknown): string {
+/** A row value in the viewer's case metadata panel. `tumor` is the case's own tumor
+ *  value, so a case without a tumor reads "None" for its tumor type, not "Unknown". */
+export function formatCaseMetaValue(key: string, v: unknown, tumor?: unknown): string {
   if (key === "tumor") {
     if (v === 1 || v === true) return "Yes";
     if (v === 0 || v === false) return "No";
     return "Unknown";
   }
-  if (v === null || v === undefined || v === "") return "Unknown";
+  if (v === null || v === undefined || v === "") {
+    return key === "tumor label" && (tumor === 0 || tumor === false) ? "None" : "Unknown";
+  }
   if (key === "sex" && typeof v === "string") {
     const named = formatSex(v);
     if (named) return named;
