@@ -1055,11 +1055,15 @@ def _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path):
     # ==================== KEY IMAGES ====================
     lesions = report_data.get("lesions", {})
     case_id = report_data.get("case_id")
-    pants_id = get_panTS_id(case_id) if str(case_id).isdigit() else ""
-    ct_path = f"{Constants.PANTS_PATH}/image_only/{pants_id}/{Constants.MAIN_NIFTI_FILENAME}"
-    seg_dir = f"{Constants.PANTS_PATH}/mask_only/{pants_id}/segmentations"
+    ct_path = seg_dir = None
+    if report_data.get("masks_available") and str(case_id).isascii() and str(case_id).isdigit():
+        # Canonicalize at the filesystem boundary. Source-only/non-PanTS IDs
+        # remain valid report metadata, but must never become image paths.
+        pants_id = get_panTS_id(int(case_id))
+        ct_path = f"{Constants.PANTS_PATH}/image_only/{pants_id}/{Constants.MAIN_NIFTI_FILENAME}"
+        seg_dir = f"{Constants.PANTS_PATH}/mask_only/{pants_id}/segmentations"
 
-    if report_data.get("masks_available") and os.path.exists(ct_path):
+    if ct_path is not None and os.path.exists(ct_path):
         lesion_files = {
             "pancreas": "pancreatic_lesion.nii.gz",
             "liver": "liver_lesion.nii.gz",

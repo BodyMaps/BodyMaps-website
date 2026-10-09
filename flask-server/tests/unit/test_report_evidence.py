@@ -208,6 +208,77 @@ def test_pdf_preserves_long_source_nonorgan_findings_and_final_impression(tmp_pa
     assert "Everything else looked normal" not in text
 
 
+@pytest.mark.parametrize("case_id,masks_available", [
+    (None, True), ("", True), ("../7", True), (r"..\7", True),
+    ("CV_00000007", True), ("CV_00000007", False), ("\u00b2", True), ("7", False),
+])
+def test_pdf_source_only_or_invalid_image_ids_never_construct_or_probe_image_paths(
+    tmp_path, monkeypatch, case_id, masks_available,
+):
+    from reportlab.pdfgen import canvas
+    from PyPDF2 import PdfReader
+
+    template = tmp_path / "blank-template.pdf"
+    pdf = canvas.Canvas(str(template))
+    pdf.showPage()
+    pdf.save()
+    monkeypatch.setenv("TEMPLATE_PATH", str(template))
+
+    def unexpected_image_access(*args):
+        pytest.fail("A source-only or invalid case ID must not access dataset image paths")
+
+    data = evidence.report_payload("unused", SYNTHETIC, measurements_available=masks_available)
+    data["case_id"] = case_id
+    functions = api_functions(
+        "_draw_report_pdf",
+        os=SimpleNamespace(getenv=os.getenv, path=SimpleNamespace(exists=unexpected_image_access)),
+        source_text=evidence.source_text, report_limitations=evidence.report_limitations,
+        measurement_display=evidence.measurement_display,
+        get_panTS_id=unexpected_image_access,
+        # Any attempt to construct a dataset path also fails before filesystem IO.
+        Constants=SimpleNamespace(),
+    )
+    output = tmp_path / "source-only.pdf"
+    functions["_draw_report_pdf"](data, str(tmp_path / "temp.pdf"), str(output))
+    text = "\n".join(page.extract_text() for page in PdfReader(str(output)).pages)
+    assert "Synthetic loculated left pleural effusion." in text
+    assert "Synthetic bulky inguinal nodes." in text
+
+
+@pytest.mark.parametrize("case_id", ["0007", 7])
+def test_pdf_canonicalizes_numeric_case_id_before_constructing_image_paths(tmp_path, monkeypatch, case_id):
+    from reportlab.pdfgen import canvas
+
+    template = tmp_path / "blank-template.pdf"
+    pdf = canvas.Canvas(str(template))
+    pdf.showPage()
+    pdf.save()
+    monkeypatch.setenv("TEMPLATE_PATH", str(template))
+    ids, paths = [], []
+
+    def canonical_folder(value):
+        assert type(value) is int
+        ids.append(value)
+        return f"PanTS_{value:08d}"
+
+    def image_exists(path):
+        paths.append(path)
+        return False
+
+    data = evidence.report_payload("unused", SYNTHETIC, measurements_available=True)
+    data["case_id"] = case_id
+    functions = api_functions(
+        "_draw_report_pdf",
+        os=SimpleNamespace(getenv=os.getenv, path=SimpleNamespace(exists=image_exists)),
+        source_text=evidence.source_text, report_limitations=evidence.report_limitations,
+        measurement_display=evidence.measurement_display, get_panTS_id=canonical_folder,
+        Constants=SimpleNamespace(PANTS_PATH=str(tmp_path), MAIN_NIFTI_FILENAME="ct.nii.gz"),
+    )
+    functions["_draw_report_pdf"](data, str(tmp_path / "temp.pdf"), str(tmp_path / "numeric.pdf"))
+    assert ids == [7]
+    assert paths == [f"{tmp_path}/image_only/PanTS_00000007/ct.nii.gz"]
+
+
 def test_json_disables_cache_and_legacy_pdf_uses_shared_builder():
     from flask import Flask, jsonify
 
