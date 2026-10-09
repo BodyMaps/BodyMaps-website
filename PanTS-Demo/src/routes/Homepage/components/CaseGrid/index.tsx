@@ -73,10 +73,10 @@ export default function CaseGrid({
             <Preview
               key={c.id}
               id={c.id}
-              previewMetadata={{ sex: c.sex, age: c.age, tumor: c.tumor }}
+              previewMetadata={{ sex: c.sex, age: c.age, tumor: c.tumor, tumorLabel: c.tumorLabel }}
               saved
               onToggleSave={() =>
-                onToggleSave(c.id, { sex: c.sex, age: c.age, tumor: c.tumor })
+                onToggleSave(c.id, { sex: c.sex, age: c.age, tumor: c.tumor, tumorLabel: c.tumorLabel })
               }
               compareSelected={compareIds.includes(c.id)}
               onToggleCompare={() => onToggleCompare(c.id)}

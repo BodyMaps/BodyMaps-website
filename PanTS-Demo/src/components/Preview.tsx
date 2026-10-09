@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_BASE } from "../helpers/constants";
 import { prefetchViewer } from "../helpers/prefetchViewer";
-import type { CaseId } from "../helpers/search";
+import { formatTumorBadge, type CaseId } from "../helpers/search";
 import type { PreviewType } from "../types";
 
 type Props = {
@@ -72,7 +72,7 @@ export default function Preview({
 	};
 	const tumorLabel =
 		previewMetadata.tumor === 1
-			? "Tumor"
+			? formatTumorBadge(previewMetadata.tumorLabel)
 			: previewMetadata.tumor === 0
 				? "No Tumor"
 				: "Unknown";

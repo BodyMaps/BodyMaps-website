@@ -6,6 +6,7 @@ export type TumorFilter = "any" | "tumor" | "no_tumor";
 export type SearchFilters = {
 	tumor: TumorFilter;
 	dataset: string[]; // "PanTS" / "CancerVerse"; empty = both (Any)
+	tumorType: string[]; // organ of the tumor, e.g. "pancreas", "liver" (from facets)
 	sex: string[]; // M / F / UNKNOWN
 	age: string[]; // "0-9" … "90-99" / "UNKNOWN"
 	manufacturer: string[]; // scanner manufacturer (from facets)
@@ -17,6 +18,7 @@ export type SearchFilters = {
 export const EMPTY_FILTERS: SearchFilters = {
 	tumor: "any",
 	dataset: [],
+	tumorType: [],
 	sex: [],
 	age: [],
 	manufacturer: [],
@@ -26,7 +28,15 @@ export const EMPTY_FILTERS: SearchFilters = {
 };
 
 // The multi-select array keys (everything except `tumor`).
-export type MultiFilterKey = "dataset" | "sex" | "age" | "manufacturer" | "ctPhase" | "siteNat" | "year";
+export type MultiFilterKey =
+	| "dataset"
+	| "tumorType"
+	| "sex"
+	| "age"
+	| "manufacturer"
+	| "ctPhase"
+	| "siteNat"
+	| "year";
 
 // A case id as used across the UI: a bare number for PanTS (e.g. 8854) or the full
 // prefixed string for CancerVerse (e.g. "CV_00000001"). CancerVerse ids MUST keep
@@ -39,7 +49,10 @@ export type SearchItem = {
 	case_id?: string | number;
 	"PanTS ID"?: string | number;
 	id?: string | number;
-	tumor?: number | null;
+	tumor?: number | null; // 1 tumor, 0 none, null/absent = unknown
+	"tumor label"?: string | null; // display name of the tumor organ(s), e.g. "Pancreas" or "Liver, Kidney"
+	"tumor types"?: string[] | null;
+	dataset?: string | null; // "PanTS" / "CancerVerse"
 	sex?: string | null;
 	age?: number | string | null;
 };
@@ -53,6 +66,16 @@ export const itemToId = (it: SearchItem): CaseId => {
 	if (raw.toUpperCase().startsWith("CV")) return raw; // keep "CV_00000001" as-is
 	const m = raw.match(/\d+/);
 	return m ? Number(m[0]) : 0;
+};
+
+// Compact tumor text for a card badge: "Pancreas" -> "Pancreas tumor"; several organs
+// -> "Liver, Kidney +1 tumor" so a long list can never overflow the card.
+export const formatTumorBadge = (label?: string | null, maxOrgans = 2): string => {
+	const organs = (label ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+	if (organs.length === 0) return "Tumor";
+	const shown = organs.slice(0, maxOrgans).join(", ");
+	const extra = organs.length - maxOrgans;
+	return `${shown}${extra > 0 ? ` +${extra}` : ""} tumor`;
 };
 
 // Canonical id sent back to backend exclusion filters.
@@ -78,6 +101,7 @@ export const buildSearchParams = (
 	if (hasCV && !hasPanTS) params.set("dataset", "cancerverse");
 	else if (hasPanTS && !hasCV) params.set("dataset", "pants");
 	else params.set("dataset", "all"); // both or neither → everything
+	(filters.tumorType ?? []).forEach((v) => params.append("tumor_type[]", v));
 	filters.sex.forEach((v) => params.append("sex[]", v));
 	if (filters.tumor === "tumor") params.set("tumor", "1");
 	else if (filters.tumor === "no_tumor") params.set("tumor", "0");
@@ -104,6 +128,7 @@ export const parseFiltersFromParams = (params: URLSearchParams): SearchFilters =
 	return {
 		tumor,
 		dataset,
+		tumorType: params.getAll("tumor_type[]"),
 		sex: params.getAll("sex[]"),
 		age: params.getAll("age_bin[]"),
 		manufacturer: params.getAll("manufacturer[]"),
@@ -118,6 +143,7 @@ export const countActiveFilters = (f: SearchFilters): number =>
 	// dataset only counts as an active filter when it restricts to a single dataset
 	// (empty or both = "Any", i.e. no restriction).
 	((f.dataset?.length ?? 0) === 1 ? 1 : 0) +
+	(f.tumorType?.length ?? 0) +
 	f.sex.length +
 	f.age.length +
 	f.manufacturer.length +
