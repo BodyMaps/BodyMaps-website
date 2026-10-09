@@ -69,14 +69,21 @@ reference preserves the original wording. Do not add patient reports, scans,
 credentials or production databases to fixtures or pull requests.
 
 Run `npm test` and `npm run build` in `PanTS-Demo`. In `flask-server`, run
-`python -m pytest tests/unit/test_report_evidence.py tests/unit/test_quiz_report_questions.py`.
+`python -m pytest tests/unit/test_report_evidence.py tests/unit/test_report_measurements.py tests/unit/test_report_measurement_cache.py tests/unit/test_quiz_report_questions.py`.
 The backend tests use generated files and isolate report functions from model
 services, production data, and database initialization.
 
-The old indefinite report cache is removed so updated source text is read again.
-Measurements currently reload local CT/masks per request; profile report latency
-on deployment hardware before adding a bounded cache keyed by source-file
-identity. Do not restore an unversioned report cache or cache failed lookups.
+The stored source text is read again for every request. Measurement calculations
+use native voxel arrays and axis reductions to avoid full floating-point mask
+copies and large voxel-coordinate arrays. NIfTI scaling, binary-mask validation,
+and CT/mask geometry checks still apply.
+
+Only the small measurement results are cached, for at most eight cases and
+120 seconds. Each lookup verifies the CT and named-mask file identities; changes
+invalidate the entry. Concurrent requests for one case share a calculation.
+Failures and calculations whose inputs change are not cached. The cache contains
+no patient metadata or source report text, and callers receive independent copies
+of the measurements. Do not restore an indefinite full-report cache.
 
 After an approved release, check the report, its shared view, and both exports.
 Confirm that complete source text is available only as a separate reference,
