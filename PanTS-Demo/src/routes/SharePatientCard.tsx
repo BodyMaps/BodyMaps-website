@@ -144,7 +144,7 @@ export default function SharePatientCard() {
                 <p style={{ color: MUTED, fontSize: 14 }}>Clinical status is not assessed by these measurements.</p>
                 {!all.length && <p style={{ color: MUTED }}>Segmentation measurements are unavailable. {getSourceReportText(data) ? 'The unverified source reference can still be expanded above.' : 'No source reference text is available for this case.'}</p>}
                 {all.length > 0 && <details>
-                  <summary style={{ cursor: 'pointer', color: NAVY }}>{all.length} structures with segmentation data</summary>
+                  <summary style={{ cursor: 'pointer', color: NAVY }}>{all.length} structure{all.length === 1 ? '' : 's'} with segmentation data</summary>
                   <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
                     {all.map(([organ, metrics]) => <div key={organ} style={{ padding: 12, border: `1px solid ${HAIRLINE}`, borderRadius: 10 }}>
                       <strong>{labelize(organ)}</strong>

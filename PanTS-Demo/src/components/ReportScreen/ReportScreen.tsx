@@ -274,7 +274,7 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
       <div style={{ animation: `${anim} 0.38s ease both` }}>
         <h1 style={{ color: '#fff', fontSize: 30 }}>Segmented structures</h1>
         <p style={{ color: 'rgba(255,255,255,0.76)', lineHeight: 1.5 }}>
-          {all.length} structure{all.length === 1 ? '' : 's'} have segmentation data. Clinical status is not assessed by these measurements.
+          {all.length} structure{all.length === 1 ? '' : 's'} {all.length === 1 ? 'has' : 'have'} segmentation data. Clinical status is not assessed by these measurements.
         </p>
         <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14, lineHeight: 1.5 }}>
           {lang === 'patient'
