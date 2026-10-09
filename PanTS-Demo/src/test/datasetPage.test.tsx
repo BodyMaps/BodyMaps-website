@@ -2,7 +2,10 @@
  * Dataset page (/dashboard): the list on screen is named by the URL (Browse
  * all, filters, page, Saved, a shuffled strip), a slow answer never replaces a
  * newer one, the grid reveals as soon as its thumbnails load, and focus has
- * somewhere to go when the control that had it disappears.
+ * somewhere to go when the control that had it disappears. The search box and
+ * the compare tray take a case number or an id copied from a card and say what
+ * is wrong with anything else, and the filter options offer Retry when they
+ * fail to load.
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -12,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Homepage from "../routes/Homepage";
 import CaseGrid from "../routes/Homepage/components/CaseGrid";
 import { SAVED_CASES_KEY } from "../helpers/savedCases";
+import { track } from "../helpers/analytics";
+import { resetCancerVerseCountCache } from "../helpers/caseNumbering";
 
 vi.mock("../helpers/prefetchViewer", () => ({ prefetchViewer: vi.fn() }));
 vi.mock("../helpers/analytics", async (importOriginal) => {
@@ -132,6 +137,8 @@ const pageOf = (page: number) =>
 
 beforeEach(() => {
 	localStorage.clear();
+	resetCancerVerseCountCache();
+	vi.mocked(track).mockClear();
 	gates = [];
 	vi.spyOn(window, "scrollTo").mockImplementation(() => {});
 	global.fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -312,8 +319,8 @@ describe("dataset page requests", () => {
 			.map(([u]) => new URL(String(u), "http://localhost"))
 			.find((u) => u.pathname.endsWith("/api/facets"));
 		expect(facets?.searchParams.get("top_k")).toBe("64");
-		const labels = within(year).getAllByRole("button").map((b) => b.textContent);
-		expect(labels).toEqual(["Any", "20235", "20212", "20199"]);
+		const labels = within(year).getAllByRole("button").map((b) => b.firstChild?.textContent);
+		expect(labels).toEqual(["Any", "2023", "2021", "2019"]);
 	});
 });
 
@@ -336,5 +343,171 @@ describe("dataset page focus", () => {
 		await user.click(screen.getByRole("button", { name: "Clear filters" }));
 		expect(screen.getByRole("region", { name: "Cases" })).toHaveFocus();
 		await waitFor(() => expect(where()).toBe("/dashboard"));
+	});
+});
+
+describe("dataset search box", () => {
+	const searchFor = async (value: string) => {
+		const user = userEvent.setup();
+		const { unmount } = renderPage();
+		const box = await screen.findByRole("textbox", { name: "Search by case number" });
+		if (value) await user.type(box, value);
+		await user.click(screen.getByRole("button", { name: "Search" }));
+		return { user, box, unmount };
+	};
+
+	it("opens the case for an id pasted from a card, in any letter case", async () => {
+		const { unmount } = await searchFor("PanTS_00000017");
+		await waitFor(() => expect(where()).toBe("/case/17"));
+		unmount();
+		await searchFor("cv_00000001");
+		await waitFor(() => expect(where()).toBe("/case/CV_00000001"));
+	});
+
+	it("reads a number written as a card prints it", async () => {
+		await searchFor("#9,902");
+		await waitFor(() => expect(where()).toBe("/case/CV_00000001"));
+	});
+
+	it("says what is wrong with anything else, from a region that was already there", async () => {
+		const { unmount } = renderPage();
+		const live = document.getElementById("dataset-search-error") as HTMLElement;
+		expect(live).toHaveAttribute("aria-live", "polite");
+		expect(live).toBeEmptyDOMElement();
+		unmount();
+
+		const { user, box } = await searchFor("12V");
+		const message = document.getElementById("dataset-search-error") as HTMLElement;
+		expect(message.textContent).toMatch(/^Enter a case number such as 17 or 9902/);
+		expect(box).toHaveAttribute("aria-invalid", "true");
+		expect(box).toHaveAttribute("aria-describedby", "dataset-search-error");
+		expect(box).toHaveFocus();
+		expect(where()).toBe("/dashboard");
+		expect(track).not.toHaveBeenCalledWith("dataset_search");
+
+		// The same message again is still a change, so it is read out again.
+		const first = message.textContent;
+		await user.click(screen.getByRole("button", { name: "Search" }));
+		expect(message.textContent).not.toBe(first);
+		expect(box).toHaveFocus();
+
+		await user.type(box, "1");
+		expect(message).toBeEmptyDOMElement();
+		expect(box).not.toHaveAttribute("aria-invalid");
+	});
+
+	it("keeps PanTS ids to the PanTS range", async () => {
+		await searchFor("PanTS_00012000");
+		expect(document.getElementById("dataset-search-error")?.textContent).toBe(
+			"PanTS IDs run from PanTS_00000001 to PanTS_00009901.",
+		);
+		expect(where()).toBe("/dashboard");
+	});
+
+	it("counts a search once whether it opens a case or applies the filters", async () => {
+		const { user, box } = await searchFor("");
+		await screen.findByText(/Page 1 of 4/);
+		expect(vi.mocked(track).mock.calls.filter(([e]) => e === "dataset_search")).toHaveLength(1);
+		await user.type(box, "17");
+		await user.click(screen.getByRole("button", { name: "Search" }));
+		await waitFor(() => expect(where()).toBe("/case/17"));
+		expect(vi.mocked(track).mock.calls.filter(([e]) => e === "dataset_search")).toHaveLength(2);
+	});
+
+	it("hides the filter button's icons and reads its count as a selection", async () => {
+		const user = userEvent.setup();
+		renderPage("/dashboard?dataset=all&tumor=1");
+		await screen.findByText(/Page 1 of 4/);
+		const toggle = screen.getByRole("button", { name: /Advanced filters/ });
+		expect(toggle).toHaveAccessibleName("Advanced filters 1 selected");
+		expect(toggle.querySelectorAll("svg:not([aria-hidden='true'])")).toHaveLength(0);
+		expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await user.click(toggle);
+		expect(toggle).toHaveAttribute("aria-expanded", "false");
+	});
+});
+
+describe("dataset filter panel", () => {
+	it("names each group by its title and reads a count as a number of cases", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		await user.click(screen.getByRole("button", { name: /Advanced filters/ }));
+		const year = await screen.findByRole("group", { name: "Study Year" });
+		expect(await within(year).findByRole("button", { name: "2023 (5 cases)" })).toBeInTheDocument();
+		expect(screen.getByRole("group", { name: "Sex" })).toBeInTheDocument();
+	});
+
+	it("offers Retry when the options fail to load, instead of loading forever", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const answer = global.fetch;
+		let failures = 1;
+		global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+			if (String(input).includes("/api/facets") && failures-- > 0) return json({ error: "boom" }, 500);
+			return answer(input);
+		}) as unknown as typeof fetch;
+		const user = userEvent.setup();
+		renderPage();
+		await user.click(screen.getByRole("button", { name: /Advanced filters/ }));
+		const alert = await screen.findByRole("alert");
+		expect(alert).toHaveTextContent("Couldn't load options.");
+		expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+		expect(screen.queryByText("—")).not.toBeInTheDocument();
+
+		await user.click(within(alert).getByRole("button", { name: "Retry" }));
+		const year = screen.getByRole("group", { name: "Study Year" });
+		expect(await within(year).findByRole("button", { name: /^2023/ })).toBeInTheDocument();
+		expect(screen.queryByText("Couldn't load options.")).not.toBeInTheDocument();
+		// Retry went away, so focus waits on the first pill.
+		expect(within(screen.getByRole("group", { name: "Tumor" })).getAllByRole("button")[0]).toHaveFocus();
+	});
+});
+
+describe("compare tray", () => {
+	const pickFirst = async () => {
+		const user = userEvent.setup();
+		renderPage();
+		await user.click(await screen.findByRole("button", { name: "Add case 35 to comparison" }));
+		const tray = screen.getByRole("region", { name: "Compare cases" });
+		return { user, tray, field: within(tray).getByRole("textbox", { name: "Add a case by number" }) };
+	};
+
+	it("adds a CancerVerse case by its number and moves on to Compare", async () => {
+		const { user, tray, field } = await pickFirst();
+		expect(screen.getByText("1 of 2 cases selected")).toBeInTheDocument();
+		await user.type(field, "9,902");
+		await user.click(within(tray).getByRole("button", { name: "Add" }));
+		await waitFor(() => expect(tray).toHaveTextContent("#35 vs #CV_00000001"));
+		expect(within(tray).getByRole("button", { name: "Compare" })).toHaveFocus();
+		expect(screen.getByText("2 cases selected, Compare is ready")).toBeInTheDocument();
+	});
+
+	it("adds a pasted id and says so when a case is already picked or the text is not a case", async () => {
+		const { user, tray, field } = await pickFirst();
+		await user.type(field, "PanTS_00000035");
+		await user.click(within(tray).getByRole("button", { name: "Add" }));
+		const message = document.getElementById("compare-tray-error") as HTMLElement;
+		expect(message).toHaveTextContent("Case PanTS_00000035 is already selected.");
+		expect(field).toHaveValue("PanTS_00000035");
+		expect(field).toHaveAttribute("aria-invalid", "true");
+
+		await user.clear(field);
+		expect(message).toBeEmptyDOMElement();
+		await user.type(field, "CV");
+		await user.click(within(tray).getByRole("button", { name: "Add" }));
+		expect(message.textContent).toMatch(/^Enter a case number such as 17 or 9902/);
+
+		await user.clear(field);
+		await user.type(field, "cv_00000007");
+		await user.click(within(tray).getByRole("button", { name: "Add" }));
+		await waitFor(() => expect(tray).toHaveTextContent("#35 vs #CV_00000007"));
+	});
+
+	it("offers a shortcut to the tray and names Clear", async () => {
+		const { user, tray, field } = await pickFirst();
+		await user.click(screen.getByRole("button", { name: "Go to compare bar" }));
+		expect(field).toHaveFocus();
+		await user.click(within(tray).getByRole("button", { name: "Clear compare selection" }));
+		expect(screen.queryByRole("region", { name: "Compare cases" })).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Go to compare bar" })).not.toBeInTheDocument();
 	});
 });

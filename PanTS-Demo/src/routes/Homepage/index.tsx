@@ -6,7 +6,7 @@ import FilterPanel from "./components/FilterPanel";
 import ResultsSummary from "./components/ResultsSummary";
 import CaseGrid from "./components/CaseGrid";
 import Pagination from "./components/Pagination";
-import CompareTray from "./components/CompareTray";
+import CompareTray, { type CompareTrayHandle } from "./components/CompareTray";
 import styles from "./Homepage.module.css";
 import { PER_PAGE } from "./constants";
 
@@ -16,6 +16,7 @@ export default function Homepage() {
   // swaps the cards and scrolls to the top away from the pager. This region
   // outlives each swap, so focus goes here.
   const resultsRef = useRef<HTMLDivElement>(null);
+  const trayRef = useRef<CompareTrayHandle>(null);
   const focusResults = () => resultsRef.current?.focus({ preventScroll: true });
   const resetFilters = () => {
     dash.handleResetFilters();
@@ -29,6 +30,15 @@ export default function Homepage() {
     dash.handleClearCompare();
     focusResults();
   };
+
+  // Always mounted, so the first pick is announced too (the tray itself only
+  // exists once something is picked).
+  const compareStatus =
+    dash.compareIds.length === 0
+      ? ""
+      : dash.compareIds.length === 1
+        ? "1 of 2 cases selected"
+        : "2 cases selected, Compare is ready";
 
   return (
     <div className={styles.page}>
@@ -50,6 +60,8 @@ export default function Homepage() {
           <SearchBar
             searchId={dash.searchId}
             setSearchId={dash.setSearchId}
+            searchError={dash.searchError}
+            rejectCount={dash.searchRejectCount}
             showFilters={dash.showFilters}
             setShowFilters={dash.setShowFilters}
             activeFilterCount={dash.activeFilterCount}
@@ -61,6 +73,8 @@ export default function Homepage() {
               filters={dash.filters}
               setFilters={dash.setFilters}
               facetData={dash.facetData}
+              facetError={dash.facetError}
+              onRetryFacets={dash.retryFacets}
               toggleMulti={dash.toggleMulti}
             />
           )}
@@ -84,6 +98,17 @@ export default function Homepage() {
         )}
 
         <div ref={resultsRef} tabIndex={-1} role="region" aria-label="Cases" className={styles.results}>
+          {/* The tray is fixed on screen but last in the page; this stays out of
+              sight until it has keyboard focus. */}
+          {dash.compareIds.length > 0 && (
+            <button
+              type="button"
+              className="design-skip-link"
+              onClick={() => trayRef.current?.focus()}
+            >
+              Go to compare bar
+            </button>
+          )}
           {!dash.showSaved && dash.error && <p className={styles.error} role="alert">{dash.error}</p>}
 
           <CaseGrid
@@ -114,14 +139,19 @@ export default function Homepage() {
 
       {dash.compareIds.length > 0 && (
         <CompareTray
+          ref={trayRef}
           compareIds={dash.compareIds}
           compareTyped={dash.compareTyped}
           setCompareTyped={dash.setCompareTyped}
+          compareError={dash.compareError}
           onSubmitTyped={dash.submitTypedCompare}
           onClear={clearCompare}
           onCompare={dash.handleCompare}
         />
       )}
+      <p role="status" className="sr-only">
+        {compareStatus}
+      </p>
     </div>
   );
 }

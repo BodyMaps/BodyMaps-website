@@ -12,7 +12,12 @@ import {
   type SearchFilters as Filters,
   type SearchItem,
 } from "../../../helpers/search";
-import { caseNumberToPath } from "../../../helpers/caseNumbering";
+import {
+  caseNumberToPath,
+  fetchCancerVerseCount,
+  numberToCaseId,
+  PANTS_CASE_COUNT,
+} from "../../../helpers/caseNumbering";
 import { prefetchViewer } from "../../../helpers/prefetchViewer";
 import { fetchCurated, getCachedCurated } from "../../../helpers/curatedCache";
 import {
@@ -27,6 +32,7 @@ import { CARD_COUNT, PER_PAGE } from "../constants";
 import type { FacetData } from "../types";
 import { track } from "../../../helpers/analytics";
 import { scrollPageToTop } from "../../../helpers/pageScroll";
+import { cleanCaseInput, parseCaseInput } from "../caseInput";
 
 // Pure so it can seed both the lazy initial state (skips the first-paint skeleton
 // entirely when the curated cache is already warm) and the post-fetch ingest path.
@@ -83,9 +89,17 @@ export function useDashboard() {
   // short last page), so the skeleton grid is as tall as what replaces it.
   const [skeletonCount, setSkeletonCount] = useState(initialList ? PER_PAGE : CARD_COUNT);
   const [error, setError] = useState<string | null>(null);
-  const [searchId, setSearchId] = useState<number>(0);
+  // What was typed or pasted in the search box: a case number or an id copied
+  // from a card. Empty means Search applies the filters.
+  const [searchId, setSearchId] = useState("");
+  const [searchError, setSearchError] = useState<string | null>(null);
+  // Counts every rejected Search, so pressing it again with the same bad input
+  // still moves focus back and is announced again (the message alone would not
+  // change).
+  const [searchRejectCount, setSearchRejectCount] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const [facetData, setFacetData] = useState<FacetData | null>(null);
+  const [facetError, setFacetError] = useState(false);
   const [page, setPage] = useState(1);
   const [pageInput, setPageInput] = useState("");
   const [resultCount, setResultCount] = useState<number | null>(null);
@@ -131,8 +145,13 @@ export function useDashboard() {
   // Cases picked for side-by-side comparison (max 2). Adding a third drops the oldest.
   const [compareIds, setCompareIds] = useState<CaseId[]>([]);
   const [compareTyped, setCompareTyped] = useState("");
+  const [compareError, setCompareError] = useState<string | null>(null);
 
   const toggleCompare = (id: CaseId) => {
+    // The tray's field unmounts at two cases and comes back below that, so a
+    // half-typed case or its error would otherwise come back with it.
+    setCompareTyped("");
+    setCompareError(null);
     setCompareIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id].slice(-2),
     );
@@ -142,18 +161,43 @@ export function useDashboard() {
     setCompareIds((prev) => (prev.includes(id) ? prev : [...prev, id].slice(-2)));
   };
 
-  const submitTypedCompare = () => {
-    const raw = compareTyped.trim();
-    if (raw.toUpperCase().startsWith("CV")) {
-      addCompareId(raw);
-    } else {
-      const n = parseInt(raw, 10);
-      if (Number.isFinite(n) && n > 0) addCompareId(n);
-    }
-    setCompareTyped("");
+  // A stale message goes as soon as the field is edited.
+  const handleSetCompareTyped = (value: string) => {
+    setCompareError(null);
+    setCompareTyped(value);
   };
 
-  const handleClearCompare = () => setCompareIds([]);
+  // Takes what the search box takes: a number on the same running scale (9,902
+  // is CV_00000001, past the end is the last case) or a PanTS_ or CV_ id.
+  // Resolves to whether the case was added.
+  const submitTypedCompare = async (): Promise<boolean> => {
+    const input = parseCaseInput(compareTyped);
+    if (!input) return false;
+    if (input.kind === "invalid") {
+      setCompareError(input.message);
+      return false;
+    }
+    let id: CaseId | null = input.kind === "id" ? input.id : input.n;
+    if (input.kind === "number" && input.n > PANTS_CASE_COUNT) {
+      id = numberToCaseId(input.n, await fetchCancerVerseCount(API_BASE));
+    }
+    if (id === null) return false;
+    if (compareIds.includes(id)) {
+      // Keep what was typed: an emptied field reads as if the add worked.
+      setCompareError(`Case ${cleanCaseInput(compareTyped)} is already selected.`);
+      return false;
+    }
+    addCompareId(id);
+    setCompareError(null);
+    setCompareTyped("");
+    return true;
+  };
+
+  const handleClearCompare = () => {
+    setCompareIds([]);
+    setCompareTyped("");
+    setCompareError(null);
+  };
 
   const ingestItems = (items: SearchItem[]) => {
     const { ids, meta } = toPreviewData(items);
@@ -313,6 +357,7 @@ export function useDashboard() {
   // pills and their counts stay stable regardless of which filter is active.
   const loadFacetOptions = async () => {
     try {
+      setFacetError(false);
       const params = new URLSearchParams();
       params.set("fields", "tumor,tumor_type,sex,manufacturer,ct_phase,site_nat,year");
       // The API cuts every group but tumor type to top_k values; 64 is above any
@@ -320,6 +365,9 @@ export function useDashboard() {
       // without a pill.
       params.set("top_k", "64");
       const res = await fetch(`${API_BASE}/api/facets?${params.toString()}`);
+      // An error status is a failure too, not an empty list of options; the
+      // panel offers Retry.
+      if (!res.ok) throw new Error(`Facets failed (${res.status})`);
       const data = await res.json();
       const counts = data.facets ?? {};
       // The API orders by count; years read newest first.
@@ -335,6 +383,7 @@ export function useDashboard() {
       });
     } catch (e) {
       console.error(e);
+      setFacetError(true);
     }
   };
 
@@ -514,17 +563,32 @@ export function useDashboard() {
     loadCurated();
   };
 
+  const handleSetSearchId = (value: string) => {
+    setSearchError(null);
+    setSearchId(value);
+  };
+
   const handleSearch = async () => {
-    track("dataset_search");
-    if (searchId) {
-      // One running number: 1-9,901 are PanTS, CancerVerse continues from 9,902.
-      const path = await caseNumberToPath(searchId, API_BASE);
-      if (path) {
-        navigation(path);
-        return;
-      }
+    const input = parseCaseInput(searchId);
+    if (input?.kind === "invalid") {
+      // Not counted as a search: nothing was looked up.
+      setSearchError(input.message);
+      setSearchRejectCount((c) => c + 1);
+      return;
     }
-    handleApplyFilters();
+    track("dataset_search");
+    if (!input) {
+      handleApplyFilters();
+      return;
+    }
+    // A copied id opens that exact case.
+    if (input.kind === "id") {
+      navigation(`/case/${input.id}`);
+      return;
+    }
+    // One running number: 1-9,901 are PanTS, CancerVerse continues from 9,902.
+    const path = await caseNumberToPath(input.n, API_BASE);
+    if (path) navigation(path);
   };
 
   const handleCompare = () => {
@@ -539,12 +603,16 @@ export function useDashboard() {
     skeletonCount,
     error,
     searchId,
-    setSearchId,
+    setSearchId: handleSetSearchId,
+    searchError,
+    searchRejectCount,
     showFilters,
     setShowFilters,
     filters,
     setFilters,
     facetData,
+    facetError,
+    retryFacets: loadFacetOptions,
     activeFilterCount,
     page,
     pageInput,
@@ -556,7 +624,8 @@ export function useDashboard() {
     savedIds,
     compareIds,
     compareTyped,
-    setCompareTyped,
+    setCompareTyped: handleSetCompareTyped,
+    compareError,
     handleToggleSave,
     toggleCompare,
     submitTypedCompare,
