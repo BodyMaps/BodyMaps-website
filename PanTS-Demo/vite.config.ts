@@ -62,9 +62,9 @@ export default defineConfig({
 		cors: true,
 		proxy: {
 			"/api": {
-				target: env.VITE_API_BASE,
+				target: env.VITE_PROXY_TARGET || env.VITE_API_BASE || "http://127.0.0.1:5001",
 				changeOrigin: true,
-				secure: false,
+				secure: true,
 			},
 			"/ws": {
 				target: env.VITE_WS_BASE || "ws://127.0.0.1:8001",
