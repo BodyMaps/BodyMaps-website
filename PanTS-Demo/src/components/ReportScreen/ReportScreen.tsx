@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { APP_CONSTANTS } from '../../helpers/constants';
 import FindingsTimeline from './FindingsTimeline';
 import SourceReportDetails from './SourceReportDetails';
-import { formatMeasurement, labelize, normalizeReportData, splitOrgans } from '../../helpers/reportFindings';
+import { formatMeasurement, getSourceReportText, labelize, normalizeReportData, splitOrgans } from '../../helpers/reportFindings';
 import type { OrganData, ReportData } from '../../helpers/reportFindings';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ const reportDataRequests = new Map<string, Promise<ReportData | null>>();
 
 /** Short-lived memory cache; source changes are revalidated and failures can be retried. */
 export function prefetchReportData(id: string): Promise<ReportData | null> {
-  const key = `${APP_CONSTANTS.API_ORIGIN}:report-v2:${id}`;
+  const key = `${APP_CONSTANTS.API_ORIGIN}:report-v3:${id}`;
   const cached = cache.get(key);
   if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.data);
   cache.delete(key);
@@ -281,10 +281,10 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
             ? 'Volume describes the segmented region. HU is the CT attenuation scale. Your clinician interprets these numbers alongside the images and source report.'
             : `Measurement source: ${data.provenance?.measurements_source || 'Not recorded'}. Values describe individual segmentation labels; a subregion is not a whole-organ measurement.`}
         </p>
-        {!all.length && <p style={{ color: '#fff' }}>Segmentation measurements are unavailable. The original source report remains available in the report overview.</p>}
+        {!all.length && <p style={{ color: '#fff' }}>Segmentation measurements are unavailable. {getSourceReportText(data) ? 'The unverified source reference can still be expanded in the report overview.' : 'No source reference text is available for this case.'}</p>}
         <OrganList organs={all} />
         <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
-          <SecondaryButton onClick={() => go(0)}>Source report</SecondaryButton>
+          <SecondaryButton onClick={() => go(0)}>Report scope</SecondaryButton>
           <PrimaryButton onClick={() => go(flagged.length > 0 ? 2 : totalSteps - 1)}>{flagged.length > 0 ? 'Review flags' : 'Continue'}</PrimaryButton>
         </div>
       </div>
@@ -292,7 +292,7 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
     if (step >= 2 && step < 2 + flagged.length && curOrganLocal && curDataLocal) return (
       <div style={{ animation: `${anim} 0.38s ease both` }}>
         <h1 style={{ color: '#fff', fontSize: 30 }}>{labelize(curOrganLocal)}</h1>
-        <p style={{ color: 'rgba(255,255,255,0.76)', lineHeight: 1.5 }}>Recorded review flag {step - 1} of {flagged.length}. A flag is not a diagnosis. The complete original report is reproduced below without inferring a finding from the flag.</p>
+        <p style={{ color: 'rgba(255,255,255,0.76)', lineHeight: 1.5 }}>Recorded review flag {step - 1} of {flagged.length}. A flag is not a diagnosis. {getSourceReportText(data) ? 'The unverified source reference can be expanded below.' : 'No source reference text is available for this case.'}</p>
         <SourceReportDetails data={data} dark />
         <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
           <SecondaryButton onClick={() => go(step - 1)}>Back</SecondaryButton>
@@ -301,9 +301,9 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
       </div>
     );
     return <div style={{ animation: `${anim} 0.38s ease both` }}>
-      <h1 style={{ color: '#fff', fontSize: 32 }}>Report overview</h1>
+      <h1 style={{ color: '#fff', fontSize: 32 }}>Measurement summary</h1>
       <SourceReportDetails data={data} dark />
-      <p style={{ color: 'rgba(255,255,255,0.72)', lineHeight: 1.5 }}>Discuss the original report with your clinician in the context of your symptoms, history, and images.</p>
+      <p style={{ color: 'rgba(255,255,255,0.72)', lineHeight: 1.5 }}>A clinician must assess disease using the images and clinical context. This auto-report provides measurements only.</p>
       <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
         <SecondaryButton onClick={() => go(step - 1)}>Back</SecondaryButton>
         <PrimaryButton onClick={() => go(0)}>Start over</PrimaryButton>
@@ -367,7 +367,7 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
 
             <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 9 }}>
               <span style={{ fontSize: 15, color: 'rgba(255,255,255,0.92)', letterSpacing: '0.025em', fontWeight: 720 }}>
-                {step === 0 ? 'Your source report' : 'Report and segmentation'}
+                {step === 0 ? 'Automated measurements' : 'Report and segmentation'}
               </span>
               {step > 0 && (
                 <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
@@ -418,8 +418,8 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
                     borderRadius: 14, padding: 16, boxShadow: '0 18px 60px rgba(0,0,0,0.5)',
                   }}>
                     <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.86)', lineHeight: 1.5, marginBottom: 12 }}>
-                      This link opens the stored source report and segmentation measurements.
-                      Anyone with the link can read the report text.
+                      This link opens the segmentation summary.
+                      {getSourceReportText(data) && ' Anyone with the link can expand and read its unverified source reference.'}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <div style={{
@@ -481,10 +481,10 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
               }}>
                 <div style={{ fontSize: 12, letterSpacing: '0.14em', color: 'rgba(255,255,255,0.42)', textTransform: 'uppercase', marginBottom: 18, fontWeight: 800 }}>Report overview</div>
                 <h1 style={{ fontSize: 48, lineHeight: 1.02, letterSpacing: '-0.065em', color: '#fff', margin: '0 0 18px', fontWeight: 860 }}>
-                  Your report and measurements
+                  Segmentation measurements
                 </h1>
                 <p style={{ fontSize: 18, color: 'rgba(255,255,255,0.70)', lineHeight: 1.55, margin: '0 auto 26px', maxWidth: 430 }}>
-                  The original source report is shown below. Segmentation measurements are not a complete diagnostic assessment.
+                  Review the supported measurements and their limits. {getSourceReportText(data) ? 'Stored source text is available separately as an unverified reference.' : 'No source reference text is available for this case.'}
                 </p>
                 <SourceReportDetails data={data} dark />
                 <button

@@ -1,8 +1,10 @@
 # Backend
 
-Automatic reports preserve source text and distinguish it from segmentation
-measurements. See [report evidence and coverage](docs/report-evidence.md) for the
-contract, limitations, and regression checks.
+Automatic reports provide segmentation measurements only, with disease status
+explicitly not assessed. Stored report text is available separately as an
+unverified reference and excluded from the default PDF. See
+[report evidence and coverage](docs/report-evidence.md) for the contract,
+limitations, and regression checks.
 
 The viewer's AI assistant also needs its model service running. See
 [AI model setup and persistent Ollama service](PanTS-Demo/src/components/AIAssistant/README_AI_MODEL_SETUP.md#hosting-the-bodymaps-ai-models-ollama-on-the-server)

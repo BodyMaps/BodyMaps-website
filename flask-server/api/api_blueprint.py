@@ -30,7 +30,7 @@ from services.ollama_client import (
 from services import ai_reasoning
 from services import lesion_grounding
 from services.report_evidence import (
-    report_payload, source_text, report_limitations, render_report_html, measurement_display,
+    report_payload, report_limitations, render_report_html, measurement_display, report_assessment_scope, source_text,
 )
 from services.segmentation_metrics import calculate_session_metrics
 from services.search_ranking import rank_quality_results, select_balanced_tumor_results
@@ -864,27 +864,27 @@ def _measure_report_structures(case_id):
 def _build_report_data(id):
     """Preserve stored evidence independently of optional segmentation measurements."""
     if get_dataset_from_case_id(secure_filename(str(id))) == "CancerVerse":
-        return report_payload(id, "", extra_limitations=("Segmentation measurements unavailable.",))
+        return report_payload(id, "")
     if id is None or not str(id).isdigit():
         return {"error": "Invalid id parameter"}
     case_id = str(int(id))
     raw, patient, imaging, source_column = "", {}, {}, None
-    limitations = []
+    source_load_failed = False
     try:
         raw, patient, imaging, source_column = _load_report_source(get_panTS_id(case_id))
     except Exception:
         # Do not log report text or patient metadata on either success or failure.
-        limitations.append("The stored source report could not be loaded.")
+        source_load_failed = True
     organs, lesions, available = {}, {}, False
     try:
         organs, lesions, measurement_imaging = _measure_report_structures(case_id)
         imaging.update(measurement_imaging)
         available = True
     except Exception:
-        limitations.append("Segmentation measurements unavailable: explicitly named masks and matching CT geometry are required.")
+        available = False
     return report_payload(case_id, raw, organ_volumes=organs, lesions=lesions,
                           patient=patient, imaging=imaging, measurements_available=available,
-                          extra_limitations=limitations, source_column=source_column)
+                          source_load_failed=source_load_failed, source_column=source_column)
 
 
 @api_blueprint.route('/get-report-data/<id>', methods=['GET'])
@@ -918,7 +918,7 @@ def _build_report_html(report_data):
 
 
 def _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path):
-    """Lays out report_data onto the report_template_3.pdf template using reportlab."""
+    """Export this feature's measurements and scope, without source clinical claims."""
     from reportlab.pdfgen import canvas as _canvas
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.colors import HexColor
@@ -975,7 +975,7 @@ def _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path):
     # ==================== HEADER ====================
     pdf.setFillColor(INK)
     pdf.setFont("Helvetica-Bold", 22)
-    pdf.drawString(left_margin, height - 55, "CT Source Report")
+    pdf.drawString(left_margin, height - 55, "CT Segmentation Summary")
     pdf.setFont("Helvetica", 10)
     pdf.setFillColor(MUTED)
     pdf.drawRightString(width - right_margin, height - 52, "BodyMaps")
@@ -983,15 +983,12 @@ def _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path):
     pdf.setLineWidth(1)
     pdf.line(left_margin, height - 70, width - right_margin, height - 70)
 
-    # AI-generation disclaimer — the findings/impression text below originates
-    # from RadGPT (an AI model), and organ measurements from automated
-    # segmentation, not a radiologist's read. This has to be visible before
-    # any clinical content, not buried in a footer, given this could otherwise
-    # read as an authoritative signed report.
+    # The auto-report's capability is narrower than other models on the site.
+    # Source report wording must not become this feature's disease assessment.
     disclaimer_y = write_wrapped_text(
         left_margin, height - 82,
-        "AI-generated report (RadGPT findings + automated segmentation measurements). "
-        "Clinician review is not documented. For research use only \u2014 not for clinical decision-making.",
+        "Automated segmentation measurements only. Disease assessment and negative screening conclusions "
+        "are not supported by this auto-report feature.",
         font_size=8,
         color=MUTED,
     )
@@ -1021,20 +1018,22 @@ def _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path):
         pdf.drawString(x, y_position - 15, value)
     y_position -= 40
 
-    # All findings are presented as stored evidence, never filtered by mask labels.
+    y_position = section_label("Assessment scope", y_position)
+    y_position = write_wrapped_text(left_margin, y_position,
+                                   report_assessment_scope()["explanation"], font_size=10)
+    y_position -= 12
     y_position = section_label("Scope and limitations", y_position)
     for limitation in report_limitations(report_data):
         y_position = write_wrapped_text(left_margin, y_position, limitation, font_size=9, color=MUTED)
         y_position -= 5
-    y_position -= 10
-    check_and_reset_page(50)
-    y_position = section_label("Complete stored source report", y_position)
-    y_position = write_wrapped_text(left_margin, y_position,
-                                   "Source: RadGPT metadata workbook. Unverified AI-generated text.",
-                                   font_size=9, color=MUTED)
     y_position -= 8
-    y_position = write_wrapped_text(left_margin, y_position,
-                                   source_text(report_data) or "No stored source report is available for this case.")
+    reference_note = (
+        "The full original source text remains available as an unverified reference in the viewer. "
+        "It is excluded from this summary because its clinical claims are not assessed by this feature."
+        if source_text(report_data).strip()
+        else "No original source report is available for this case."
+    )
+    y_position = write_wrapped_text(left_margin, y_position, reference_note, font_size=9, color=MUTED)
     y_position -= section_spacing
     check_and_reset_page(65)
     y_position = section_label("Segmentation measurements", y_position)

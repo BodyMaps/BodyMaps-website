@@ -8,6 +8,7 @@ import re
 import tempfile
 import uuid
 from io import BytesIO
+from html.parser import HTMLParser
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -56,7 +57,11 @@ def test_measurements_and_keywords_never_establish_clinical_status(raw, hu, volu
     assert data["coverage"]["status"] == "limited"
     assert data["coverage"]["measured_structures"] == 2
     assert data["provenance"]["image_review_performed"] is False
-    assert data["report_schema_version"] == "2"
+    assert data["report_schema_version"] == "3"
+    assert data["comments"] == ""
+    assert data["impression"] == []
+    assert data["assessment_scope"]["supported_outputs"] == ["segmentation_measurements"]
+    assert data["assessment_scope"]["disease_assessment"] == "not_supported"
 
 
 def test_full_source_survives_missing_masks_unrecognized_sections_and_lesion_formats():
@@ -64,8 +69,9 @@ def test_full_source_survives_missing_masks_unrecognized_sections_and_lesion_for
     data = evidence.report_payload("7", raw)
     assert data["masks_available"] is False
     assert data["source_report"]["text"] == raw
-    assert "bulky inguinal nodes" in data["comments"]
-    assert "require review" in data["impression"][0]
+    assert "bulky inguinal nodes" in data["source_report"]["findings"]
+    assert "require review" in data["source_report"]["impression"][0]
+    assert data["source_report"]["purpose"] == "unverified_reference"
     assert data["lesions"] == {}
     assert "not assessed" in " ".join(data["coverage"]["limitations"])
 
@@ -179,7 +185,8 @@ def test_measurement_geometry_is_validated_instead_of_silently_cropped(tmp_path)
         measure("7")
 
 
-def test_pdf_preserves_long_source_nonorgan_findings_and_final_impression(tmp_path, monkeypatch):
+@pytest.mark.parametrize("legacy", [False, True])
+def test_default_pdf_preserves_long_measurements_but_excludes_source_clinical_claims(tmp_path, monkeypatch, legacy):
     from reportlab.pdfgen import canvas
     from PyPDF2 import PdfReader
 
@@ -188,9 +195,16 @@ def test_pdf_preserves_long_source_nonorgan_findings_and_final_impression(tmp_pa
     pdf.showPage()
     pdf.save()
     monkeypatch.setenv("TEMPLATE_PATH", str(template))
-    raw = SYNTHETIC + "\n" + "\n".join(f"Synthetic retained line {i}." for i in range(150)) + "\nFINAL SOURCE MARKER"
-    data = evidence.report_payload("7", raw, organ_volumes={"pancreas": {"volume": 95, "mean_hu": 60}})
-    functions = api_functions("_draw_report_pdf", os=os, source_text=evidence.source_text,
+    raw = SYNTHETIC + "\nStomach healthy. No stomach cancer. Pancreas enlarged.\nFINAL SOURCE MARKER"
+    organs = {f"synthetic_structure_{i:03}": {"volume": 95 + i, "mean_hu": 60} for i in range(60)}
+    organs["stomach"] = {"volume": 95, "mean_hu": 60}
+    data = evidence.report_payload("7", raw, organ_volumes=organs)
+    if legacy:
+        data.pop("source_report")
+        data.pop("assessment_scope")
+        data["comments"] = raw
+        data["impression"] = ["Stomach healthy. No stomach cancer."]
+    functions = api_functions("_draw_report_pdf", os=os, report_assessment_scope=evidence.report_assessment_scope, source_text=evidence.source_text,
                               report_limitations=evidence.report_limitations,
                               measurement_display=evidence.measurement_display,
                               get_panTS_id=lambda _: "synthetic-7",
@@ -200,12 +214,14 @@ def test_pdf_preserves_long_source_nonorgan_findings_and_final_impression(tmp_pa
     functions["_draw_report_pdf"](data, str(tmp_path / "temp.pdf"), str(output))
     reader = PdfReader(str(output))
     assert len(reader.pages) >= 3
-    text = "\n".join(page.extract_text() for page in reader.pages)
-    for required in ("Synthetic loculated left pleural effusion.", "Synthetic bulky inguinal nodes.",
-                     "No mass. Not enlarged.", "FINAL SOURCE MARKER", "Not assessed", "Scope and limitations"):
+    text = " ".join("\n".join(page.extract_text() for page in reader.pages).split())
+    for required in ("CT Segmentation Summary", "Not assessed", "Scope and limitations",
+                     "Synthetic Structure 059", "stomach or any other organ", "unverified reference in the viewer"):
         assert required.lower() in text.lower()
-    assert "Organs Reviewed" not in text
-    assert "Everything else looked normal" not in text
+    for unsupported in ("Stomach healthy.", "No stomach cancer.", "Pancreas enlarged.", "FINAL SOURCE MARKER",
+                        "Synthetic loculated left pleural effusion.", "Synthetic bulky inguinal nodes.",
+                        "Organs Reviewed", "Everything else looked normal"):
+        assert unsupported not in text
 
 
 @pytest.mark.parametrize("case_id,masks_available", [
@@ -232,7 +248,7 @@ def test_pdf_source_only_or_invalid_image_ids_never_construct_or_probe_image_pat
     functions = api_functions(
         "_draw_report_pdf",
         os=SimpleNamespace(getenv=os.getenv, path=SimpleNamespace(exists=unexpected_image_access)),
-        source_text=evidence.source_text, report_limitations=evidence.report_limitations,
+        report_assessment_scope=evidence.report_assessment_scope, source_text=evidence.source_text, report_limitations=evidence.report_limitations,
         measurement_display=evidence.measurement_display,
         get_panTS_id=unexpected_image_access,
         # Any attempt to construct a dataset path also fails before filesystem IO.
@@ -241,8 +257,10 @@ def test_pdf_source_only_or_invalid_image_ids_never_construct_or_probe_image_pat
     output = tmp_path / "source-only.pdf"
     functions["_draw_report_pdf"](data, str(tmp_path / "temp.pdf"), str(output))
     text = "\n".join(page.extract_text() for page in PdfReader(str(output)).pages)
-    assert "Synthetic loculated left pleural effusion." in text
-    assert "Synthetic bulky inguinal nodes." in text
+    assert "Synthetic loculated left pleural effusion." not in text
+    assert "Synthetic bulky inguinal nodes." not in text
+    assert "Segmentation measurements unavailable." in text
+    assert "Assessment scope" in text or "ASSESSMENT SCOPE" in text
 
 
 @pytest.mark.parametrize("case_id", ["0007", 7])
@@ -270,7 +288,7 @@ def test_pdf_canonicalizes_numeric_case_id_before_constructing_image_paths(tmp_p
     functions = api_functions(
         "_draw_report_pdf",
         os=SimpleNamespace(getenv=os.getenv, path=SimpleNamespace(exists=image_exists)),
-        source_text=evidence.source_text, report_limitations=evidence.report_limitations,
+        report_assessment_scope=evidence.report_assessment_scope, source_text=evidence.source_text, report_limitations=evidence.report_limitations,
         measurement_display=evidence.measurement_display, get_panTS_id=canonical_folder,
         Constants=SimpleNamespace(PANTS_PATH=str(tmp_path), MAIN_NIFTI_FILENAME="ct.nii.gz"),
     )
@@ -333,3 +351,140 @@ def test_combined_mask_without_named_structure_identity_is_not_measured(tmp_path
                               get_panTS_id=lambda _: "synthetic-7")
     with pytest.raises(ValueError, match="explicit structure mask names"):
         functions["_measure_report_structures"]("7")
+
+
+class DefaultReportText(HTMLParser):
+    """Read visible summary text, excluding the explicitly collapsed reference."""
+    def __init__(self):
+        super().__init__()
+        self.reference_depth = 0
+        self.text = []
+        self.references = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "details":
+            self.references.append(dict(attrs))
+            self.reference_depth += 1
+
+    def handle_endtag(self, tag):
+        if tag == "details":
+            self.reference_depth -= 1
+
+    def handle_data(self, data):
+        if not self.reference_depth:
+            self.text.append(data)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_default_html_does_not_assert_unsupported_stomach_or_other_source_claims(legacy):
+    raw = "Stomach healthy. No stomach cancer. Pancreas enlarged. No disease elsewhere."
+    data = evidence.report_payload("7", raw, organ_volumes={"stomach": {"volume": 95, "mean_hu": 60}})
+    if legacy:
+        data.pop("source_report")
+        data.pop("assessment_scope")
+        data["comments"] = raw
+        data["impression"] = ["All organs healthy."]
+        data["organ_volumes"]["stomach"]["status"] = "normal"
+    rendered = evidence.render_report_html(data)
+    parsed = DefaultReportText()
+    parsed.feed(rendered)
+    summary = " ".join(parsed.text)
+    assert raw in rendered  # No deletion or keyword filtering of original evidence.
+    assert parsed.references == [{"id": "source-reference"}]
+    assert "Unverified source reference" in rendered
+    assert "not findings or conclusions generated" in rendered
+    for unsupported in ("Stomach healthy.", "No stomach cancer.", "Pancreas enlarged.", "No disease elsewhere.", "All organs healthy."):
+        assert unsupported not in summary
+    assert "stomach or any other organ" in summary
+    assert "disease assessment not supported" in summary
+    assert "Not assessed" in summary
+
+
+def test_feature_scope_is_explicit_and_cannot_be_expanded_by_source_or_stale_payload():
+    data = evidence.report_payload("7", "All diseases ruled out. Every organ is healthy.")
+    scope = data["assessment_scope"]
+    assert scope["supported_outputs"] == ["segmentation_measurements"]
+    assert scope["disease_assessment"] == "not_supported"
+    assert scope["explanation"] == evidence.ASSESSMENT_SCOPE_EXPLANATION
+    assert data["comments"] == "" and data["impression"] == []
+    assert data["source_report"]["text"] == "All diseases ruled out. Every organ is healthy."
+    scope["supported_outputs"].append("cancer_screening")
+    scope["disease_assessment"] = "supported"
+    scope["explanation"] = "Every organ is healthy."
+    assert evidence.report_assessment_scope()["supported_outputs"] == ["segmentation_measurements"]
+    rendered = evidence.render_report_html(data)
+    parsed = DefaultReportText()
+    parsed.feed(rendered)
+    assert "Every organ is healthy." not in " ".join(parsed.text)
+    assert evidence.ASSESSMENT_SCOPE_EXPLANATION in rendered
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_html_ignores_arbitrary_incoming_limitation_claims(legacy):
+    unsupported = "All organs healthy. No stomach cancer."
+    data = evidence.report_payload("7", SYNTHETIC)
+    if legacy:
+        data.pop("source_report")
+        data["comments"] = SYNTHETIC
+    data["coverage"] = {"limitations": [unsupported]}
+    rendered = evidence.render_report_html(data)
+    assert unsupported not in rendered
+    for limitation in evidence.REPORT_LIMITATIONS:
+        assert limitation in rendered
+    assert "explicitly named masks and matching CT geometry" in rendered
+
+
+def test_canonical_limitations_use_typed_availability_and_preserve_failure_messages():
+    data = evidence.report_payload("7", "", source_load_failed=True)
+    assert data["source_report"]["load_failed"] is True
+    assert "The stored source report could not be loaded." in data["coverage"]["limitations"]
+    assert "No stored source report is available for this case." in data["coverage"]["limitations"]
+    assert any("Segmentation measurements unavailable" in value for value in data["coverage"]["limitations"])
+
+    available = evidence.report_payload("7", SYNTHETIC, measurements_available=True)
+    assert evidence.report_limitations(available) == list(evidence.REPORT_LIMITATIONS)
+    available["coverage"]["limitations"] = ["All organs healthy. No stomach cancer."]
+    available["masks_available"] = "true"
+    available["source_report"]["available"] = "true"
+    limitations = evidence.report_limitations(available)
+    assert "No stored source report is available for this case." in limitations
+    assert any("Segmentation measurements unavailable" in value for value in limitations)
+    assert "No stomach cancer" not in " ".join(limitations)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("has_source", [False, True])
+def test_pdf_ignores_incoming_limitations_and_only_promises_existing_reference(tmp_path, monkeypatch, legacy, has_source):
+    from reportlab.pdfgen import canvas
+    from PyPDF2 import PdfReader
+
+    template = tmp_path / "blank-template.pdf"
+    pdf = canvas.Canvas(str(template))
+    pdf.showPage()
+    pdf.save()
+    monkeypatch.setenv("TEMPLATE_PATH", str(template))
+    raw = SYNTHETIC if has_source else ""
+    data = evidence.report_payload("7", raw)
+    if legacy:
+        data.pop("source_report")
+        data["comments"] = raw
+    data["coverage"] = {"limitations": ["All organs healthy. No stomach cancer."]}
+    functions = api_functions(
+        "_draw_report_pdf", os=os, source_text=evidence.source_text,
+        report_assessment_scope=evidence.report_assessment_scope,
+        report_limitations=evidence.report_limitations,
+        measurement_display=evidence.measurement_display,
+    )
+    output = tmp_path / "guarded-summary.pdf"
+    functions["_draw_report_pdf"](data, str(tmp_path / "temp.pdf"), str(output))
+    text = " ".join("\n".join(page.extract_text() for page in PdfReader(str(output)).pages).split())
+    assert "All organs healthy." not in text
+    assert "No stomach cancer." not in text
+    assert "Measurements cannot establish health or exclude disease" in text
+    assert "Segmentation measurements unavailable" in text
+    if has_source:
+        assert "source text remains available as an unverified reference in the viewer" in text
+        assert "No original source report is available" not in text
+    else:
+        assert "source text remains available" not in text
+        assert "No original source report is available for this case." in text

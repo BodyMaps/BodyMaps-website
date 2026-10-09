@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router';
 import { APP_CONSTANTS } from '../helpers/constants';
 import type { ReportData } from '../helpers/reportFindings';
-import { formatMeasurement, labelize, normalizeReportData, splitOrgans } from '../helpers/reportFindings';
+import { formatMeasurement, getSourceReportText, labelize, normalizeReportData, splitOrgans } from '../helpers/reportFindings';
 import SourceReportDetails from '../components/ReportScreen/SourceReportDetails';
 
 const NAVY = '#14265C';
@@ -136,13 +136,13 @@ export default function SharePatientCard() {
 
               <div style={stagger(revealed, 2)}>
                 <div style={eyebrow}>REPORT AND SEGMENTATION</div>
-                <h1 style={{ fontSize: 28, color: NAVY }}>Source report summary</h1>
+                <h1 style={{ fontSize: 28, color: NAVY }}>Segmentation measurement summary</h1>
                 <SourceReportDetails data={data} />
               </div>
               <section aria-label="Segmentation measurements" style={{ marginTop: 22 }}>
                 <h2 style={{ fontSize: 20, color: NAVY }}>Segmented structures</h2>
                 <p style={{ color: MUTED, fontSize: 14 }}>Clinical status is not assessed by these measurements.</p>
-                {!all.length && <p style={{ color: MUTED }}>Segmentation measurements are unavailable. The source report above is retained.</p>}
+                {!all.length && <p style={{ color: MUTED }}>Segmentation measurements are unavailable. {getSourceReportText(data) ? 'The unverified source reference can still be expanded above.' : 'No source reference text is available for this case.'}</p>}
                 {all.length > 0 && <details>
                   <summary style={{ cursor: 'pointer', color: NAVY }}>{all.length} structures with segmentation data</summary>
                   <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
