@@ -78,7 +78,7 @@ jobs:
         run: python -m compileall -q .
 
       - name: Automatic report evidence and source preservation
-        run: python -m pytest tests/unit/test_report_evidence.py tests/unit/test_quiz_report_questions.py -v
+        run: python -m pytest tests/unit/test_report_evidence.py tests/unit/test_report_measurements.py tests/unit/test_report_measurement_cache.py tests/unit/test_quiz_report_questions.py -v
 
       - name: Path-safety unit tests
         run: python -m pytest tests/unit/test_path_safety.py -v

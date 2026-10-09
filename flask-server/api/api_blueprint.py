@@ -29,6 +29,8 @@ from services.ollama_client import (
 )
 from services import ai_reasoning
 from services import lesion_grounding
+from services.report_measurements import read_native_volume, measure_binary_structure
+from services.report_measurement_cache import get_or_compute as cached_report_measurements
 from services.report_evidence import (
     report_payload, report_limitations, render_report_html, measurement_display, report_assessment_scope, source_text,
 )
@@ -798,12 +800,8 @@ def _load_report_source(pants_id):
     return raw, patient, imaging, source_column
 
 
-def _measure_report_structures(case_id):
-    """Measure explicitly named masks; combined-label conventions are ambiguous.
-
-    Historical PanTS, viewer, and legacy Constants tables assign different
-    structures to the same label IDs. Never guess a structure from those IDs.
-    """
+def _report_measurement_inputs(case_id):
+    """Resolve the CT and explicitly named masks without loading voxel arrays."""
     pants_id = get_panTS_id(case_id)
     subfolder = "ImageTr" if int(case_id) < 9000 else "ImageTe"
     label_subfolder = "LabelTr" if int(case_id) < 9000 else "LabelTe"
@@ -821,40 +819,58 @@ def _measure_report_structures(case_id):
                 named_masks.setdefault(name, path)
     if not named_masks:
         raise ValueError("No explicit structure mask names are available")
+    return ct_path, named_masks
+
+
+def _report_measurement_signature(inputs):
+    """Identity of every measurement input; never includes source report text."""
+    ct_path, named_masks = inputs
+    def identity(path):
+        resolved = Path(path).resolve(strict=True)
+        stat = resolved.stat()
+        return (str(resolved), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    return ("native-block-v1", identity(ct_path),
+            tuple((name, identity(path)) for name, path in sorted(named_masks.items())))
+
+
+def _measure_report_structures(case_id, *, inputs=None):
+    """Reuse only numeric measurements with current file identities and mask names."""
+    inputs = inputs if inputs is not None else _report_measurement_inputs(case_id)
+    def paths_of(value):
+        ct_path, named_masks = value
+        return str(ct_path), tuple((name, str(path)) for name, path in sorted(named_masks.items()))
+    original_paths = paths_of(inputs)
+    def signature():
+        # A new/deleted mask invalidates measurements even when every original
+        # file remains unchanged. Check again after computation via the cache.
+        if paths_of(_report_measurement_inputs(case_id)) != original_paths:
+            raise ValueError("Report measurement input paths changed during calculation")
+        return _report_measurement_signature(inputs)
+    return cached_report_measurements(str(case_id), signature, lambda: _compute_report_measurements(inputs))
+
+
+def _compute_report_measurements(inputs):
+    """Measure named binary masks using native arrays and bounded reductions."""
+    ct_path, named_masks = inputs
     ct_nii = nib.load(ct_path)
-    ct_array = ct_nii.get_fdata()
+    ct_values, ct_scaling = read_native_volume(ct_nii)
     organ_volumes, lesions = {}, {}
     for organ, path in named_masks.items():
         mask_nii = nib.load(str(path))
         if ct_nii.shape != mask_nii.shape or not np.allclose(ct_nii.affine, mask_nii.affine, atol=1e-3):
             raise ValueError("CT and segmentation geometry do not match")
-        mask_values = mask_nii.get_fdata()
-        # A named segmentation must be a binary structure mask, not a mislabeled
-        # combined map. Nonzero foreground may use a single value other than 1.
-        foreground = np.unique(mask_values[mask_values != 0])
-        if len(foreground) > 1 or (len(foreground) and (not np.isfinite(foreground[0]) or foreground[0] < 0)):
-            raise ValueError("Named segmentation is not a binary structure mask")
-        mask = mask_values > 0
-        if not np.any(mask):
+        mask_values, mask_scaling = read_native_volume(mask_nii)
+        measured = measure_binary_structure(ct_values, mask_values, mask_nii.affine,
+                                            ct_scaling=ct_scaling, mask_scaling=mask_scaling)
+        if measured is None:
             continue
-        voxel_volume = abs(float(np.linalg.det(mask_nii.affine[:3, :3]))) / 1000
-        spacing_mm = np.linalg.norm(mask_nii.affine[:3, :3], axis=0)
-        voxel_coords = np.argwhere(mask)
-        centroid_world = nib.affines.apply_affine(mask_nii.affine, voxel_coords.mean(axis=0))
-        dims_mm = (voxel_coords.max(axis=0) - voxel_coords.min(axis=0) + 1) * spacing_mm
-        mean_hu = float(np.mean(ct_array[mask]))
-        volume = round(float(np.sum(mask)) * voxel_volume, 2)
         organ_volumes[organ] = {
-            "volume": volume,
-            "mean_hu": round(mean_hu, 1) if np.isfinite(mean_hu) else None,
-            "status": "not_assessed",
-            "centroid_mm": [round(float(value), 2) for value in centroid_world],
-            "dimensions": [round(float(value) / 10, 1) for value in dims_mm],
-            "mask_source": f"segmentations/{path.name}",
+            key: value for key, value in measured.items() if key != "voxels"
         }
+        organ_volumes[organ].update({"status": "not_assessed", "mask_source": f"segmentations/{path.name}"})
         lesion_root = {"pancreatic_lesion": "pancreas", "liver_lesion": "liver", "kidney_lesion": "kidney"}.get(organ)
         if lesion_root:
-            lesions[lesion_root] = {"voxels": int(np.count_nonzero(mask)), "volume": volume,
+            lesions[lesion_root] = {"voxels": measured["voxels"], "volume": measured["volume"],
                                    "source": "segmentation annotation"}
     imaging = {"spacing": [round(float(value), 3) for value in ct_nii.header.get_zooms()],
                "shape": list(ct_nii.shape)}

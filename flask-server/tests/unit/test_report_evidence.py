@@ -5,6 +5,7 @@ import ast
 import importlib.util
 import os
 import re
+import sys
 import tempfile
 import uuid
 from io import BytesIO
@@ -34,6 +35,20 @@ IMPRESSION:
 
 
 def api_functions(*names, **namespace):
+    if "_measure_report_structures" in names:
+        for dependency in ("_report_measurement_inputs", "_report_measurement_signature", "_compute_report_measurements"):
+            if dependency not in names:
+                names += (dependency,)
+        spec = importlib.util.spec_from_file_location("report_measurements", SERVER / "services/report_measurements.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        namespace.setdefault("read_native_volume", module.read_native_volume)
+        namespace.setdefault("measure_binary_structure", module.measure_binary_structure)
+        cache_spec = importlib.util.spec_from_file_location("_report_cache_for_api_tests", SERVER / "services/report_measurement_cache.py")
+        cache_module = importlib.util.module_from_spec(cache_spec)
+        sys.modules[cache_spec.name] = cache_module
+        cache_spec.loader.exec_module(cache_module)
+        namespace.setdefault("cached_report_measurements", cache_module.get_or_compute)
     tree = ast.parse((SERVER / "api/api_blueprint.py").read_text(encoding="utf-8"))
     selected = []
     for node in tree.body:
@@ -488,3 +503,83 @@ def test_pdf_ignores_incoming_limitations_and_only_promises_existing_reference(t
     else:
         assert "source text remains available" not in text
         assert "No original source report is available for this case." in text
+
+
+def measurement_cache_api(tmp_path):
+    image_dir = tmp_path / "image_only/synthetic-7"
+    mask_dir = tmp_path / "mask_only/synthetic-7/segmentations"
+    image_dir.mkdir(parents=True)
+    mask_dir.mkdir(parents=True)
+    ct_path = image_dir / "ct.nii.gz"
+    ct_path.write_bytes(b"synthetic CT identity")
+    (mask_dir / "pancreas.nii.gz").write_bytes(b"synthetic mask identity")
+    functions = api_functions(
+        "_measure_report_structures", os=os, Path=Path, re=re,
+        Constants=SimpleNamespace(PANTS_PATH=str(tmp_path), MAIN_NIFTI_FILENAME="ct.nii.gz"),
+        get_panTS_id=lambda _: "synthetic-7",
+    )
+    return functions, ct_path, mask_dir
+
+
+def test_measurement_api_reuses_metrics_but_invalidates_changed_files_and_mask_names(tmp_path):
+    functions, ct_path, mask_dir = measurement_cache_api(tmp_path)
+    computations = []
+    def compute(inputs):
+        computations.append(inputs)
+        return {name: {"volume": 95, "status": "not_assessed"} for name in inputs[1]}, {}, {"shape": [2, 2, 2]}
+    functions["_compute_report_measurements"] = compute
+    measure = functions["_measure_report_structures"]
+    first = measure("7")
+    first[0]["pancreas"]["volume"] = 999
+    assert measure("7")[0]["pancreas"]["volume"] == 95
+    assert len(computations) == 1
+    ct_path.write_bytes(b"changed synthetic CT identity")
+    measure("7")
+    assert len(computations) == 2
+    (mask_dir / "pancreas.nii.gz").write_bytes(b"changed synthetic mask identity")
+    measure("7")
+    assert len(computations) == 3
+    (mask_dir / "stomach.nii.gz").write_bytes(b"new synthetic mask")
+    assert "stomach" in measure("7")[0]
+    assert len(computations) == 4
+    (mask_dir / "stomach.nii.gz").unlink()
+    assert "stomach" not in measure("7")[0]
+    assert len(computations) == 5
+
+
+def test_measurement_api_rejects_mask_list_changes_during_computation(tmp_path):
+    functions, _, mask_dir = measurement_cache_api(tmp_path)
+    computations = []
+    def compute(inputs):
+        computations.append(inputs)
+        if len(computations) == 1:
+            (mask_dir / "stomach.nii.gz").write_bytes(b"arrived during synthetic computation")
+        return {name: {"volume": 95, "status": "not_assessed"} for name in inputs[1]}, {}, {}
+    functions["_compute_report_measurements"] = compute
+    with pytest.raises(ValueError, match="input paths changed"):
+        functions["_measure_report_structures"]("7")
+    assert "stomach" in functions["_measure_report_structures"]("7")[0]
+    functions["_measure_report_structures"]("7")
+    assert len(computations) == 2
+
+
+def test_source_report_is_refreshed_when_measurements_are_cached(tmp_path):
+    functions, _, _ = measurement_cache_api(tmp_path)
+    computations, source_reads = [], []
+    def compute(inputs):
+        computations.append(inputs)
+        return {"pancreas": {"volume": 95, "status": "not_assessed"}}, {}, {}
+    def read_source(_):
+        source_reads.append(True)
+        return f"Synthetic source revision {len(source_reads)}", {}, {}, "Structured Report"
+    functions["_compute_report_measurements"] = compute
+    builder = api_functions(
+        "_build_report_data", report_payload=evidence.report_payload,
+        get_dataset_from_case_id=lambda _: "PanTS", secure_filename=str,
+        get_panTS_id=lambda _: "synthetic-7", _load_report_source=read_source,
+        _measure_report_structures=functions["_measure_report_structures"],
+    )["_build_report_data"]
+    first, second = builder("7"), builder("7")
+    assert first["source_report"]["text"] == "Synthetic source revision 1"
+    assert second["source_report"]["text"] == "Synthetic source revision 2"
+    assert len(computations) == 1 and len(source_reads) == 2
