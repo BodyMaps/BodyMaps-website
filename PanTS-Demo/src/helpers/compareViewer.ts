@@ -548,6 +548,9 @@ async function loadCase(
 	await setVolumesForViewports(engine, [{ volumeId: ctVolId }], viewportIds);
 	engine.renderViewports(viewportIds);
 
+	// An empty URL means the case has no mask (a CancerVerse scan without a tumor mask):
+	// show the CT alone.
+	if (!segUrl) return;
 	try {
 		const segIds = await createNiftiImageIdsAndCacheMetadata({ url: segUrl });
 		if (!segIds.length) return;
