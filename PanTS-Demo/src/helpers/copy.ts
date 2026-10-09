@@ -16,7 +16,7 @@ export const LANDING_OVERVIEW =
   "Browse the library in 2D and 3D, upload your own CT for AI segmentation, and annotate or refine the results.";
 
 /** Browser-tab / link-preview title (index.html <title>, og:title, twitter:title). */
-export const SITE_TITLE = "BodyMaps: CT Library, Segmentation, and Annotation";
+export const SITE_TITLE = "BodyMaps: CT library, segmentation, and annotation";
 
 /** Meta / og / twitter description. */
 export const SITE_DESCRIPTION =
