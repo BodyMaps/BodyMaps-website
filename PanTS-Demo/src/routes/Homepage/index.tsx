@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useDashboard } from "./hooks/useDashboard";
 import LibraryHeader from "./components/LibraryHeader";
 import SearchBar from "./components/SearchBar";
@@ -11,6 +12,23 @@ import { PER_PAGE } from "./constants";
 
 export default function Homepage() {
   const dash = useDashboard();
+  // Clear filters and the tray's Clear unmount with focus on them, and paging
+  // swaps the cards and scrolls to the top away from the pager. This region
+  // outlives each swap, so focus goes here.
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const focusResults = () => resultsRef.current?.focus({ preventScroll: true });
+  const resetFilters = () => {
+    dash.handleResetFilters();
+    focusResults();
+  };
+  const goToPage = (p: number) => {
+    dash.goToPage(p);
+    focusResults();
+  };
+  const clearCompare = () => {
+    dash.handleClearCompare();
+    focusResults();
+  };
 
   return (
     <div className={styles.page}>
@@ -61,24 +79,27 @@ export default function Homepage() {
           <ResultsSummary
             resultCount={dash.resultCount}
             page={dash.page}
-            onReset={dash.handleResetFilters}
+            onReset={resetFilters}
           />
         )}
 
-        {!dash.showSaved && dash.error && <p className={styles.error} role="alert">{dash.error}</p>}
+        <div ref={resultsRef} tabIndex={-1} role="region" aria-label="Cases" className={styles.results}>
+          {!dash.showSaved && dash.error && <p className={styles.error} role="alert">{dash.error}</p>}
 
-        <CaseGrid
-          showSaved={dash.showSaved}
-          savedCases={dash.savedCases}
-          loading={dash.loading}
-          resultCount={dash.resultCount}
-          previewIds={dash.previewIds}
-          previewMetadata={dash.previewMetadata}
-          savedIds={dash.savedIds}
-          compareIds={dash.compareIds}
-          onToggleSave={dash.handleToggleSave}
-          onToggleCompare={dash.toggleCompare}
-        />
+          <CaseGrid
+            showSaved={dash.showSaved}
+            savedCases={dash.savedCases}
+            loading={dash.loading}
+            skeletonCount={dash.skeletonCount}
+            resultCount={dash.resultCount}
+            previewIds={dash.previewIds}
+            previewMetadata={dash.previewMetadata}
+            savedIds={dash.savedIds}
+            compareIds={dash.compareIds}
+            onToggleSave={dash.handleToggleSave}
+            onToggleCompare={dash.toggleCompare}
+          />
+        </div>
 
         {!dash.showSaved && dash.resultCount !== null && dash.resultCount > PER_PAGE && (
           <Pagination
@@ -86,7 +107,7 @@ export default function Homepage() {
             resultCount={dash.resultCount}
             pageInput={dash.pageInput}
             setPageInput={dash.setPageInput}
-            onGoToPage={dash.goToPage}
+            onGoToPage={goToPage}
           />
         )}
       </section>
@@ -97,7 +118,7 @@ export default function Homepage() {
           compareTyped={dash.compareTyped}
           setCompareTyped={dash.setCompareTyped}
           onSubmitTyped={dash.submitTypedCompare}
-          onClear={dash.handleClearCompare}
+          onClear={clearCompare}
           onCompare={dash.handleCompare}
         />
       )}

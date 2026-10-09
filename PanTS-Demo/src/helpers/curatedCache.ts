@@ -66,15 +66,20 @@ function doFetch(): Promise<SearchItem[]> {
       .catch(() => null);
 
   return Promise.all([grab(1), grab(0)]).then(([tumorRes, noTumorRes]) => {
-    if (tumorRes == null && noTumorRes == null) {
-      // Total failure (both requests errored/non-OK) -- don't poison the cache
-      // with an empty result; let the next call retry instead of showing an
-      // empty grid for the rest of the session.
+    if (tumorRes == null || noTumorRes == null) {
+      // Either request errored or came back non-OK. Caching the half that did
+      // arrive would pin a lopsided grid (say 4 tumor-only cards) for the whole
+      // session with no error. Throw so nothing is cached, the page shows its
+      // error, and the next call retries both.
       throw new Error("curated fetch failed");
     }
     const tumorItems = prioritizeKnownDemographics(tumorRes?.items ?? []).slice(0, HALF);
     const noTumorItems = prioritizeKnownDemographics(noTumorRes?.items ?? []).slice(0, HALF);
     const items = interleave(tumorItems, noTumorItems);
+    // Reachable but empty (no PanTS cases on this server, or a transient empty
+    // answer): an empty strip would be cached for the session as a blank grid
+    // with no message, so fail instead and let the next call ask again.
+    if (items.length === 0) throw new Error("curated fetch returned no cases");
     cachedItems = items;
     return items;
   });
