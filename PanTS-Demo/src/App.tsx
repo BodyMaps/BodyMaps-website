@@ -37,7 +37,6 @@ const ResetPassword = lazy(() => import("./routes/ResetPassword"));
 const VerifyEmail = lazy(() => import("./routes/VerifyEmail"));
 const LegalPage = lazy(() => import("./routes/LegalPage"));
 const SharePatientCard = lazy(() => import("./routes/SharePatientCard"));
-const RotatingHeartLoader = lazy(() => import("./components/Loading"));
 
 const BASENAME = import.meta.env.VITE_BASENAME;
 
@@ -131,7 +130,6 @@ function App() {
                     <Route path="/share/:shareId" element={<SharePatientCard />} />
                     <Route path="/compare" element={<ComparePage />} />
                     <Route path="/compare-viewer" element={<CompareViewerPage />} />
-                    <Route path="/test" element={<RotatingHeartLoader />} />
                   </Route>
                   <Route path="/home.html" element={<Navigate to="/" replace />} />
                   <Route path="/api" element={<Navigate to="/upload" replace />} />
