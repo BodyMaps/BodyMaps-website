@@ -27,6 +27,13 @@ const focusLesionChoice = (event: React.KeyboardEvent<HTMLElement>) => {
   choice.focus();
 };
 
+// True when keyboard focus fell to the page (or onto a control that left it or was
+// disabled), so moving it somewhere useful takes nothing away from anyone.
+const keyboardFocusLost = () => {
+  const active = document.activeElement as HTMLElement | null;
+  return !active || active === document.body || !active.isConnected || active.matches(":disabled");
+};
+
 const LESION_OPTIONS: {
   id: "pancreatic" | "liver" | "kidney" | "colon";
   label: string;
@@ -586,6 +593,15 @@ const UploadPage: React.FC = () => {
     if (renamingId) setRecentUploads(renameRecentUpload(renamingId, renameValue));
     setRenamingId(null);
   };
+  // Removing a file chip, removing a run or a batch, cancelling a whole batch and ending
+  // a rename take the focused control off the page and drop keyboard focus on <body>.
+  // These say where it goes instead: the run whose Rename button gets focus back, the
+  // chip whose Remove button is next ("" for the file picker), and "run" (the run
+  // selector, else the file picker) or "composer" (the file picker). Set only for presses
+  // from the keyboard, so focus after a mouse click is left as it was.
+  const renameRefocusRef = useRef<string | null>(null);
+  const chipRefocusRef = useRef<string | null>(null);
+  const runRefocusRef = useRef<"run" | "composer" | null>(null);
   // Which batch's "View details" popup is open (null = none).
   const [detailsBatchId, setDetailsBatchId] = useState<string | null>(null);
   const [focusedRunId, setFocusedRunId] = useState<string | null>(null);
@@ -1223,8 +1239,7 @@ const UploadPage: React.FC = () => {
     if (couponBusy || !target) return;
     couponRefocusRef.current = null;
     // Only when focus was lost; someone who moved on meanwhile keeps their place.
-    const active = document.activeElement as HTMLElement | null;
-    if (active && active !== document.body && active.isConnected && !active.matches(":disabled")) return;
+    if (!keyboardFocusLost()) return;
     if (target === "input") {
       couponInputRef.current?.focus();
       return;
@@ -1294,6 +1309,32 @@ const UploadPage: React.FC = () => {
   useEffect(() => {
     if (composerFocusRequest) focusComposer();
   }, [composerFocusRequest, focusComposer]);
+
+  useEffect(() => {
+    const id = renameRefocusRef.current;
+    if (renamingId !== null || !id) return;
+    renameRefocusRef.current = null;
+    if (!keyboardFocusLost()) return;
+    Array.from(document.querySelectorAll<HTMLElement>("[data-rename-trigger]"))
+      .find((button) => button.dataset.renameTrigger === id)?.focus();
+  }, [renamingId]);
+  useEffect(() => {
+    const id = chipRefocusRef.current;
+    if (id === null) return;
+    chipRefocusRef.current = null;
+    if (!keyboardFocusLost()) return;
+    const next = id ? Array.from(document.querySelectorAll<HTMLElement>("[data-chip-remove]"))
+      .find((button) => button.dataset.chipRemove === id) : undefined;
+    (next ?? document.querySelector<HTMLElement>("[data-composer-focus]"))?.focus();
+  }, [selectedItems]);
+  useEffect(() => {
+    const target = runRefocusRef.current;
+    if (!target) return;
+    runRefocusRef.current = null;
+    if (!keyboardFocusLost()) return;
+    ((target === "run" ? document.getElementById("workspace-current-run") : null)
+      ?? document.querySelector<HTMLElement>("[data-composer-focus]"))?.focus();
+  }, [recentUploads]);
 
   useEffect(() => {
     const refresh = () => setRecentUploads(loadRecentUploads(user?.id ?? null));
@@ -2367,9 +2408,19 @@ const UploadPage: React.FC = () => {
           <button type="button" disabled={downloadBusy} onClick={() => downloadResult(upload.sessionId)}>Download</button></>}
         {renamingId === upload.sessionId ? <input autoFocus aria-label="Run name" value={renameValue}
           onChange={(event) => setRenameValue(event.target.value)} onBlur={commitRename}
-          onKeyDown={(event) => { if (event.key === "Enter") commitRename(); else if (event.key === "Escape") setRenamingId(null); }} />
-          : <button type="button" onClick={() => startRename(upload)}>Rename</button>}
-        <button type="button" onClick={() => setRecentUploads(removeRecentUpload(upload.sessionId))}>Remove</button>
+          onKeyDown={(event) => {
+            // The Enter that confirms an input method's candidate is not the end of the edit.
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (event.key !== "Enter" && event.key !== "Escape") return;
+            event.preventDefault();
+            renameRefocusRef.current = upload.sessionId;
+            if (event.key === "Enter") commitRename(); else setRenamingId(null);
+          }} />
+          : <button type="button" data-rename-trigger={upload.sessionId} onClick={() => startRename(upload)}>Rename</button>}
+        <button type="button" onClick={(event) => {
+          if (event.detail === 0) runRefocusRef.current = "run";
+          setRecentUploads(removeRecentUpload(upload.sessionId));
+        }}>Remove</button>
       </>} />;
     }
     const running = group.uploads.filter((upload) => upload.status === "Processing");
@@ -2388,11 +2439,17 @@ const UploadPage: React.FC = () => {
         cancelled={group.uploads.filter((upload) => upload.status === "Cancelled").length}
         closeNote={running.length ? closeNote : undefined} closeReady={!closeInfo.active}
         onViewDetails={() => { track("upload_open_batch_details"); setDetailsBatchId(group.batchId); trackedBatchIdRef.current = null; }}
-        onCancelAll={running.length ? () => running.forEach(cancelRun) : undefined} />
+        onCancelAll={running.length ? (event?: React.MouseEvent) => {
+          if (event?.detail === 0) runRefocusRef.current = "composer";
+          running.forEach(cancelRun);
+        } : undefined} />
       <div className="workspace-batch-actions">
         {pendingStarts.length > 0 && <button type="button" onClick={() => pendingStarts.forEach((upload) => void retryAdmission(upload.sessionId))}>Retry pending starts</button>}
         {!running.length && <><button type="button" disabled={downloadBusy || !done} onClick={() => downloadBatch(group.uploads)}>Download completed</button>
-          <button type="button" onClick={() => { let next = recentUploads; group.uploads.forEach((upload) => { next = removeRecentUpload(upload.sessionId); }); setRecentUploads(next); }}>Remove batch</button></>}
+          <button type="button" onClick={(event) => {
+            if (event.detail === 0) runRefocusRef.current = "run";
+            let next = recentUploads; group.uploads.forEach((upload) => { next = removeRecentUpload(upload.sessionId); }); setRecentUploads(next);
+          }}>Remove batch</button></>}
       </div>
     </div>;
   };
@@ -2421,6 +2478,9 @@ const UploadPage: React.FC = () => {
   return (
     <div className={`upload-page-wrapper workspace-page${focusedGroup ? " has-runs" : ""}${previewItem ? " has-scan-preview" : ""}`}>
       <WorkspaceIntro collapsed={!!focusedGroup} />
+      {/* The intro and its h1 are hidden from screen readers while a run is showing;
+          the page still needs a top-level heading then. */}
+      {focusedGroup && <h1 className="sr-only">Workspace</h1>}
 
       <div className="upload-main">
         {focusedGroup && <section className="workspace-run-thread" aria-label="Current runs">
@@ -2552,7 +2612,14 @@ const UploadPage: React.FC = () => {
                         </span>
                         <button type="button"
                           className="file-chip-remove"
-                          onClick={() => removeItem(item.id)}
+                          data-chip-remove={item.id}
+                          onClick={(event) => {
+                            if (event.detail === 0) {
+                              const at = selectedItems.findIndex((other) => other.id === item.id);
+                              chipRefocusRef.current = (selectedItems[at + 1] ?? selectedItems[at - 1])?.id ?? "";
+                            }
+                            removeItem(item.id);
+                          }}
                           aria-label={`Remove ${name}`}
                         >
                           Remove
