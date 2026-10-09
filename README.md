@@ -68,11 +68,17 @@ Optional dataset vars:
 # Writable dir for precomputed PanTS low-res volumes (make_lowres.py output)
 PANTS_LOWRES_PATH=/home/visitor/pants_lowres
 
-# CancerVerse (second, CT-only dataset). Leave unset to disable it.
+# CancerVerse (second dataset). Leave unset to disable it.
 CANCERVERSE_PATH=/folder/where/CancerVerse
 CANCERVERSE_LOWRES_PATH=/home/visitor/cancerverse_lowres
+# Optional writable overlay with updated/new scans, current metadata and the tumor index
+CANCERVERSE_OVERLAY_PATH=/home/visitor/cancerverse_v351
 ```
-`CANCERVERSE_PATH` holds the `CV_########/ct.nii.gz` cases; the metadata CSV `CancerVerse_dataset_metadata.csv` sits **next to** that folder (in its parent). When set, `/api/search?dataset=cancerverse` (or `dataset=all`) searches it; CancerVerse has no masks yet, so mask endpoints return `{"masks_available": false}`.
+`CANCERVERSE_PATH` holds the cases (`image_only/CV_########/ct.nii.gz`, or the flat `CV_########/ct.nii.gz`); the metadata CSV `CancerVerse_dataset_metadata.csv` sits **next to** that folder (in its parent). Search treats PanTS and CancerVerse as **one collection**: `/api/search`, `/api/facets` and `/api/random` cover both by default (`?dataset=pants` or `?dataset=cancerverse` still narrows them for API clients). CancerVerse has no organ masks, so mask endpoints return `{"masks_available": false}` for it.
+
+**Tumor type.** Every PanTS tumor is pancreatic. CancerVerse annotates 13 organs, so its tumor types come from the released lesion masks: run `scripts/build_cancerverse_index.py --labels CancerVerse_Label.tar.gz --out <overlay>/cancerverse_case_index.json --workers 4` once (about 30 minutes). It decompresses every mask an annotator touched (a touched mask can be an erased, all-zero annotation, so file size alone is not evidence of a tumor) and skips the untouched ones, verifying that skip on a sample; it exits non-zero if the check ever finds a tumor in a skipped mask. Without that file the CancerVerse tumor status simply shows as unknown. Filter with `tumor_type[]=pancreas&tumor_type[]=liver`; items carry `dataset`, `tumor types` and `tumor label`. A bare number in `caseid=` always means a PanTS case; CancerVerse ids keep their `CV_` prefix.
+
+**Updating CancerVerse.** The dataset mount is read-only, so updates go into the overlay and the site prefers it. `scripts/plan_cancerverse_update.py` compares the server copy with the published release and writes the list of new or changed CTs; `scripts/stage_cancerverse_update.sh <plan> <overlay>` downloads and verifies them (size and SHA-256), builds the tumor index, and publishes the metadata CSV last, only if every download succeeded. It never touches `.env` or restarts anything: add `CANCERVERSE_OVERLAY_PATH`, then reload the backend with the usual deploy procedure when no job is running.
 
 #### Build the search/shuffle quality index
 
