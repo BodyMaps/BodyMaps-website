@@ -239,6 +239,7 @@ describe("leaving /upload mid-transfer and coming back", () => {
 
     expect(inFlight.every((c) => c.signal?.aborted)).toBe(true);
     await flush();
+    expect(statusOf(sid)).toBe("Cancelled");
     expect(callsTo("/api/upload-inference-chunk", sid)).toHaveLength(inFlight.length);
     expect(callsTo("/api/finalize-upload", sid)).toHaveLength(0);
     expect(callsTo("/api/run-epai-inference", sid)).toHaveLength(0);
