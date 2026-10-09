@@ -32,6 +32,7 @@ from services import lesion_grounding
 from services.segmentation_metrics import calculate_session_metrics
 from services.search_ranking import rank_quality_results, select_balanced_tumor_results
 from services.site_normalization import site_country_label, split_site_codes
+from services import cancerverse_catalog as cv_catalog
 from models.application_session import ApplicationSession
 from models.combined_labels import CombinedLabels
 from models.base import db
@@ -62,6 +63,7 @@ import uuid
 
 from datetime import datetime, timedelta
 from .utils import *
+from . import utils as _search_tables   # live DF / DF_CV / DF_ALL (``import *`` copies the names at import time)
 import requests  # ⭐ 只在這裡 import 一次 requests
 
 # 建立 blueprint
@@ -3805,6 +3807,23 @@ def _facet_counts_with_unknown(df: pd.DataFrame, col_key: str, top_k: int = 6) -
     rows: List[Dict[str, Any]] = []
     unknown: int = 0
 
+    # ---- Tumor type: count each organ, a scan can have several ----
+    # 'unknown' = scans whose tumor status is unknown (no tumor-type can be told for them);
+    # healthy scans have no type and are simply not counted.
+    if col_key == "tumor_type":
+        type_counts: Dict[str, int] = {}
+        if "__tumor_types" in df.columns:
+            for types in df["__tumor_types"]:
+                for t in set(types if isinstance(types, (tuple, list, set)) else ()):
+                    type_counts[t] = type_counts.get(t, 0) + 1
+        unknown = int(df["__tumor01"].isna().sum()) if "__tumor01" in df.columns else 0
+        rows = [
+            {"value": t, "label": cv_catalog.tumor_type_label(t), "count": n}
+            for t, n in type_counts.items()
+        ]
+        rows.sort(key=lambda row: (-row["count"], row["label"]))   # at most 13 organs: no top_k cut
+        return {"rows": rows, "unknown": unknown}
+
     key_to_col = {
         "ct_phase": ("__ct", str),
         "manufacturer": ("__mfr", str),
@@ -3923,16 +3942,17 @@ def api_facets():
         fields = [f.strip().lower() for f in fields_raw.split(",") if f.strip()]
 
         valid  = {
-            "ct_phase","manufacturer","year","sex","tumor",
+            "ct_phase","manufacturer","year","sex","tumor","tumor_type",
             "model","study_type","site_nat","site_nationality"
         }
         fields = [f for f in fields if f in valid] or ["ct_phase","manufacturer"]
         top_k  = to_int(_arg("top_k","6")) or 6
         guarantee = (_arg("guarantee","0") or "0").strip().lower() in ("1","true","yes","y")
 
-        # 先應用目前的過濾條件
-        df_now = apply_filters(DF)
-        base_for_ranges = df_now if len(df_now) else DF
+        # Same base as /search (the combined PanTS + CancerVerse catalog unless ?dataset= narrows it).
+        base_df = select_dataset_df()
+        df_now = apply_filters(base_df)
+        base_for_ranges = df_now if len(df_now) else base_df
 
         facets: Dict[str, List[Dict[str, Any]]] = {}
         unknown_counts: Dict[str, int] = {}
@@ -3944,6 +3964,7 @@ def api_facets():
             "year": {"year_from","year_to"},
             "sex": {"sex"},
             "tumor": {"tumor"},
+            "tumor_type": {"tumor_type"},
             "model": {"model"},
             "study_type": {"study_type"},
             "site_nat": {"site_nat","site_nationality"},
@@ -3953,7 +3974,7 @@ def api_facets():
         for f in fields:
             ex = exclude_map.get(f, set())
             # 若 guarantee=1 且目前篩完為空，改用全量 DF 以「保證列出所有可能值」
-            src = (DF if (guarantee and len(df_now) == 0) else df_now)
+            src = (base_df if (guarantee and len(df_now) == 0) else df_now)
             df_facet = apply_filters(src, exclude=ex)
             res = _facet_counts_with_unknown(df_facet, f, top_k=top_k)
 
@@ -3978,8 +3999,8 @@ def api_facets():
                 year_min, year_max = int(yr.min()), int(yr.max())
 
         dataset_counts = {
-            "PanTS": int(len(DF)),
-            "CancerVerse": int(len(DF_CV)) if DF_CV is not None else 0,
+            "PanTS": int(len(_search_tables.DF)),
+            "CancerVerse": int(len(_search_tables.DF_CV)) if _search_tables.DF_CV is not None else 0,
         }
         return jsonify({
             "facets": facets,
