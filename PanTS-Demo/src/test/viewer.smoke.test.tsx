@@ -91,7 +91,15 @@ vi.mock("../helpers/CornerstoneNifti2", async (importOriginal) => {
 	};
 });
 
-import { applyRemoteMeasurement, clearMeasurements, LENGTH_TOOL, renderVisualization } from "../helpers/CornerstoneNifti2";
+// A local NIfTI arrives as a blob: URL over the decompressed file.
+vi.mock("../helpers/localNifti", () => ({
+	loadLocalNiftiAsRawBlobUrl: vi.fn(async () => "blob:local-ct"),
+	getLocalNiftiFile: vi.fn(() => null),
+	setLocalNiftiFile: vi.fn(),
+	clearLocalNiftiFile: vi.fn(),
+}));
+
+import { applyRemoteMeasurement, clearMeasurements, LENGTH_TOOL, renderVisualization, upgradeCtVolume } from "../helpers/CornerstoneNifti2";
 import VisualizationPage from "../routes/VisualizationPage";
 import type { QuizPracticeController } from "../education/types";
 import type { LiveRoomController } from "../liveRooms/types";
@@ -223,6 +231,27 @@ describe("viewer smoke test", () => {
 		expect(screen.getByRole("heading", { level: 1, name: "Case 17" })).toHaveClass("sr-only");
 	});
 
+	it("lets go of a local NIfTI's blob URL when the viewer closes", async () => {
+		const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+		const { unmount } = render(
+			<AuthProvider>
+				<MemoryRouter initialEntries={["/local-nifti"]}>
+					<Routes>
+						<Route path="/local-nifti" element={<VisualizationPage />} />
+					</Routes>
+				</MemoryRouter>
+			</AuthProvider>
+		);
+		await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
+		expect(vi.mocked(renderVisualization).mock.calls.at(-1)?.[4]).toBe("blob:local-ct");
+		expect(revoke).not.toHaveBeenCalledWith("blob:local-ct");
+
+		unmount();
+
+		expect(revoke).toHaveBeenCalledWith("blob:local-ct");
+		revoke.mockRestore();
+	});
+
 	it("runs Brightness and Contrast the way their names say and announces the real level and width", async () => {
 		render(
 			<AuthProvider>
@@ -309,6 +338,33 @@ describe("viewer smoke test", () => {
 
 		await act(async () => answerSearch());
 		expect(await screen.findByText("No metadata available for this case.")).toBeInTheDocument();
+	});
+
+	it("puts focus on the HD loading overlay's Cancel, cancels on Escape, and gives focus back to Annotate", async () => {
+		// An HD download that doesn't finish while the test looks at the overlay.
+		vi.mocked(upgradeCtVolume).mockImplementationOnce(() => new Promise(() => {}));
+		render(
+			<AuthProvider>
+				<MemoryRouter initialEntries={["/case/1"]}>
+					<Routes>
+						<Route path="/case/:caseId" element={<VisualizationPage />} />
+					</Routes>
+				</MemoryRouter>
+			</AuthProvider>
+		);
+		await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
+		const annotate = screen.getByRole("button", { name: "Annotate" });
+		annotate.focus();
+		fireEvent.click(annotate);
+
+		const overlay = screen.getByRole("dialog", { name: "Loading HD resolution" });
+		expect(overlay).toHaveAttribute("aria-modal", "true");
+		await waitFor(() => expect(upgradeCtVolume).toHaveBeenCalled());
+		expect(screen.getByRole("button", { name: "Cancel HD loading" })).toHaveFocus();
+
+		fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+		expect(screen.queryByRole("dialog", { name: "Loading HD resolution" })).toBeNull();
+		expect(annotate).toHaveFocus();
 	});
 
 	it("aborts an in-flight load and disposes its late result", async () => {
