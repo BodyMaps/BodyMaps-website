@@ -89,14 +89,20 @@ def get_case_nifti_paths(case_id):
     dataset = get_dataset_from_case_id(case_id)
     if dataset == "CancerVerse":
         folder = get_cancerverse_id(case_id)
+        # Overlay (updated scans) first, then the dataset in either on-disk layout.
+        image = cv_catalog.resolve_ct_path(
+            folder, Constants.CANCERVERSE_PATH, Constants.CANCERVERSE_OVERLAY_PATH
+        )
+        if cv_catalog.is_under(image, Constants.CANCERVERSE_OVERLAY_PATH):
+            # The old low-res copy was made from the CT this one replaced: never serve it.
+            lowres = f"{Constants.CANCERVERSE_OVERLAY_PATH}/lowres/image_only/{folder}/ct_lowres.nii.gz"
+        else:
+            lowres = f"{Constants.CANCERVERSE_LOWRES_PATH}/image_only/{folder}/ct_lowres.nii.gz"
         return {
             "dataset": dataset,
             "folder_id": folder,
-            # Overlay (updated scans) first, then the dataset in either on-disk layout.
-            "image": cv_catalog.resolve_ct_path(
-                folder, Constants.CANCERVERSE_PATH, Constants.CANCERVERSE_OVERLAY_PATH
-            ),
-            "lowres_image": f"{Constants.CANCERVERSE_LOWRES_PATH}/image_only/{folder}/ct_lowres.nii.gz",
+            "image": image,
+            "lowres_image": lowres,
             "mask": None,
             "masks_available": False,
         }
@@ -1504,10 +1510,15 @@ def select_dataset_df() -> pd.DataFrame:
         return DF_CV if DF_CV is not None else DF.iloc[0:0]
     return DF_ALL
 
+def _is_number(text: str) -> bool:
+    """ASCII digits only: str.isdigit() also accepts '²' and '٣', which int() then rejects."""
+    return text.isascii() and text.isdigit()
+
+
 def _exact_case_mask(df: pd.DataFrame, cid: str) -> pd.Series:
     """Rows whose case id is exactly ``cid``. A bare number means a PanTS case."""
     s = df["__case_str"].astype(str).str.strip()
-    if cid.isdigit():
+    if _is_number(cid):
         n = int(cid)
         nums = pd.to_numeric(s.str.extract(r"(\d+)")[0], errors="coerce")
         is_pants = (df["__dataset"] == "PanTS") if "__dataset" in df.columns else True
@@ -1532,13 +1543,13 @@ def apply_filters(base: pd.DataFrame, exclude: Optional[Set[str]] = None) -> pd.
     cid = (_arg("caseid") or "").strip()
     if cid and not q and "caseid" not in exclude and "__case_str" in df.columns:
         exact = _exact_case_mask(df, cid)
-        if exact.any() or cid.isdigit():
+        if exact.any() or _is_number(cid):
             df = df[exact]
         else:   # not a full id: keep the old substring behaviour for API clients
             df = df[df["__case_str"].astype(str).str.contains(re.escape(cid), na=False, case=False, regex=False)]
     elif q and "caseid" not in exclude and "__case_str" in df.columns:
         s = df["__case_str"].astype(str)
-        if q.isdigit():
+        if _is_number(q):
             # 把每列所有數字 token 抓出來，做數值等號；77 不會吃 177/077（前導 0 忽略）
             qq = int(q)
             nums = s.str.findall(r"\d+")
@@ -1563,11 +1574,12 @@ def apply_filters(base: pd.DataFrame, exclude: Optional[Set[str]] = None) -> pd.
             df = df[df["__tumor01"] == tv]
 
     # --- Tumor type (organ of the tumor; PanTS tumors are pancreatic) ---
-    tt_list = _collect_list_params(["tumor_type", "tumor_type[]"])
-    tt_raw = (_arg("tumor_type", "") or "").strip()
-    if tt_raw and not tt_list:
-        tt_list = [p.strip() for p in re.split(r"[;,|]+", tt_raw) if p.strip()]
-    wanted_types = {p.strip().lower() for p in tt_list if p and p.strip()}
+    wanted_types = {
+        part.strip().lower()
+        for value in _collect_list_params(["tumor_type", "tumor_type[]"])
+        for part in re.split(r"[;|]+", value)       # commas are already split by the collector
+        if part.strip()
+    }
     if wanted_types and "__tumor_types" in df.columns and "tumor_type" not in exclude:
         df = df[df["__tumor_types"].map(
             lambda ts: bool(wanted_types.intersection(ts)) if isinstance(ts, (tuple, list, set)) else False

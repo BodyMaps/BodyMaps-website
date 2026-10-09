@@ -215,3 +215,23 @@ def test_balanced_tumor_selection_returns_empty_when_quota_is_impossible():
     )
 
     assert selected.empty
+
+
+def test_quality_ranking_puts_pants_before_cancerverse_inside_a_thumbnail_tier():
+    """CancerVerse scans are larger on average; without the dataset tie-break they would fill page one."""
+    big_cv = _row("cv-big", tumor=1, voxels=9000, spacing=0.1, sex="F", age=40, order=100_000_001, ct_bytes=9000)
+    pants = _row("pants", tumor=1, voxels=100, spacing=1.0, sex="F", age=40, order=1, ct_bytes=100)
+    distorted = _row("pants-distorted", tumor=1, voxels=100, spacing=1.0, sex="F", age=40, order=2,
+                     thumbnail_rank=2, ct_bytes=100)
+    big_cv["__dataset"], pants["__dataset"], distorted["__dataset"] = "CancerVerse", "PanTS", "PanTS"
+    ranked = rank_quality_results(_frame([big_cv, distorted, pants]), balance_sex=False, balance_age=False)
+    assert ranked["id"].tolist() == ["pants", "cv-big", "pants-distorted"]     # tier first, then dataset, then size
+
+
+def test_quality_ranking_without_a_dataset_column_is_unchanged():
+    df = _frame([
+        _row("small", tumor=1, voxels=1000, spacing=0.2, sex="F", age=40, order=1, ct_bytes=100),
+        _row("large", tumor=0, voxels=100, spacing=1.0, sex="F", age=40, order=2, ct_bytes=1000),
+    ])
+    assert "__dataset" not in df.columns
+    assert rank_quality_results(df, balance_sex=False, balance_age=False)["id"].tolist() == ["large", "small"]

@@ -34,6 +34,7 @@ Read-only on the inputs; writes only --out.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import struct
@@ -243,6 +244,15 @@ def build_index(cases: Iterator[Tuple[str, Dict[str, bytes]]], workers: int = 1,
             "cases": out_cases}
 
 
+def missing_scans(metadata_csv: str, index: dict) -> Tuple[List[str], int]:
+    """(scan ids listed in the metadata CSV's first column that the index lacks, number of CSV scans)."""
+    with open(metadata_csv, newline="", encoding="utf-8-sig") as f:
+        rows = csv.reader(f)
+        next(rows, None)                                # header
+        ids = [row[0].strip() for row in rows if row and row[0].strip()]
+    return [i for i in ids if i not in index["cases"]], len(ids)
+
+
 def main(argv: Optional[list] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     src = ap.add_mutually_exclusive_group(required=True)
@@ -253,9 +263,22 @@ def main(argv: Optional[list] = None) -> int:
     ap.add_argument("--exact", action="store_true", help="decompress every mask of every scan (slowest)")
     ap.add_argument("--qc-every", type=int, default=50,
                     help="verify the untouched masks of every Nth scan (0 = off)")
+    ap.add_argument("--metadata", help="metadata CSV (first column: CancerVerse ID). The index is NOT written if "
+                                       "too many of its scans are missing from the labels, which is what a "
+                                       "truncated archive looks like (tarfile ends quietly at a cut)")
+    ap.add_argument("--max-missing", type=float, default=0.005,
+                    help="largest tolerated fraction of --metadata scans without labels (default 0.5%%)")
     args = ap.parse_args(argv)
     cases = iter_cases_from_tar(args.labels) if args.labels else iter_cases_from_dir(args.labels_dir)
     index = build_index(cases, workers=max(1, args.workers), qc_every=max(0, args.qc_every), exact=args.exact)
+    if args.metadata:
+        missing, listed = missing_scans(args.metadata, index)
+        print(f"{len(missing)} scans in the metadata have no label folder in the archive"
+              + (f" (e.g. {', '.join(missing[:3])})" if missing else ""))
+        if not index["cases"] or len(missing) > args.max_missing * listed:
+            print(f"ERROR: too many scans are missing (limit {args.max_missing:.1%}); the archive looks incomplete. "
+                  f"Index NOT written.", file=sys.stderr)
+            return 2
     tmp = args.out + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(index, f, separators=(",", ":"))

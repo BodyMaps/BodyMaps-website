@@ -88,6 +88,18 @@ def test_tumor_type_filter_spans_datasets():
     assert ids("tumor_type[]=spleen") == []
 
 
+def test_tumor_type_accepts_every_separator():
+    for query in ("tumor_type=liver;kidney", "tumor_type=liver|kidney", "tumor_type=liver,kidney",
+                  "tumor_type[]=liver&tumor_type[]=kidney"):
+        assert ids(query) == ["CV_00000012"], query
+
+
+@pytest.mark.parametrize("query", ["caseid=%C2%B2", "q=%C2%B2", "caseid=%D9%A3", "q=%D9%A3"])
+def test_non_ascii_digits_are_text_not_numbers(query):
+    """str.isdigit() accepts '²' and Arabic digits; int() then raised and the request returned a 500."""
+    assert ids(query) == []
+
+
 def test_tumor_flag_works_across_datasets_and_unknown_is_not_no_tumor():
     assert ids("tumor=1") == ["CV_00000012", "CV_00000013", "PanTS_00000012", "PanTS_00000030"]
     # CV_14 / CV_15 are healthy patients; CV_16 is a scan of a patient with tumor scans: unknown

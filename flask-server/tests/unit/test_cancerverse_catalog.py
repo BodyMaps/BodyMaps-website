@@ -90,6 +90,49 @@ def test_a_scan_without_patient_id_is_its_own_patient():
     assert out["tumor?"].iloc[0] == 0.0
 
 
+@pytest.mark.parametrize("patient", [np.nan, None, "nan", "None", " "])
+def test_a_missing_patient_id_in_any_form_is_not_one_shared_patient(patient):
+    """Two scans with no patient id are two patients: one's tumor must not hide the other's status."""
+    raw = pd.DataFrame({"CancerVerse ID": ["CV_00000001", "CV_00000002"], "Patient ID": [patient, patient]})
+    idx = {"CV_00000001": {"tumors": ["liver"]}, "CV_00000002": {"tumors": []}}
+    out = cv.normalize_metadata(raw, idx)
+    assert list(out["tumor?"]) == [1.0, 0.0]
+
+
+@pytest.mark.parametrize("code,is_neoplasm", [
+    ("C79.5", True), ("C22.0", True), ("c25", True), (" C64", True), ("D35.2", True), ("D09", True),
+    ("D50.9", False), ("E11", False), ("", False), (None, False), (float("nan"), False), ("Z51.1", False),
+])
+def test_neoplasm_codes(code, is_neoplasm):
+    assert cv.has_neoplasm_code(code) is is_neoplasm
+
+
+def test_a_patient_diagnosed_with_an_unsegmented_cancer_is_unknown_not_no_tumor():
+    """C79 (metastases), a cancer in an organ outside the 13, ...: no annotated lesion does not mean no tumor."""
+    raw = raw_frame()
+    raw["icd10_code"] = ["C22.0", "", "C79.5", "", ""]            # P2 (CV_00000003) has cancer, no lesion mask
+    out = cv.normalize_metadata(raw, index())
+    status = dict(zip(out["CancerVerse ID"], out["tumor?"]))
+    assert np.isnan(status["CV_00000003"])                        # was 0.0 before the diagnosis was considered
+    assert status["CV_00000004"] == 0.0                           # no diagnosis, no lesion: still a negative
+    assert status["CV_00000001"] == 1.0                           # a lesion mask always wins
+
+
+def test_a_diagnosis_on_any_scan_of_the_patient_applies_to_all_their_scans():
+    raw = raw_frame()
+    raw["Patient ID"] = ["P1", "P1", "P2", "P2", "P3"]
+    raw["icd10_code"] = ["", "", "", "C18.9", ""]                  # only one of P2's two scans carries the code
+    idx = {f"CV_0000000{i}": {"tumors": []} for i in range(1, 6)}
+    out = cv.normalize_metadata(raw, idx)
+    assert list(out["tumor?"].isna()) == [False, False, True, True, False]
+
+
+def test_no_icd_column_keeps_the_mask_only_rule():
+    raw = raw_frame().drop(columns=["icd10_code"])
+    out = cv.normalize_metadata(raw, index())
+    assert dict(zip(out["CancerVerse ID"], out["tumor?"]))["CV_00000003"] == 0.0
+
+
 def test_tumor_type_helpers():
     assert cv.split_tumor_types("liver; kidney;;") == ("liver", "kidney")
     assert cv.split_tumor_types(None) == () and cv.split_tumor_types(float("nan")) == ()
@@ -142,3 +185,26 @@ def test_metadata_and_index_resolution_order(tmp_path):
     idx = _touch(overlay / cv.INDEX_JSON)
     assert cv.resolve_index_file(None, str(overlay)) == idx
     assert cv.resolve_index_file(None, None) is None
+
+
+def test_profile_resolution_prefers_the_overlay(tmp_path):
+    root, overlay = tmp_path / "CancerVerse", tmp_path / "overlay"
+    old = _touch(root / "profile_only" / "CV_00000001" / "profile.jpg")
+    new = _touch(overlay / "profile_only" / "CV_00000001" / "profile.jpg")
+    only_old = _touch(root / "profile_only" / "CV_00000002" / "profile.jpg")
+    assert cv.resolve_profile_path("CV_00000001", str(root), str(overlay)) == new
+    assert cv.resolve_profile_path("CV_00000002", str(root), str(overlay)) == only_old
+    assert cv.resolve_profile_path("CV_00000001", str(root), None) == old
+    missing = cv.resolve_profile_path("CV_00000009", str(root), str(overlay))
+    assert missing.replace("\\", "/").endswith("CancerVerse/profile_only/CV_00000009/profile.jpg")   # the dataset path
+    assert cv.resolve_profile_path("CV_00000009", None, None) == ""
+
+
+def test_is_under(tmp_path):
+    base = tmp_path / "overlay"
+    inside = _touch(base / "image_only" / "CV_00000001" / "ct.nii.gz")
+    outside = _touch(tmp_path / "elsewhere" / "ct.nii.gz")
+    assert cv.is_under(inside, str(base)) is True
+    assert cv.is_under(outside, str(base)) is False
+    assert cv.is_under(str(base) + "-sibling/x", str(base)) is False          # prefix of the name is not containment
+    assert cv.is_under(inside, None) is False and cv.is_under(None, str(base)) is False

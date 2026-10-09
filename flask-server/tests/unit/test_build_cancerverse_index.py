@@ -180,3 +180,36 @@ def test_main_exits_non_zero_when_qc_finds_a_tumor_in_an_untouched_mask(tmp_path
     real = bci.count_foreground
     monkeypatch.setattr(bci, "count_foreground", lambda raw: (3, real(raw)[1]))
     assert bci.main(["--labels", str(tar_path), "--out", str(tmp_path / "idx.json"), "--qc-every", "1"]) == 1
+
+
+def _metadata(path, ids):
+    path.write_text("CancerVerse ID,sex\n" + "".join(f"{i},M\n" for i in ids))
+    return str(path)
+
+
+def test_a_truncated_archive_is_refused_when_checked_against_the_metadata(tmp_path, capsys):
+    """tarfile ends quietly at a cut, so a half-downloaded archive used to give a 'valid' partial index."""
+    tar_path, out = tmp_path / "labels.tar.gz", tmp_path / "idx.json"
+    write_tar(tar_path, {"CV_00000001": case_masks({"liver_lesion": 9}), "CV_00000002": case_masks()})
+    csv_path = _metadata(tmp_path / "meta.csv", ["CV_00000001", "CV_00000002", "CV_00000003", "CV_00000004"])
+    assert bci.main(["--labels", str(tar_path), "--out", str(out), "--metadata", csv_path]) == 2
+    assert not out.exists() and not (tmp_path / "idx.json.tmp").exists()
+    assert "Index NOT written" in capsys.readouterr().err
+
+
+def test_a_few_unlabelled_scans_are_tolerated(tmp_path):
+    """The real release has 24,422 scans in the CSV and 24,420 label folders."""
+    tar_path, out = tmp_path / "labels.tar.gz", tmp_path / "idx.json"
+    write_tar(tar_path, {f"CV_{i:08d}": case_masks() for i in range(1, 11)})
+    csv_path = _metadata(tmp_path / "meta.csv", [f"CV_{i:08d}" for i in range(1, 11)] + ["CV_00000099"])
+    assert bci.main(["--labels", str(tar_path), "--out", str(out), "--metadata", csv_path, "--max-missing", "0.2"]) == 0
+    assert out.exists()
+    assert bci.main(["--labels", str(tar_path), "--out", str(tmp_path / "strict.json"), "--metadata", csv_path]) == 2
+
+
+def test_an_empty_archive_is_never_a_valid_index(tmp_path):
+    tar_path, out = tmp_path / "labels.tar.gz", tmp_path / "idx.json"
+    write_tar(tar_path, {})
+    csv_path = _metadata(tmp_path / "meta.csv", [])
+    assert bci.main(["--labels", str(tar_path), "--out", str(out), "--metadata", csv_path]) == 2
+    assert not out.exists()

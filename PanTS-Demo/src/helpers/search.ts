@@ -120,14 +120,11 @@ export const buildSearchParams = (
 export const parseFiltersFromParams = (params: URLSearchParams): SearchFilters => {
 	const tumorRaw = params.get("tumor");
 	const tumor: TumorFilter = tumorRaw === "1" ? "tumor" : tumorRaw === "0" ? "no_tumor" : "any";
-	const datasetRaw = (params.get("dataset") || "").toLowerCase();
-	const dataset =
-		datasetRaw === "pants" ? ["PanTS"] :
-		datasetRaw === "cancerverse" || datasetRaw === "cv" ? ["CancerVerse"] :
-		[]; // "all"/absent → both (Any)
+	// The library has no dataset picker any more, so a ?dataset= left in an old bookmark must
+	// not turn into a filter nobody can see or clear: it is ignored (the API still accepts it).
 	return {
 		tumor,
-		dataset,
+		dataset: [],
 		tumorType: params.getAll("tumor_type[]"),
 		sex: params.getAll("sex[]"),
 		age: params.getAll("age_bin[]"),

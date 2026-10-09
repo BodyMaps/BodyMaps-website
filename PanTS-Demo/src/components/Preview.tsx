@@ -298,7 +298,7 @@ export default function Preview({
 				</div>
 
 				<div
-					className="flex items-center gap-2"
+					className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
 					style={{ fontSize: "11px", fontWeight: 700, color: "#111111" }}
 				>
 					<span>Sex {previewMetadata.sex || "—"}</span>

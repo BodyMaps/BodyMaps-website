@@ -43,6 +43,15 @@ LESION_TYPES: Dict[str, str] = {
     "gallbladder_lesion": "gallbladder",
 }
 PANTS_TUMOR_TYPE = "pancreas"
+# ICD-10 chapter II (neoplasms): C00-C97 malignant, D00-D49 in situ / benign / uncertain.
+_NEOPLASM_ICD = re.compile(r"^\s*(C\d\d|D[0-4]\d)", re.IGNORECASE)
+
+
+def has_neoplasm_code(value) -> bool:
+    """True for an ICD-10 neoplasm code ('C22.0', 'D35'); blank/NaN/other chapters are False."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return False
+    return bool(_NEOPLASM_ICD.match(str(value)))
 
 
 def tumor_type_label(key: str) -> str:
@@ -155,10 +164,12 @@ def normalize_metadata(raw: pd.DataFrame, case_index: Optional[Dict[str, dict]] 
 
     Tumor status (``tumor?``) comes from the annotated masks:
       1    the scan has at least one annotated lesion
-      0    the scan is indexed, has none, and none of that patient's scans has one
-      NaN  unknown: no index available, scan not indexed, or a scan with no lesion of a
-           patient whose other scans have one (an earlier or unannotated scan: it may
-           or may not contain tumor, so it is not called "no tumor")
+      0    the scan is indexed, has none, none of that patient's scans has one, and the
+           patient has no ICD-10 neoplasm code on any scan
+      NaN  unknown: no index available, scan not indexed, a scan with no lesion of a
+           patient whose other scans have one (an earlier or unannotated scan), or a
+           patient diagnosed with a neoplasm that was never segmented (ICD C00-D49 but no
+           annotated lesion, e.g. an organ outside the 13). None of these is "no tumor".
     Patient identifiers, accession numbers and report text are dropped here: search never
     exposes them.
     """
@@ -166,9 +177,9 @@ def normalize_metadata(raw: pd.DataFrame, case_index: Optional[Dict[str, dict]] 
     if "CancerVerse ID" not in df.columns:
         raise ValueError("CancerVerse metadata needs a 'CancerVerse ID' column")
     ids = df["CancerVerse ID"].astype(str).str.strip()
-    patients = (df["Patient ID"].astype(str).str.strip() if "Patient ID" in df.columns
+    patients = (df["Patient ID"].fillna("").astype(str).str.strip() if "Patient ID" in df.columns
                 else pd.Series([""] * len(df), index=df.index))
-    patients = patients.where(patients != "", ids)           # no patient id: its own patient
+    patients = patients.where(~patients.str.lower().isin({"", "nan", "none", "null"}), ids)   # no patient id: its own patient
 
     out = pd.DataFrame({"CancerVerse ID": ids, "dataset": "CancerVerse"}, index=df.index)
     out["sex"] = df["sex"].fillna("").astype(str).str.strip() if "sex" in df.columns else ""
@@ -194,7 +205,11 @@ def normalize_metadata(raw: pd.DataFrame, case_index: Optional[Dict[str, dict]] 
 
     tumor = pd.Series(np.nan, index=df.index, dtype=float)
     tumor[has_tumor] = 1.0
-    healthy = indexed & ~has_tumor & ~patients.isin(tumor_patients)
+    if "icd10_code" in df.columns:
+        diagnosed = set(patients[df["icd10_code"].map(has_neoplasm_code)])
+    else:
+        diagnosed = set()
+    healthy = indexed & ~has_tumor & ~patients.isin(tumor_patients) & ~patients.isin(diagnosed)
     tumor[healthy] = 0.0
     out["tumor?"] = tumor
     out["tumor type"] = types.map(";".join)
@@ -250,3 +265,23 @@ def resolve_ct_path(folder: str, root: Optional[str], overlay: Optional[str] = N
         if os.path.exists(path):
             return path
     return os.path.join(root, "image_only", folder, CT_FILENAME) if root else ""
+
+
+def resolve_profile_path(folder: str, root: Optional[str], overlay: Optional[str] = None) -> str:
+    """Where one CancerVerse card thumbnail lives: overlay first, then the dataset root."""
+    candidates = [os.path.join(base, "profile_only", folder, "profile.jpg") for base in (overlay, root) if base]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[-1] if candidates else ""
+
+
+def is_under(path: Optional[str], base: Optional[str]) -> bool:
+    """True when ``path`` is inside directory ``base`` (symlinks resolved; False if either is unset)."""
+    if not path or not base:
+        return False
+    try:
+        real_base = os.path.realpath(base)
+        return os.path.commonpath((os.path.realpath(path), real_base)) == real_base
+    except ValueError:
+        return False

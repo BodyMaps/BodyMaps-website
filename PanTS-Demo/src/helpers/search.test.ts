@@ -99,7 +99,7 @@ describe("parseFiltersFromParams", () => {
 	it("round-trips filters through the URL query string", () => {
 		const filters: SearchFilters = {
 			tumor: "tumor",
-			dataset: ["CancerVerse"],
+			dataset: [],
 			tumorType: ["kidney", "liver"],
 			sex: ["F"],
 			age: ["50-59"],
@@ -110,6 +110,14 @@ describe("parseFiltersFromParams", () => {
 		};
 		const restored = parseFiltersFromParams(buildSearchParams(filters));
 		expect(restored).toEqual(filters);
+	});
+
+	it("ignores a ?dataset= from an old bookmark instead of applying a filter nobody can see", () => {
+		for (const value of ["cancerverse", "cv", "pants", "all"]) {
+			const restored = parseFiltersFromParams(new URLSearchParams({ dataset: value }));
+			expect(restored).toEqual(EMPTY_FILTERS);
+			expect(countActiveFilters(restored)).toBe(0);
+		}
 	});
 
 	it("defaults to EMPTY_FILTERS for an empty query", () => {
