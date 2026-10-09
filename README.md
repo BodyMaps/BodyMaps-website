@@ -1,5 +1,9 @@
 # Backend
 
+Automatic reports preserve source text and distinguish it from segmentation
+measurements. See [report evidence and coverage](docs/report-evidence.md) for the
+contract, limitations, and regression checks.
+
 The viewer's AI assistant also needs its model service running. See
 [AI model setup and persistent Ollama service](PanTS-Demo/src/components/AIAssistant/README_AI_MODEL_SETUP.md#hosting-the-bodymaps-ai-models-ollama-on-the-server)
 for installation, restart, and health checks. Restarting Flask alone does not

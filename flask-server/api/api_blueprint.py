@@ -29,6 +29,9 @@ from services.ollama_client import (
 )
 from services import ai_reasoning
 from services import lesion_grounding
+from services.report_evidence import (
+    report_payload, source_text, report_limitations, render_report_html, measurement_display,
+)
 from services.segmentation_metrics import calculate_session_metrics
 from services.search_ranking import rank_quality_results, select_balanced_tumor_results
 from services.site_normalization import site_country_label, split_site_codes
@@ -197,9 +200,8 @@ def _load_metadata_cache():
         return {}
 
 _METADATA_CACHE = _load_metadata_cache()
-_REPORT_DATA_CACHE = {}  # {case_id: report_data_dict} — avoids reloading/recomputing
-                          # the full CT+mask volume on every report/PDF request
 progress_tracker = {}  # {session_id: (start_time, expected_total_seconds)}
+_REPORT_IMAGE_LOCK = threading.Lock()  # matplotlib uses process-global plotting state
 
 # Lazy cache of {PanTS id: (contrast, study_detail)} for /get-report-data.
 # The old code re-loaded the entire ~10k-row workbook (non-read-only!) on
@@ -724,76 +726,12 @@ def get_main_nifti(clabel_id):
 
 @api_blueprint.route('/get-report/<id>', methods=['GET'])
 def get_report(id):
+    """Compatibility endpoint: use the same evidence-preserving PDF as all clients."""
     if not str(id).isdigit():
         return jsonify({"error": "Invalid id"}), 400
-    numeric_id = int(id)
-    safe_case_id = str(numeric_id)
-    pants_id = get_panTS_id(numeric_id)
-    # Per-request filenames: with gunicorn's 8 threads, two simultaneous report
-    # requests sharing temp.pdf/final.pdf would corrupt each other's output.
-    request_token = uuid.uuid4().hex
-    temp_pdf_path = f"{PDF_DIR}/temp_{request_token}.pdf"
-    output_pdf_path = f"{PDF_DIR}/final_{request_token}.pdf"
-    try:
-        try:
-            organ_metrics = get_mask_data_internal(numeric_id)
-            organ_metrics = organ_metrics.get("organ_metrics", [])
-        except Exception as e:
-            return jsonify({"error": f"Error loading organ metrics: {str(e)}"}), 500
- 
-        base_path = os.path.join(SESSIONS_DIR, safe_case_id)
-        # New flat structure, matching get-main-nifti / get-label-colormap above —
-        # this fixes a bug from the merge where `subfolder`/`label_subfolder` were
-        # referenced here but never defined, which would have raised a NameError
-        # on every call to this route.
-        ct_path = os.path.join(Constants.PANTS_PATH, "image_only", pants_id, Constants.MAIN_NIFTI_FILENAME)
-        masks = os.path.join(Constants.PANTS_PATH, "mask_only", pants_id, Constants.COMBINED_LABELS_NIFTI_FILENAME)
- 
-        template_pdf = os.getenv("TEMPLATE_PATH", "report_template_3.pdf")
- 
-        extracted_data = None
-        column_headers = None
-        try:
-            csv_path = f"{base_path}/info.csv"
-            df = pd.read_csv(csv_path)
-            extracted_data = df.iloc[0] if len(df) > 0 else None
-            column_headers = df.columns.tolist()
-        except Exception:
-            pass
- 
-        generate_pdf_with_template(
-            output_pdf=output_pdf_path,
-            folder_name=safe_case_id,
-            ct_path=ct_path,
-            mask_path=masks,
-            template_pdf=template_pdf,
-            temp_pdf_path=temp_pdf_path,
-            id=safe_case_id,
-            extracted_data=extracted_data,
-            column_headers=column_headers
-        )
- 
-        return send_file(
-            output_pdf_path,
-            mimetype="application/pdf",
-            as_attachment=True,
-            download_name=f"report_{id}.pdf"
-        )
- 
-    except Exception as e:
-        return jsonify({"error": f"Unhandled error: {str(e)}"}), 500
+    return generate_report_pdf(str(int(id)))
 
-    finally:
-        # send_file has already opened the output PDF by the time this runs, so
-        # unlinking here is safe (POSIX) and keeps per-request files from piling up.
-        for path in (temp_pdf_path, output_pdf_path):
-            try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except OSError:
-                pass
- 
- 
+
 @api_blueprint.route('/explain-impressions', methods=['POST'])
 def explain_impressions():
     """Deprecated: plain-language explanations required Ollama, which isn't
@@ -821,255 +759,132 @@ def define_term():
     }), 200
  
  
+def _load_report_source(pants_id):
+    """Read one current workbook row; never cache source text or patient details."""
+    import openpyxl
+
+    raw, patient, imaging, source_column = "", {}, {}, None
+    metadata_path = _metadata_xlsx_path()
+    if not metadata_path:
+        return raw, patient, imaging, source_column
+    wb = openpyxl.load_workbook(metadata_path, read_only=True, data_only=True)
+    try:
+        ws = wb["PanTS_metadata"] if "PanTS_metadata" in wb.sheetnames else wb.active
+        rows = ws.iter_rows(values_only=True)
+        headers = list(next(rows, ()))
+        normalized = [_norm_colname(value) for value in headers]
+        id_col = normalized.index("pantsid") if "pantsid" in normalized else 0
+        # Prefer the original structured source over downstream report rewrites.
+        candidates = [i for i, value in enumerate(normalized) if "report" in value]
+        priorities = {"structuredreport": 0, "radgptstructuredreport": 1, "report": 3}
+        candidates.sort(key=lambda i: priorities.get(normalized[i], 2 if "structured" in normalized[i] else 4))
+        for row in rows:
+            if id_col >= len(row) or str(row[id_col] or "").strip() != pants_id:
+                continue
+            def value(column, default=""):
+                if column not in normalized:
+                    return default
+                index = normalized.index(column)
+                return row[index] if index < len(row) and row[index] is not None else default
+            selected = next((index for index in candidates
+                             if index < len(row) and row[index] is not None and str(row[index]).strip()), None)
+            raw = str(row[selected]).strip() if selected is not None else ""
+            source_column = str(headers[selected]) if selected is not None else None
+            patient = {"age": value("age", "N/A"), "sex": value("sex", "N/A")}
+            imaging = {"study_type": value("studytype"), "contrast": value("ctphase")}
+            break
+    finally:
+        wb.close()
+    return raw, patient, imaging, source_column
+
+
+def _measure_report_structures(case_id):
+    """Measure explicitly named masks; combined-label conventions are ambiguous.
+
+    Historical PanTS, viewer, and legacy Constants tables assign different
+    structures to the same label IDs. Never guess a structure from those IDs.
+    """
+    pants_id = get_panTS_id(case_id)
+    subfolder = "ImageTr" if int(case_id) < 9000 else "ImageTe"
+    label_subfolder = "LabelTr" if int(case_id) < 9000 else "LabelTe"
+    image_only_path = f"{Constants.PANTS_PATH}/image_only/{pants_id}/{Constants.MAIN_NIFTI_FILENAME}"
+    data_ct_path = f"{Constants.PANTS_PATH}/data/{subfolder}/{pants_id}/{Constants.MAIN_NIFTI_FILENAME}"
+    ct_path = image_only_path if os.path.exists(image_only_path) else data_ct_path
+    named_masks = {}
+    for directory in (
+        Path(f"{Constants.PANTS_PATH}/mask_only/{pants_id}/segmentations"),
+        Path(f"{Constants.PANTS_PATH}/data/{label_subfolder}/{pants_id}/segmentations"),
+    ):
+        for path in sorted(directory.glob("*.nii.gz")):
+            name = path.name[:-7]
+            if re.fullmatch(r"[a-z][a-z0-9_]*", name):
+                named_masks.setdefault(name, path)
+    if not named_masks:
+        raise ValueError("No explicit structure mask names are available")
+    ct_nii = nib.load(ct_path)
+    ct_array = ct_nii.get_fdata()
+    organ_volumes, lesions = {}, {}
+    for organ, path in named_masks.items():
+        mask_nii = nib.load(str(path))
+        if ct_nii.shape != mask_nii.shape or not np.allclose(ct_nii.affine, mask_nii.affine, atol=1e-3):
+            raise ValueError("CT and segmentation geometry do not match")
+        mask_values = mask_nii.get_fdata()
+        # A named segmentation must be a binary structure mask, not a mislabeled
+        # combined map. Nonzero foreground may use a single value other than 1.
+        foreground = np.unique(mask_values[mask_values != 0])
+        if len(foreground) > 1 or (len(foreground) and (not np.isfinite(foreground[0]) or foreground[0] < 0)):
+            raise ValueError("Named segmentation is not a binary structure mask")
+        mask = mask_values > 0
+        if not np.any(mask):
+            continue
+        voxel_volume = abs(float(np.linalg.det(mask_nii.affine[:3, :3]))) / 1000
+        spacing_mm = np.linalg.norm(mask_nii.affine[:3, :3], axis=0)
+        voxel_coords = np.argwhere(mask)
+        centroid_world = nib.affines.apply_affine(mask_nii.affine, voxel_coords.mean(axis=0))
+        dims_mm = (voxel_coords.max(axis=0) - voxel_coords.min(axis=0) + 1) * spacing_mm
+        mean_hu = float(np.mean(ct_array[mask]))
+        volume = round(float(np.sum(mask)) * voxel_volume, 2)
+        organ_volumes[organ] = {
+            "volume": volume,
+            "mean_hu": round(mean_hu, 1) if np.isfinite(mean_hu) else None,
+            "status": "not_assessed",
+            "centroid_mm": [round(float(value), 2) for value in centroid_world],
+            "dimensions": [round(float(value) / 10, 1) for value in dims_mm],
+            "mask_source": f"segmentations/{path.name}",
+        }
+        lesion_root = {"pancreatic_lesion": "pancreas", "liver_lesion": "liver", "kidney_lesion": "kidney"}.get(organ)
+        if lesion_root:
+            lesions[lesion_root] = {"voxels": int(np.count_nonzero(mask)), "volume": volume,
+                                   "source": "segmentation annotation"}
+    imaging = {"spacing": [round(float(value), 3) for value in ct_nii.header.get_zooms()],
+               "shape": list(ct_nii.shape)}
+    return organ_volumes, lesions, imaging
+
+
 def _build_report_data(id):
-    """Gathers everything the report needs (RadGPT text, organ volumes/status/
-    centroid/dimensions, lesions) into a plain dict. Shared by the JSON
-    endpoint and the PDF-generation endpoint so both show identical data."""
-    # CancerVerse has no masks/RadGPT report yet -- respond gracefully.
+    """Preserve stored evidence independently of optional segmentation measurements."""
     if get_dataset_from_case_id(secure_filename(str(id))) == "CancerVerse":
-        return {"masks_available": False}
+        return report_payload(id, "", extra_limitations=("Segmentation measurements unavailable.",))
     if id is None or not str(id).isdigit():
         return {"error": "Invalid id parameter"}
-    case_id = int(id)
-    id = str(case_id)
-
-    if id in _REPORT_DATA_CACHE:
-        return _REPORT_DATA_CACHE[id]
-
+    case_id = str(int(id))
+    raw, patient, imaging, source_column = "", {}, {}, None
+    limitations = []
     try:
-        radgpt_comments = None
-        radgpt_impression = None
-        try:
-            import openpyxl, re
-            metadata_path = _metadata_xlsx_path()
-            if metadata_path:
-                wb = openpyxl.load_workbook(metadata_path, read_only=True, data_only=True)
-                ws = wb.active
-                headers = [cell.value for cell in next(ws.iter_rows())]
-                id_col = next((i for i, h in enumerate(headers) if h and 'ID' in str(h)), 0)
-                report_col = next((i for i, h in enumerate(headers) if h and 'report' in str(h).lower()), -1)
-                if report_col >= 0:
-                    pants_id = get_panTS_id(id)
-                    for row in ws.iter_rows(min_row=2, values_only=True):
-                        row_id = str(row[id_col] or '').strip()
-                        if row_id == pants_id:
-                            raw = str(row[report_col] or '')
-                            raw = raw.replace('_x000D_', '\n').replace('\r\n', '\n').replace('\r', '\n')
-                            import re as _re
-                            raw = _re.sub(r'\n{3,}', '\n\n', raw)
-                            findings_match = re.search(r'FINDINGS:(.*?)(?=IMPRESSION:|$)', raw, re.DOTALL)
-                            impression_match = re.search(r'IMPRESSION:(.*?)$', raw, re.DOTALL)
-                            if findings_match:
-                                radgpt_comments = findings_match.group(1).strip()
-                            if impression_match:
-                                imp_text = impression_match.group(1).strip()
-                                sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', imp_text) if s.strip()]
-                                radgpt_impression = sentences if sentences else [imp_text]
-                            print(f"[RadGPT] Found report for case {id}: {radgpt_impression}")
-                            break
-                wb.close()
-        except Exception as e:
-            print(f"[RadGPT] metadata lookup failed: {e}")
-
-        subfolder = "ImageTr" if case_id < 9000 else "ImageTe"
-        label_subfolder = "LabelTr" if case_id < 9000 else "LabelTe"
-        image_only_path = f"{Constants.PANTS_PATH}/image_only/{get_panTS_id(case_id)}/{Constants.MAIN_NIFTI_FILENAME}"
-        data_ct_path = f"{Constants.PANTS_PATH}/data/{subfolder}/{get_panTS_id(case_id)}/{Constants.MAIN_NIFTI_FILENAME}"
-        ct_path = image_only_path if os.path.exists(image_only_path) else data_ct_path
-        mask_only_path = f"{Constants.PANTS_PATH}/mask_only/{get_panTS_id(case_id)}/{Constants.COMBINED_LABELS_NIFTI_FILENAME}"
-        data_mask_path = f"{Constants.PANTS_PATH}/data/{label_subfolder}/{get_panTS_id(case_id)}/{Constants.COMBINED_LABELS_NIFTI_FILENAME}"
-        mask_path = mask_only_path if os.path.exists(mask_only_path) else data_mask_path
-        seg_dir = f"{Constants.PANTS_PATH}/mask_only/{get_panTS_id(case_id)}/segmentations"
-        pid = get_panTS_id(case_id)
-        meta = _METADATA_CACHE.get(pid, {})
-        age = meta.get("age", "N/A")
-        sex = meta.get("sex", "N/A")
-
-        contrast, study_detail = _report_study_meta(pid)
-
-        # If local files don't exist, download from HuggingFace
-        if not os.path.exists(ct_path) or not os.path.exists(mask_path):
-            import requests, tempfile
-            pants_id = get_panTS_id(id)
-            hf_base = f"https://huggingface.co/datasets/BodyMaps/iPanTSMini/resolve/main"
-            tmp_dir = tempfile.mkdtemp()
-            if not os.path.exists(ct_path):
-                hf_ct = f"{hf_base}/image_only/{pants_id}/ct.nii.gz?download=true"
-                ct_path = os.path.join(tmp_dir, "ct.nii.gz")
-                print(f"[HuggingFace] Downloading CT for case {id}...")
-                r = requests.get(hf_ct, stream=True, timeout=60)
-                with open(ct_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-            if not os.path.exists(mask_path):
-                hf_mask = f"{hf_base}/mask_only/{pants_id}/combined_labels.nii.gz?download=true"
-                mask_path = os.path.join(tmp_dir, "combined_labels.nii.gz")
-                print(f"[HuggingFace] Downloading mask for case {id}...")
-                r = requests.get(hf_mask, stream=True, timeout=60)
-                with open(mask_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-
-        ct_nii = nib.load(ct_path)
-        spacing = ct_nii.header.get_zooms()
-        shape = ct_nii.shape
-        ct_array = ct_nii.get_fdata()
-        mask_nii = nib.load(mask_path)
-        mask_array = mask_nii.get_fdata().astype(np.uint8)
-        min_shape = tuple(min(c, m) for c, m in zip(ct_array.shape, mask_array.shape))
-        ct_array = ct_array[:min_shape[0], :min_shape[1], :min_shape[2]]
-        mask_array = mask_array[:min_shape[0], :min_shape[1], :min_shape[2]]
-        voxel_volume = np.prod(mask_nii.header.get_zooms()) / 1000
-        affine = mask_nii.affine
-
-        LABELS = {v: k for k, v in Constants.PREDEFINED_LABELS.items()}
-
-        SOLID_ORGAN_HU_RANGE = (-20, 150)
-        GI_HOLLOW_ORGAN_HU_RANGE = (-300, 200)
-        LUNG_HU_RANGE = (-1000, -200)
-        GI_HOLLOW_ORGANS = {"colon", "stomach", "intestine", "duodenum"}
-        LUNG_ORGANS = {"lung_left", "lung_right"}
-
-        organ_volumes = {}
-        NO_FLAG_ORGANS = {
-            "femur_left", "femur_right", "aorta", "postcava", "veins",
-            "celiac_artery", "superior_mesenteric_artery", "renal_vein_left",
-            "renal_vein_right", "common_bile_duct", "pancreatic_duct",
-        }
-        for organ, label_id in LABELS.items():
-            if label_id == 0:
-                continue
-            mask = (mask_array == label_id)
-            if not np.any(mask):
-                continue
-            volume = float(np.sum(mask) * voxel_volume)
-            mean_hu = float(np.mean(ct_array[mask]))
-
-            if organ in LUNG_ORGANS:
-                lo, hi = LUNG_HU_RANGE
-            elif organ in GI_HOLLOW_ORGANS:
-                lo, hi = GI_HOLLOW_ORGAN_HU_RANGE
-            else:
-                lo, hi = SOLID_ORGAN_HU_RANGE
-            status = "normal" if organ in NO_FLAG_ORGANS else ("check" if (mean_hu < lo or mean_hu > hi) else "normal")
-
-            voxel_coords = np.argwhere(mask)
-            centroid_voxel = voxel_coords.mean(axis=0)
-            centroid_world = nib.affines.apply_affine(affine, centroid_voxel)
-
-            bbox_min = voxel_coords.min(axis=0)
-            bbox_max = voxel_coords.max(axis=0)
-            bbox_voxels = bbox_max - bbox_min + 1
-            spacing_mm = np.abs([affine[0,0], affine[1,1], affine[2,2]])
-            dims_mm = bbox_voxels * spacing_mm
-            dims_cm = [round(float(d)/10, 1) for d in dims_mm]
-
-            organ_volumes[organ] = {
-                "volume": round(float(volume), 2),
-                "mean_hu": round(float(mean_hu), 1),
-                "status": status,
-                "centroid_mm": [round(float(c), 2) for c in centroid_world],
-                "dimensions": dims_cm,
-            }
-
-        lesions = {}
-        lesion_files = {
-            "pancreas": "pancreatic_lesion.nii.gz",
-            "liver": "liver_lesion.nii.gz",
-            "kidney": "kidney_lesion.nii.gz",
-        }
-        for organ, filename in lesion_files.items():
-            path = os.path.join(seg_dir, filename)
-            if os.path.exists(path):
-                lesion_data = nib.load(path).get_fdata()
-                voxels = int(np.sum(lesion_data > 0))
-                if voxels > 0:
-                    lesion_volume = round(voxels * voxel_volume, 2)
-                    lesions[organ] = {"voxels": voxels, "volume": round(float(lesion_volume), 2)}
-
-        print(f"[DEBUG] seg_dir={seg_dir}")
-        print(f"[DEBUG] lesions found: {lesions}")
-
-        if radgpt_comments:
-            for organ in list(organ_volumes.keys()):
-                organ_volumes[organ]['status'] = 'normal'
-            # NOTE: 'hypoattenuating'/'hyperattenuating' added — RadGPT's actual
-            # enhancement-description vocabulary ("Enhancement relative to
-            # pancreas: Hypoattenuating...") wasn't covered by the old list,
-            # which only had the unrelated words 'hypodense'/'hyperdense'.
-            abnormal_keywords = ['enlarged', 'mass', 'lesion', 'tumor', 'abnormal',
-                                 'dilated', 'obstruction', 'isoattenuating', 'hypodense',
-                                 'hyperdense', 'hypoattenuating', 'hyperattenuating',
-                                 'cyst', 'nodule', 'atrophy', 'bilateral']
-            subtype_suffixes = ('_body', '_head', '_tail', '_left', '_right')
-
-            def _base_root(organ_name):
-                r = organ_name
-                for suf in ('_left', '_right', '_body', '_head', '_tail', '_gland', '_duct', '_lesion'):
-                    r = r.replace(suf, '')
-                return r.replace('_', '').lower()
-
-            organs_by_root = {}
-            for organ in organ_volumes.keys():
-                organs_by_root.setdefault(_base_root(organ), []).append(organ)
-
-            # Find each organ-heading line (a line that IS, after stripping a
-            # trailing ':', one of the known organ roots or "<root>s") — same
-            # rule the frontend uses to scope report text per organ — then
-            # scan the WHOLE block between consecutive headings for both the
-            # abnormal keyword and the subtype word, rather than requiring
-            # both on one line. A lesion's location ("Location: pancreas
-            # tail.") is routinely on a different line than the keyword that
-            # flags it ("Pancreas lesions:"), so the old per-line check could
-            # never flag a sub-label organ even when its own block clearly
-            # documented a finding there.
-            lines = radgpt_comments.split('\n')
-            heading_idx = []
-            for i, line in enumerate(lines):
-                cleaned = line.strip().rstrip(':').lower()
-                for root in organs_by_root:
-                    if root and (cleaned == root or cleaned == f'{root}s'):
-                        heading_idx.append((i, root))
-                        break
-
-            for pos, (start, root) in enumerate(heading_idx):
-                end = heading_idx[pos + 1][0] if pos + 1 < len(heading_idx) else len(lines)
-                block_lower = '\n'.join(lines[start:end]).lower()
-                if not any(kw in block_lower for kw in abnormal_keywords):
-                    continue
-                for organ in organs_by_root.get(root, []):
-                    has_subtype = organ.endswith(subtype_suffixes)
-                    if not has_subtype:
-                        # Generic/base organ label (no left/right/body/head/tail
-                        # subtype) — any abnormal keyword anywhere in its block
-                        # flags it, same as before.
-                        organ_volumes[organ]['status'] = 'check'
-                    elif organ.rsplit('_', 1)[-1] in block_lower:
-                        # Sub-label organ — only flag it if ITS specific
-                        # subtype word (e.g. "tail") appears anywhere in the
-                        # block, not just on the same line as the keyword.
-                        organ_volumes[organ]['status'] = 'check'
-
-        comments = radgpt_comments or "Clinical comments unavailable."
-        impression_items = radgpt_impression or ["No impression available for this case."]
-        result = {
-            "case_id": id,
-            "patient": {"age": age, "sex": sex},
-            "imaging": {
-                "study_type": study_detail,
-                "contrast": contrast,
-                "spacing": [round(float(s), 3) for s in spacing],
-                "shape": list(shape),
-            },
-            "organ_volumes": organ_volumes,
-            "lesions": lesions,
-            "comments": comments,
-            "impression": impression_items,
-        }
-        _REPORT_DATA_CACHE[id] = result
-        return result
+        raw, patient, imaging, source_column = _load_report_source(get_panTS_id(case_id))
     except Exception:
-        return {"error": "Failed to build report data for the given id."}
+        # Do not log report text or patient metadata on either success or failure.
+        limitations.append("The stored source report could not be loaded.")
+    organs, lesions, available = {}, {}, False
+    try:
+        organs, lesions, measurement_imaging = _measure_report_structures(case_id)
+        imaging.update(measurement_imaging)
+        available = True
+    except Exception:
+        limitations.append("Segmentation measurements unavailable: explicitly named masks and matching CT geometry are required.")
+    return report_payload(case_id, raw, organ_volumes=organs, lesions=lesions,
+                          patient=patient, imaging=imaging, measurements_available=available,
+                          extra_limitations=limitations, source_column=source_column)
 
 
 @api_blueprint.route('/get-report-data/<id>', methods=['GET'])
@@ -1078,19 +893,14 @@ def get_report_data(id):
     if "error" in data:
         status = 400 if data["error"] == "Invalid id parameter" else 500
         return jsonify(data), status
-    return jsonify(data)
+    response = jsonify(data)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
 
 
 @api_blueprint.route('/report/<id>', methods=['GET'])
 def report_html(id):
-    """Shareable Apple-Health-style HTML report for a case -- same underlying
-    data as get_report_data/generate_report_pdf (_build_report_data), just
-    rendered as an interactive patient/clinician-toggle page instead of JSON
-    or a static PDF. This is a live server-rendered page (not a static file
-    a client fetches data into), so the same auth/session that already
-    protects case access here protects this route too -- no new data-exposure
-    surface. The 'Download radiology report' button on the clinician side
-    links to the existing /generate-report-pdf/<id> route."""
+    """Shareable source report with explicit coverage and neutral measurements."""
     resolved = _resolve_case_id_or_token(id)
     if resolved is None:
         return jsonify({"error": "Invalid or expired link"}), 404
@@ -1099,473 +909,16 @@ def report_html(id):
         status = 400 if data["error"] == "Invalid id parameter" else 500
         return jsonify(data), status
     html_out = _build_report_html(data)
-    return Response(html_out, mimetype="text/html")
+    return Response(html_out, mimetype="text/html", headers={"Cache-Control": "no-store"})
  
 
-import html as _html_mod
-import json as _json_mod
-
-
-def _plain_organ_name(root):
-    return root
-
-
-_SUBREGION_PLAIN = {
-    ("pancreas", "tail"): "the tail of your pancreas (the end farthest from your stomach)",
-    ("pancreas", "body"): "the body of your pancreas (the middle section)",
-    ("pancreas", "head"): "the head of your pancreas (the end closest to your small intestine)",
-}
-
-_FINDING_WORD = [
-    ("cyst", "fluid-filled spot"),
-    ("nodule", "small bump"),
-    ("mass", "growth"),
-    ("tumor", "growth"),
-    ("enlarged", "enlarged area"),
-    ("dilated", "widened area"),
-    ("lesion", "spot"),
-]
-
-
-def _finding_word(detail_text):
-    d = (detail_text or "").lower()
-    for keyword, word in _FINDING_WORD:
-        if keyword in d:
-            return word
-    return None
-
-
-def _where_phrase(root, location_word):
-    name = _plain_organ_name(root)
-    if not location_word:
-        return f"your {name}"
-    if location_word in ("left", "right"):
-        return f"your {location_word} {name}"
-    if (root, location_word) in _SUBREGION_PLAIN:
-        return _SUBREGION_PLAIN[(root, location_word)]
-    # Unknown or compound locator (e.g. "segment 4", parsed straight from the
-    # report text) — forcing this into "the X of your Y" reads wrong for
-    # anything that isn't a short single anatomical word. This construction
-    # stays grammatically correct for any locator string.
-    return f"your {name} ({location_word})"
-
-
-def _organ_base_stats(root, organ_volumes):
-    """Looks up an organ's baseline volume/HU. Some organs (kidney, lung,
-    adrenal gland) have no bare aggregate key in organ_volumes — only
-    <root>_left/<root>_right — in which case this sums volume and averages
-    HU across both sides instead of returning nothing."""
-    if root in organ_volumes:
-        return organ_volumes[root]
-    parts = [organ_volumes[k] for k in (f"{root}_left", f"{root}_right") if k in organ_volumes]
-    if not parts:
-        return {}
-    vols = [p.get("volume") for p in parts if p.get("volume") is not None]
-    hus = [p.get("mean_hu") for p in parts if p.get("mean_hu") is not None]
-    return {
-        "volume": sum(vols) if vols else None,
-        "mean_hu": (sum(hus) / len(hus)) if hus else None,
-    }
-
-
-def _patient_lesion_sentence(root, lesion, location_word, detail_text):
-    where = _where_phrase(root, location_word)
-    size = lesion.get("size")
-    word = _finding_word(detail_text) or "spot"
-    size_part = f" measuring {size} cm" if size else ""
-    return f"Your scan found a {word}{size_part} in {where}."
-
-
-def _patient_no_lesion_sentence(root):
-    name = _plain_organ_name(root)
-    return (f"Your {name} was flagged for your doctor to review, but the report "
-            f"doesn't describe a specific spot or growth \u2014 your doctor can "
-            f"tell you exactly what stood out.")
-
-
-def _doctor_lesion_sentence(root, lesion, location_word):
-    loc = f" ({location_word})" if location_word else ""
-    return (f"{root.title()}{loc} lesion, {lesion.get('size', 'N/A')} cm, "
-            f"volume {lesion.get('volume', 0):.1f} cc. "
-            f"{lesion.get('enhancement', '')} relative to {root}, "
-            f"HU {lesion.get('hu', 0):.1f} \u00b1 {lesion.get('hu_sd', 0):.1f}.").strip()
-
-
-def _base_root(organ):
-    r = organ
-    for suf in ('_left', '_right', '_body', '_head', '_tail', '_gland', '_duct', '_lesion'):
-        r = r.replace(suf, '')
-    return r.replace('_', '').lower()
-
-
-def _e(s):
-    """HTML-escape any real data before it goes in the page — this is a
-    document assembled from case data, not a trusted template string."""
-    return _html_mod.escape(str(s), quote=True)
-
-
 def _build_report_html(report_data):
-    """Builds the full Apple-Health-inspired shareable HTML report from a
-    real report_data dict (same shape _draw_report_pdf and the JSON API use:
-    case_id, patient, imaging, organ_volumes, lesions, comments, impression).
-    No placeholder content — every value is pulled from report_data itself,
-    and the layout adapts to however many findings/organs actually exist.
-    """
-    case_id = report_data.get("case_id", "N/A")
-    patient = report_data.get("patient", {})
-    imaging = report_data.get("imaging", {})
-    organ_volumes = report_data.get("organ_volumes", {})
-    lesions = report_data.get("lesions", {})
-    comments = str(report_data.get("comments", ""))
-
-    roots_present = sorted(set(_base_root(o) for o in organ_volumes.keys()))
-    parsed_organs = _parse_findings(comments, roots_present)
-    organ_lookup = {o['root']: o for o in parsed_organs}
-
-    # ---- Build one "finding" entry per flagged organ (0, 1, or many) ----
-    flagged_roots = sorted(set(
-        _base_root(o) for o, v in organ_volumes.items() if v.get("status") == "check"
-    ))
-    findings = []
-    for root in flagged_roots:
-        entry = organ_lookup.get(root, {"baseline_lines": [], "lesions": []})
-        detail_text = " ".join(entry.get("baseline_lines", []))
-        organ_base = _organ_base_stats(root, organ_volumes)
-
-        if entry.get("lesions"):
-            for lesion in entry["lesions"]:
-                loc_word = lesion["location"].replace(root, "").strip() or None
-                findings.append({
-                    "title": f"{root.title()}" + (f" \u2014 {loc_word.title()}" if loc_word else ""),
-                    "patient_html": _e(_patient_lesion_sentence(root, lesion, loc_word, detail_text)),
-                    "doctor_html": _e(_doctor_lesion_sentence(root, lesion, loc_word)),
-                    "metrics": [
-                        {"label": "Organ volume", "value": f"{organ_base.get('volume', 0):.1f} cc" if organ_base.get('volume') is not None else "N/A"},
-                        {"label": "Lesion volume", "value": f"{lesion.get('volume', 0):.1f} cc"},
-                        {"label": "Mean HU (organ)", "value": f"{organ_base.get('mean_hu', 0):.1f}" if organ_base.get('mean_hu') is not None else "N/A"},
-                        {"label": "Lesion count", "value": str(len(entry["lesions"]))},
-                    ],
-                })
-        else:
-            findings.append({
-                "title": root.title(),
-                "patient_html": _e(_patient_no_lesion_sentence(root)),
-                "doctor_html": _e(detail_text or f"{root.title()} flagged; no lesion described in report text."),
-                "metrics": [
-                    {"label": "Organ volume", "value": f"{organ_base.get('volume', 0):.1f} cc" if organ_base.get('volume') is not None else "N/A"},
-                    {"label": "Mean HU (organ)", "value": f"{organ_base.get('mean_hu', 0):.1f}" if organ_base.get('mean_hu') is not None else "N/A"},
-                ],
-            })
-
-    # ---- "Everything else looked normal" — organs RadGPT actually commented
-    # on that are NOT flagged (real prose-covered organs only, not every
-    # unrelated bone/vessel) ----
-    clean_cards = []
-    for organ in parsed_organs:
-        root = organ["root"]
-        if root in flagged_roots:
-            continue
-        base = _organ_base_stats(root, organ_volumes)
-        clean_cards.append({
-            "name": root.title(),
-            "volume": f"{base.get('volume', 0):.0f}" if base.get("volume") is not None else "\u2014",
-            "hu": f"Mean HU {base.get('mean_hu', 0):.1f}" if base.get("mean_hu") is not None else "",
-        })
-
-    # ---- Full organs-reviewed checklist (every organ in this case) ----
-    organ_rows = sorted(
-        (organ.replace("_", " ").title(), vals.get("status", "normal"))
-        for organ, vals in organ_volumes.items()
-    )
-    flagged_rows = [r for r in organ_rows if r[1] == "check"]
-    normal_rows = [r for r in organ_rows if r[1] != "check"]
-    visible_rows = flagged_rows + normal_rows[:max(0, 3 - len(flagged_rows))]
-    hidden_rows = normal_rows[len(visible_rows) - len(flagged_rows):]
-
-    def _row_html(name, status):
-        cls = "row flagged" if status == "check" else "row"
-        icon = '<span class="exclaim">!</span>' if status == "check" else '<span class="check">&#10003;</span>'
-        name_cls = ' class="name"' if status != "check" else ' class="name"'
-        return f'<div class="{cls}"><span{name_cls}>{_e(name)}</span>{icon}</div>'
-
-    visible_rows_html = "\n".join(_row_html(n, s) for n, s in visible_rows)
-    hidden_rows_html = "\n".join(_row_html(n, s) for n, s in hidden_rows)
-
-    clean_grid_html = "\n".join(
-        f'''<div class="clean-card"><div class="name">{_e(c['name'])}</div>
-        <div class="num">{_e(c['volume'])}<span class="unit"> cc</span></div>
-        <div class="hu">{_e(c['hu'])}</div></div>'''
-        for c in clean_cards
-    ) or '<p style="font-size:13.5px;color:var(--muted);">No additional measured organs for this case.</p>'
-
-    age = patient.get("age", "N/A")
-    sex = patient.get("sex", "N/A")
-    study = imaging.get("study_type", "N/A")
-    contrast = imaging.get("contrast", "N/A")
-
-    findings_json = _json_mod.dumps(findings)
-    pdf_url = f"/api/generate-report-pdf/{case_id}"
-
-    findings_count = len(findings)
-    flagged_summary = (
-        f"{findings_count} finding{'s' if findings_count != 1 else ''} need{'s' if findings_count == 1 else ''} review"
-        if findings_count else "No findings flagged for review"
-    )
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CT Scan Report \u2014 Case {_e(case_id)}</title>
-<style>
-{_REPORT_CSS}
-</style>
-</head>
-<body>
-<div class="wrap">
-
-  <div class="toggle">
-    <button id="btn-patient" class="active" onclick="setView('patient')">For me / family</button>
-    <button id="btn-doctor" onclick="setView('doctor')">For clinicians</button>
-  </div>
-
-  <div class="disclaimer" id="disclaimer"></div>
-
-  <div class="header">
-    <h1>CT scan results</h1>
-    <div class="sub">Case {_e(case_id)} &middot; {_e(study)} &middot; {_e(age)}y, {_e(sex)} &middot; {_e(contrast)}</div>
-  </div>
-
-  <div id="download-row" style="display:none; margin-bottom:16px;">
-    <a href="{_e(pdf_url)}" class="download-btn"><i>&#8681;</i> Download radiology report (PDF)</a>
-  </div>
-
-  <div class="top-grid">
-    <div id="findings-container"></div>
-    <div>
-      <div class="section-label" style="margin-top:0;">Everything else looked normal</div>
-      <div class="clean-grid">
-        {clean_grid_html}
-      </div>
-    </div>
-  </div>
-
-  <div class="section-label">Organs reviewed &middot; {len(organ_rows)} total</div>
-  <div class="checklist">
-    {visible_rows_html}
-  </div>
-  {f'<div id="more-organs" class="checklist" style="margin-top:8px;">{hidden_rows_html}</div><button class="show-more" onclick="toggleMore()" id="more-btn">Show all {len(organ_rows)} organs</button>' if hidden_rows else ''}
-
-</div>
-
-<script>
-const findings = {findings_json};
-const disclaimers = {{
-  patient: "This is an easy-to-read summary of your CT scan, generated automatically. It has not been reviewed by a doctor yet \\u2014 your care team will go over the full results with you.",
-  doctor: "AI-generated report (RadGPT findings + automated segmentation measurements). Not reviewed by a radiologist. For research use only \\u2014 not for clinical decision-making.",
-}};
-
-function renderFindings(view) {{
-  const container = document.getElementById('findings-container');
-  if (findings.length === 0) {{
-    container.innerHTML = '<div class="card" style="background:var(--green-bg);"><div class="body-text">No findings were flagged in this scan.</div></div>';
-    return;
-  }}
-  container.innerHTML = findings.map(f => {{
-    const body = view === 'patient' ? f.patient_html : f.doctor_html;
-    const metricsHtml = (view === 'doctor' && f.metrics.length)
-      ? '<div class="metrics-grid">' + f.metrics.map(m =>
-          '<div class="metric"><div class="label">' + m.label + '</div><div class="value">' + m.value + '</div></div>'
-        ).join('') + '</div>'
-      : '';
-    const badge = view === 'doctor' ? '<div class="badge">Needs review</div>' : '';
-    return '<div class="card flag">' +
-      '<div class="flag-label"><span class="dot"></span> Needs a closer look</div>' +
-      '<div class="organ-title">' + f.title + '</div>' +
-      '<div class="body-text">' + body + '</div>' +
-      metricsHtml + badge +
-      '</div>';
-  }}).join('');
-}}
-
-function setView(view) {{
-  document.getElementById('disclaimer').textContent = disclaimers[view];
-  renderFindings(view);
-  document.getElementById('btn-patient').classList.toggle('active', view === 'patient');
-  document.getElementById('btn-doctor').classList.toggle('active', view === 'doctor');
-  document.getElementById('download-row').style.display = view === 'doctor' ? 'block' : 'none';
-}}
-
-function toggleMore() {{
-  const el = document.getElementById('more-organs');
-  const btn = document.getElementById('more-btn');
-  if (!el) return;
-  el.classList.toggle('open');
-  btn.textContent = el.classList.contains('open') ? 'Show fewer' : 'Show all {len(organ_rows)} organs';
-}}
-
-setView('patient');
-</script>
-</body>
-</html>"""
-
-
-# ============================================================
-# DROP-IN REPLACEMENT for _REPORT_CSS in api_blueprint.py
-# ============================================================
-
-_REPORT_CSS = """
-  :root {
-    --jhu-heritage: #002D72;
-    --jhu-spirit:   #68ACE5;
-    --jhu-white:    #FFFFFF;
-
-    --ink: #071C3C; --muted: #4C6584; --faint: #7C93AE;
-    --surface: #F2F6FB; --card: #ffffff; --line: #D6E4F2;
-    --accent: var(--jhu-heritage); --accent-bg: #E7EFFA;
-    --green: #1C7C4F; --green-bg: #EAF7EF;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--surface); color: var(--ink); }
-  .wrap { max-width: 640px; margin: 0 auto; padding: 20px 18px 60px; }
-  @media (min-width: 720px) {
-    .wrap { max-width: 900px; padding: 32px 32px 80px; }
-    .top-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; align-items: start; }
-    .clean-grid { grid-template-columns: repeat(3, 1fr); }
-    .metrics-grid { grid-template-columns: repeat(4, 1fr); }
-  }
-  @media (min-width: 1080px) {
-    .wrap { max-width: 1080px; }
-    .clean-grid { grid-template-columns: repeat(4, 1fr); }
-  }
-  .toggle { display: flex; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 4px; margin-bottom: 18px; position: sticky; top: 12px; z-index: 10; box-shadow: 0 2px 10px rgba(0,45,114,0.08); }
-  .toggle button { flex: 1; border: none; background: transparent; border-radius: 999px; padding: 10px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
-  .toggle button.active { background: var(--jhu-heritage); color: var(--jhu-white); }
-  .disclaimer { font-size: 11.5px; color: var(--faint); font-style: italic; margin: 0 2px 18px; line-height: 1.5; }
-  .header { margin-bottom: 18px; border-bottom: 3px solid var(--jhu-spirit); padding-bottom: 14px; }
-  .header h1 { font-size: 22px; font-weight: 700; margin: 0 0 2px; color: var(--jhu-heritage); }
-  .header .sub { font-size: 13px; color: var(--muted); }
-  .download-btn { display: inline-flex; align-items: center; gap: 8px; background: var(--jhu-heritage); color: var(--jhu-white); text-decoration: none; font-size: 14px; font-weight: 600; padding: 10px 16px; border-radius: 10px; }
-  .download-btn:hover { background: #001F52; }
-  .card { background: var(--card); border-radius: 16px; padding: 16px 18px; margin-bottom: 12px; border: 1px solid var(--line); box-shadow: 0 2px 8px rgba(0,45,114,0.05); }
-  .card.flag { background: var(--accent-bg); border-color: var(--jhu-spirit); border-left: 4px solid var(--jhu-heritage); }
-  .flag-label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--jhu-heritage); text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 8px; }
-  .flag-label .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--jhu-heritage); }
-  .organ-title { font-size: 17px; font-weight: 700; margin-bottom: 6px; color: var(--jhu-heritage); }
-  .body-text { font-size: 15.5px; line-height: 1.55; color: var(--ink); }
-  .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
-  .metric { background: var(--jhu-white); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-  .metric .label { font-size: 11.5px; color: var(--jhu-heritage); font-weight: 600; text-transform: uppercase; }
-  .metric .value { font-size: 17px; font-weight: 700; margin-top: 2px; color: var(--ink); }
-  .badge { display: inline-flex; align-items: center; gap: 6px; background: var(--jhu-heritage); color: var(--jhu-white); font-size: 11px; font-weight: 700; letter-spacing: 0.03em; padding: 4px 10px; border-radius: 999px; margin-top: 10px; }
-  .section-label { font-size: 12.5px; font-weight: 700; color: var(--jhu-heritage); text-transform: uppercase; letter-spacing: 0.03em; margin: 20px 4px 10px; }
-  .clean-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-  .clean-card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
-  .clean-card .name { font-size: 13px; color: var(--muted); }
-  .clean-card .num { font-size: 19px; font-weight: 700; margin-top: 2px; color: var(--jhu-heritage); }
-  .clean-card .num .unit { font-size: 12px; font-weight: 500; color: var(--muted); }
-  .clean-card .hu { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
-  .checklist { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-  .row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14.5px; }
-  .row:last-child { border-bottom: none; }
-  .row.flagged { background: var(--accent-bg); }
-  .row.flagged span.name { color: var(--jhu-heritage); font-weight: 600; }
-  .check { color: var(--green); font-weight: 700; }
-  .exclaim { color: var(--jhu-heritage); font-weight: 700; }
-  .show-more { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 14px; font-weight: 600; color: var(--jhu-heritage); margin-top: 8px; cursor: pointer; }
-  #more-organs { display: none; }
-  #more-organs.open { display: block; }
-
-  .bm-footer { margin-top: 32px; padding: 22px 24px; border-radius: 16px; background: var(--jhu-heritage); display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-  .bm-footer__text { color: var(--jhu-white); }
-  .bm-footer__title { font-size: 15px; font-weight: 700; margin: 0 0 4px; }
-  .bm-footer__sub { font-size: 12.5px; color: var(--jhu-spirit); margin: 0; }
-  .bm-footer__cta { display: inline-flex; align-items: center; gap: 8px; background: var(--jhu-white); color: var(--jhu-heritage); text-decoration: none; font-size: 13.5px; font-weight: 700; padding: 10px 18px; border-radius: 999px; white-space: nowrap; }
-  .bm-footer__cta:hover { background: var(--jhu-spirit); }
-"""
-
-
-# ============================================================
-# In _build_report_html, add this block right before the
-# closing "</div>" of <div class="wrap"> (i.e. right after the
-# checklist / #more-organs block, before the final </div>\n\n<script>)
-# ============================================================
-
-BODYMAPS_FOOTER_HTML = """
-  <div class="bm-footer">
-    <div class="bm-footer__text">
-      <p class="bm-footer__title">Generated by BodyMaps &middot; Johns Hopkins University</p>
-      <p class="bm-footer__sub">AI-powered CT segmentation and tumor detection. Explore your own scans.</p>
-    </div>
-    <a href="https://bodymaps.wse.jhu.edu/dashboard" class="bm-footer__cta" target="_blank" rel="noopener">
-      Visit BodyMaps &rarr;
-    </a>
-  </div>
-"""
-
-
-def _parse_findings(comments, organ_roots):
-    """Groups the RadGPT comments text into per-organ blocks (same heading-
-    boundary rule used for status flagging: a line that IS, after stripping a
-    trailing ':', one of the known organ roots or "<root>s"), and within each
-    block splits out any lesion sub-entries with their structured fields
-    (location, size, volume, enhancement, HU). Returns a list of dicts in the
-    order organs appear in the report:
-      {"root": "pancreas", "baseline_lines": [...], "lesions": [{...}, ...]}
-    This is what lets the PDF render "Pancreas" as its own header with plain
-    stat lines, and its lesion as a separate highlighted callout — instead of
-    one long undifferentiated paragraph.
-    """
-    import re
-    if not comments:
-        return []
-    lines = comments.split('\n')
-    heading_idx = []
-    for i, line in enumerate(lines):
-        cleaned = line.strip().rstrip(':').lower()
-        for root in organ_roots:
-            if cleaned == root or cleaned == f'{root}s':
-                heading_idx.append((i, root))
-                break
-
-    organs = []
-    for pos, (start, root) in enumerate(heading_idx):
-        end = heading_idx[pos + 1][0] if pos + 1 < len(heading_idx) else len(lines)
-        block_lines = [l.strip() for l in lines[start + 1:end] if l.strip()]
-
-        lesion_start = None
-        for i, l in enumerate(block_lines):
-            if re.match(rf'^{re.escape(root)}\s+lesions:?$', l, re.I):
-                lesion_start = i
-                break
-
-        baseline_lines = block_lines if lesion_start is None else block_lines[:lesion_start]
-        lesion_text = ' '.join(block_lines[lesion_start:]) if lesion_start is not None else ''
-
-        lesions = []
-        for m in re.finditer(
-            rf'{re.escape(root)}\s+lesion\s+(\d+):\s*'
-            rf'Location:\s*([^.]+)\.\s*'
-            rf'Size:\s*([^()]+?)\s*cm[^.]*\.\s*'
-            rf'Volume:\s*([\d.]+)\s*cc\.\s*'
-            rf'Enhancement relative to [^:]+:\s*([^(]+?)\s*\(HU value is\s*(-?[\d.]+)\s*\+/-\s*([\d.]+)\)\.',
-            lesion_text, re.I
-        ):
-            num, location, size, volume, enh, hu, husd = m.groups()
-            lesions.append({
-                'num': num, 'location': location.strip(), 'size': size.strip(),
-                'volume': float(volume), 'enhancement': enh.strip(),
-                'hu': float(hu), 'hu_sd': float(husd),
-            })
-
-        organs.append({'root': root, 'baseline_lines': baseline_lines, 'lesions': lesions})
-    return organs
+    """Render all source evidence without keyword-based clinical summaries."""
+    return render_report_html(report_data, api_prefix=_api_prefix_path())
 
 
 def _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path):
     """Lays out report_data onto the report_template_3.pdf template using reportlab."""
-    import re as _re
     from reportlab.pdfgen import canvas as _canvas
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.colors import HexColor
@@ -1578,7 +931,6 @@ def _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path):
     LINE = HexColor("#e5e7eb")
     ACCENT = HexColor("#c2410c")       # flagged / impression / lesion accent
     ACCENT_BG = HexColor("#fff7ed")
-    GREEN = HexColor("#16a34a")        # normal-status check
     ROW_ALT = HexColor("#f9fafb")
 
     pdf = _canvas.Canvas(temp_pdf_path, pagesize=letter)
@@ -1607,32 +959,23 @@ def _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path):
         return y - 16
 
     def write_wrapped_text(x, y, content, font_size=10, max_width=None, color=INK, bold=False):
-        pdf.setFillColor(color)
-        pdf.setFont("Helvetica-Bold" if bold else "Helvetica", font_size)
-        words = str(content).split()
-        current_line = ""
-        max_width = max_width or content_width
-        for word in words:
-            font_name = "Helvetica-Bold" if bold else "Helvetica"
-            if pdf.stringWidth(current_line + word + " ", font_name, font_size) > max_width:
-                pdf.drawString(x, y, current_line.strip())
-                y -= line_height
-                current_line = f"{word} "
+        from reportlab.lib.utils import simpleSplit
+        font_name = "Helvetica-Bold" if bold else "Helvetica"
+        for text_line in str(content).splitlines() or [""]:
+            for line in simpleSplit(text_line, font_name, font_size, max_width or content_width) or [""]:
                 if y < 60:
                     reset_page()
-                    y = height - top_margin
-            else:
-                current_line += f"{word} "
-        if current_line:
-            pdf.drawString(x, y, current_line.strip())
-            y -= line_height
-        pdf.setFillColor(INK)
+                    y = y_position
+                pdf.setFillColor(color)
+                pdf.setFont(font_name, font_size)
+                pdf.drawString(x, y, line)
+                y -= line_height
         return y
 
     # ==================== HEADER ====================
     pdf.setFillColor(INK)
     pdf.setFont("Helvetica-Bold", 22)
-    pdf.drawString(left_margin, height - 55, "CT Radiology Report")
+    pdf.drawString(left_margin, height - 55, "CT Source Report")
     pdf.setFont("Helvetica", 10)
     pdf.setFillColor(MUTED)
     pdf.drawRightString(width - right_margin, height - 52, "BodyMaps")
@@ -1648,7 +991,7 @@ def _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path):
     disclaimer_y = write_wrapped_text(
         left_margin, height - 82,
         "AI-generated report (RadGPT findings + automated segmentation measurements). "
-        "Not reviewed by a radiologist. For research use only \u2014 not for clinical decision-making.",
+        "Clinician review is not documented. For research use only \u2014 not for clinical decision-making.",
         font_size=8,
         color=MUTED,
     )
@@ -1678,156 +1021,50 @@ def _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path):
         pdf.drawString(x, y_position - 15, value)
     y_position -= 40
 
-    # ==================== IMPRESSION callout ====================
-    impression_items = report_data.get("impression", [])
-    impression_text = " ".join(
-        _re.sub(r'^\d+\.\s*', '', str(t)).strip() for t in impression_items if str(t).strip()
-    ) or "No impression available for this case."
-
-    box_top = y_position
-    pdf.setFont("Helvetica", 10)
-    # Measure wrapped height first so the box can be sized to fit.
-    words = impression_text.split()
-    test_lines, cur = [], ""
-    for w in words:
-        if pdf.stringWidth(cur + w + " ", "Helvetica", 10) > content_width - 40:
-            test_lines.append(cur.strip())
-            cur = f"{w} "
-        else:
-            cur += f"{w} "
-    if cur:
-        test_lines.append(cur.strip())
-    box_h = 20 + len(test_lines) * line_height + 10
-    check_and_reset_page(box_h + 10)
-    box_top = y_position
-
-    pdf.setFillColor(ACCENT_BG)
-    pdf.rect(left_margin, box_top - box_h, content_width, box_h, fill=1, stroke=0)
-    pdf.setFillColor(ACCENT)
-    pdf.rect(left_margin, box_top - box_h, 3, box_h, fill=1, stroke=0)
-    pdf.setFont("Helvetica-Bold", 9)
-    pdf.setFillColor(ACCENT)
-    pdf.drawString(left_margin + 14, box_top - 16, "IMPRESSION")
-    ty = box_top - 32
-    for line in test_lines:
-        pdf.setFillColor(INK)
-        pdf.setFont("Helvetica", 10)
-        pdf.drawString(left_margin + 14, ty, line)
-        ty -= line_height
-    y_position = box_top - box_h - section_spacing
-
-    # ==================== ORGANS REVIEWED (3-column) ====================
-    check_and_reset_page(160)
-    y_position = section_label("Organs Reviewed", y_position)
-    pdf.setStrokeColor(LINE)
-    pdf.line(left_margin, y_position + 8, width - right_margin, y_position + 8)
-    y_position -= 6
-
-    organ_volumes = report_data.get("organ_volumes", {})
-    organ_rows = sorted(
-        (organ.replace("_", " ").title(), vals.get("status", "normal"))
-        for organ, vals in organ_volumes.items()
-    )
-    num_cols = 3
-    col_w2 = content_width / num_cols
-    row_h = 22
-
-    col_i = 0
-    row_top = y_position
-    for name, status in organ_rows:
-        if col_i == 0:
-            check_and_reset_page(row_h + 4)
-            row_top = y_position
-        x = left_margin + col_i * col_w2
-        is_flagged = status == "check"
-        pdf.setFillColor(ACCENT if is_flagged else GREEN)
-        pdf.setFont("Helvetica-Bold", 10)
-        pdf.drawString(x, row_top - 14, "!" if is_flagged else u"\u2713")
-        pdf.setFillColor(ACCENT if is_flagged else INK)
-        pdf.setFont("Helvetica-Bold" if is_flagged else "Helvetica", 9.5)
-        pdf.drawString(x + 14, row_top - 14, name)
-        col_i += 1
-        if col_i >= num_cols:
-            col_i = 0
-            y_position = row_top - row_h
-    if col_i != 0:
-        y_position = row_top - row_h
-    y_position -= section_spacing
-
-    # ==================== FINDINGS (per-organ blocks + lesion callouts) ====================
-    check_and_reset_page(100)
-    y_position = section_label("Findings", y_position)
-    pdf.setStrokeColor(LINE)
-    pdf.line(left_margin, y_position + 8, width - right_margin, y_position + 8)
+    # All findings are presented as stored evidence, never filtered by mask labels.
+    y_position = section_label("Scope and limitations", y_position)
+    for limitation in report_limitations(report_data):
+        y_position = write_wrapped_text(left_margin, y_position, limitation, font_size=9, color=MUTED)
+        y_position -= 5
     y_position -= 10
-
-    comments = str(report_data.get("comments", ""))
-    # Roots to look for = every base organ this case actually has (dedup by
-    # base root the same way status-flagging does), so Findings only shows
-    # organs that exist for this case rather than a hardcoded list.
-    def _base_root(o):
-        r = o
-        for suf in ('_left', '_right', '_body', '_head', '_tail', '_gland', '_duct', '_lesion'):
-            r = r.replace(suf, '')
-        return r.replace('_', '').lower()
-    roots_present = sorted(set(_base_root(o) for o in organ_volumes.keys()))
-    parsed_organs = _parse_findings(comments, roots_present)
-
-    for organ in parsed_organs:
-        check_and_reset_page(40)
-        pdf.setFillColor(INK)
-        pdf.setFont("Helvetica-Bold", 11)
-        pdf.drawString(left_margin, y_position, organ['root'].title())
-        y_position -= line_height + 2
-
-        for line in organ['baseline_lines']:
-            check_and_reset_page(line_height + 4)
-            y_position = write_wrapped_text(left_margin, y_position, line, color=MUTED)
-
-        for lesion in organ['lesions']:
-            # Location is typically "<root> tail" / "<root> body" — take just
-            # the location word after the root for the callout title.
-            loc_word = lesion['location'].replace(organ['root'], '').strip() or lesion['location']
-            title = f"{organ['root'].title()} Lesion \u2014 {loc_word.title()}"
-            detail_lines = [
-                f"Size: {lesion['size']} cm (image) \u00b7 Volume: {lesion['volume']:.1f} cc",
-                f"{lesion['enhancement']} relative to {organ['root']}",
-                f"HU {lesion['hu']:.1f} \u00b1 {lesion['hu_sd']:.1f}",
-            ]
-            box_h = 18 + len(detail_lines) * line_height + 8
-            check_and_reset_page(box_h + 6)
-            box_top = y_position
-            pdf.setFillColor(ACCENT_BG)
-            pdf.rect(left_margin, box_top - box_h, content_width, box_h, fill=1, stroke=0)
-            pdf.setFillColor(ACCENT)
-            pdf.rect(left_margin, box_top - box_h, 3, box_h, fill=1, stroke=0)
-            pdf.setFont("Helvetica-Bold", 10)
-            pdf.drawString(left_margin + 14, box_top - 15, title)
-            ty = box_top - 30
-            for dl in detail_lines:
-                pdf.setFillColor(INK)
-                pdf.setFont("Helvetica", 9)
-                pdf.drawString(left_margin + 14, ty, dl)
-                ty -= line_height
-            y_position = box_top - box_h - 6
-
-        y_position -= 10
+    check_and_reset_page(50)
+    y_position = section_label("Complete stored source report", y_position)
+    y_position = write_wrapped_text(left_margin, y_position,
+                                   "Source: RadGPT metadata workbook. Unverified AI-generated text.",
+                                   font_size=9, color=MUTED)
+    y_position -= 8
+    y_position = write_wrapped_text(left_margin, y_position,
+                                   source_text(report_data) or "No stored source report is available for this case.")
+    y_position -= section_spacing
+    check_and_reset_page(65)
+    y_position = section_label("Segmentation measurements", y_position)
+    y_position = write_wrapped_text(left_margin, y_position,
+                                   "Source: CT + segmentation. Clinical status is not assessed from these measurements.",
+                                   font_size=9, color=MUTED)
+    organ_volumes = report_data.get("organ_volumes", {})
+    for organ, values in sorted(organ_volumes.items()):
+        check_and_reset_page(34)
+        text = (f"{organ.replace('_', ' ').title()}: "
+                f"volume {measurement_display(values.get('volume'), 2)} cc; "
+                f"mean HU {measurement_display(values.get('mean_hu'))}. Clinical assessment: Not assessed.")
+        y_position = write_wrapped_text(left_margin, y_position, text, font_size=9)
+        y_position -= 4
+    if not organ_volumes:
+        y_position = write_wrapped_text(left_margin, y_position, "Segmentation measurements unavailable.")
 
     # ==================== KEY IMAGES ====================
     lesions = report_data.get("lesions", {})
     case_id = report_data.get("case_id")
-    pants_id = get_panTS_id(case_id)
+    pants_id = get_panTS_id(case_id) if str(case_id).isdigit() else ""
     ct_path = f"{Constants.PANTS_PATH}/image_only/{pants_id}/{Constants.MAIN_NIFTI_FILENAME}"
-    mask_path_combined = f"{Constants.PANTS_PATH}/mask_only/{pants_id}/{Constants.COMBINED_LABELS_NIFTI_FILENAME}"
     seg_dir = f"{Constants.PANTS_PATH}/mask_only/{pants_id}/segmentations"
 
-    if os.path.exists(ct_path) and os.path.exists(mask_path_combined):
+    if report_data.get("masks_available") and os.path.exists(ct_path):
         lesion_files = {
             "pancreas": "pancreatic_lesion.nii.gz",
             "liver": "liver_lesion.nii.gz",
             "kidney": "kidney_lesion.nii.gz",
         }
-        organ_lookup = {o['root']: o for o in parsed_organs}
         for organ_root_key in lesions.keys():
             mask_filename = lesion_files.get(organ_root_key)
             if not mask_filename:
@@ -1837,81 +1074,26 @@ def _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path):
                 continue
 
             reset_page()
-            y_position = section_label(f"Key Image \u2014 {organ_root_key.title()} Lesion", y_position)
+            y_position = section_label(f"Segmentation annotation - {organ_root_key.title()}", y_position)
             pdf.setStrokeColor(LINE)
             pdf.line(left_margin, y_position + 8, width - right_margin, y_position + 8)
             y_position -= 20
 
             img_size = 220
-            overlay_path = f"/tmp/report_{case_id}_{organ_root_key}_lesion.png"
-            if _create_lesion_overlay_image(ct_path, lesion_mask_path, overlay_path):
-                pdf.drawImage(overlay_path, left_margin, y_position - img_size, width=img_size, height=img_size)
+            overlay_path = f"{temp_pdf_path}_{organ_root_key}_lesion.png"
+            try:
+                with _REPORT_IMAGE_LOCK:
+                    image_available = _create_lesion_overlay_image(ct_path, lesion_mask_path, overlay_path)
+                if image_available:
+                    pdf.drawImage(overlay_path, left_margin, y_position - img_size, width=img_size, height=img_size)
+            finally:
                 if os.path.exists(overlay_path):
                     os.remove(overlay_path)
 
-            detail_x = left_margin + img_size + 30
-            dy = y_position - 8
-            lesion_detail = None
-            organ_entry = organ_lookup.get(organ_root_key)
-            if organ_entry and organ_entry['lesions']:
-                lesion_detail = organ_entry['lesions'][0]
-            if lesion_detail:
-                loc_word = lesion_detail['location'].replace(organ_root_key, '').strip() or lesion_detail['location']
-                pdf.setFillColor(ACCENT)
-                pdf.setFont("Helvetica-Bold", 11)
-                pdf.drawString(detail_x, dy, f"Lesion 1 \u2014 {organ_root_key.title()} {loc_word.title()}")
-                dy -= 20
-                for dl in [
-                    f"Size: {lesion_detail['size']} cm \u00b7 Volume: {lesion_detail['volume']:.1f} cc",
-                    f"Enhancement: {lesion_detail['enhancement']} relative to {organ_root_key}",
-                    f"HU {lesion_detail['hu']:.1f} \u00b1 {lesion_detail['hu_sd']:.1f}",
-                ]:
-                    pdf.setFillColor(INK)
-                    pdf.setFont("Helvetica", 10)
-                    pdf.drawString(detail_x, dy, dl)
-                    dy -= 16
+            write_wrapped_text(left_margin + img_size + 25, y_position - 8,
+                               "Segmentation annotation only; not a verified diagnosis or complete search for lesions.",
+                               max_width=content_width - img_size - 25, font_size=9, color=MUTED)
             y_position -= (img_size + section_spacing)
-
-        # ---- All Organs Reviewed thumbnail grid ----
-        reset_page()
-        y_position = section_label("All Organs Reviewed", y_position)
-        pdf.setStrokeColor(LINE)
-        pdf.line(left_margin, y_position + 8, width - right_margin, y_position + 8)
-        y_position -= 20
-
-        ct_nii = nib.load(ct_path)
-        mask_nii = nib.load(mask_path_combined)
-        ct_array = ct_nii.get_fdata()
-        mask_array = mask_nii.get_fdata().astype(np.uint8)
-        min_shape = tuple(min(c, m) for c, m in zip(ct_array.shape, mask_array.shape))
-        ct_array = ct_array[:min_shape[0], :min_shape[1], :min_shape[2]]
-        mask_array = mask_array[:min_shape[0], :min_shape[1], :min_shape[2]]
-
-        num_cols = 5
-        col_gap, row_gap = 14, 26
-        img_w = (content_width - col_gap * (num_cols - 1)) / num_cols
-        img_h = img_w
-        col_x = [left_margin + i * (img_w + col_gap) for i in range(num_cols)]
-        col_i = 0
-
-        organ_label_map = {v: k for k, v in Constants.PREDEFINED_LABELS.items()}
-        for organ, label_id in organ_label_map.items():
-            if label_id == 0:
-                continue
-            check_and_reset_page(img_h + row_gap + 20)
-            x = col_x[col_i]
-            overlay_path = f"/tmp/report_{case_id}_{organ}_overview.png"
-            if _create_organ_overview_image(ct_array, mask_array, label_id, overlay_path):
-                pdf.drawImage(overlay_path, x, y_position - img_h, width=img_w, height=img_h)
-                if os.path.exists(overlay_path):
-                    os.remove(overlay_path)
-                pdf.setFont("Helvetica", 8)
-                pdf.setFillColor(MUTED)
-                pdf.drawCentredString(x + img_w / 2, y_position - img_h - 12, organ.replace("_", " ").title())
-                col_i += 1
-                if col_i >= num_cols:
-                    col_i = 0
-                    y_position -= (img_h + row_gap)
 
     pdf.save()
 
@@ -2015,8 +1197,9 @@ def _create_organ_overview_image(ct_array, mask_array, label_id, output_path, co
 def generate_report_pdf(id):
     if not _is_safe_id(id):
         return jsonify({"error": "Invalid id"}), 400
-    temp_pdf_path = f"{PDF_DIR}/temp_report_{id}.pdf"
-    output_pdf_path = f"{PDF_DIR}/report_{id}.pdf"
+    request_token = uuid.uuid4().hex
+    temp_pdf_path = f"{PDF_DIR}/temp_report_{request_token}.pdf"
+    output_pdf_path = f"{PDF_DIR}/report_{request_token}.pdf"
     try:
         resolved = _resolve_case_id_or_token(id)
         if resolved is None:
@@ -2028,18 +1211,24 @@ def generate_report_pdf(id):
 
         _draw_report_pdf(report_data, temp_pdf_path, output_pdf_path)
 
-        return send_file(
-            output_pdf_path,
-            mimetype="application/pdf",
-            as_attachment=True,
-            download_name=f"case_{id}_report.pdf",
-        )
+        # Materialize the finished PDF so all per-request files can be removed
+        # safely on Windows as well as POSIX, including concurrent same-case exports.
+        with open(output_pdf_path, "rb") as output:
+            content = BytesIO(output.read())
+        response = send_file(content, mimetype="application/pdf", as_attachment=True,
+                             download_name=f"case_{id}_report.pdf")
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return response
     except Exception:
         current_app.logger.exception("Error generating report PDF for case_id=%s", id)
         return jsonify({"error": "An internal error has occurred."}), 500
     finally:
-        if os.path.exists(temp_pdf_path):
-            os.remove(temp_pdf_path)
+        for path in (temp_pdf_path, output_pdf_path):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
 
 @api_blueprint.route('/get-specific-segmentations/<combined_labels_id>', methods=['POST'])
 async def get_specific_segmentations(combined_labels_id):

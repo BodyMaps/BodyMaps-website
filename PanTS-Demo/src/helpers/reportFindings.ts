@@ -1,235 +1,124 @@
-// ─────────────────────────────────────────────────────────────────────────
-// Shared report-text parsing + plain-language finding logic.
-//
-// This is a straight extraction of the pure helper functions that already
-// live in ReportScreen.tsx (organRoot, getReportSection, getReportMeasurements,
-// patientFindingText, etc). Nothing about their behavior has changed — same
-// regexes, same bug-fix comments preserved — they've just been moved here so
-// a second surface (the shareable patient card) can reuse the identical
-// logic instead of re-implementing it and risking the two drifting apart.
-//
-// ReportScreen.tsx can optionally switch to importing from here instead of
-// keeping its own copies; that's a one-line import swap per function and is
-// left as a follow-up so it doesn't touch the verified report-walkthrough
-// flow in this change.
-// ─────────────────────────────────────────────────────────────────────────
-
+// Report text and segmentation measurements are separate evidence sources.
+// Neither absent flags nor an in-range measurement establishes clinical normality.
 export interface OrganData {
-  volume: number;
-  mean_hu: number;
-  status?: 'normal' | 'check';
+  volume: number | null;
+  mean_hu: number | null;
+  status?: 'not_assessed' | 'normal' | 'check';
   centroid_mm?: [number, number, number];
   dimensions?: [number, number, number];
 }
 
 export interface ReportData {
   case_id: string;
-  patient: { age: number; sex: string };
-  imaging: { study_type: string; contrast: string; spacing: number[]; shape: number[] };
-  organ_volumes: { [k: string]: OrganData };
-  lesions: { [k: string]: { voxels: number; volume: number } };
+  report_schema_version?: string;
+  patient: { age: number | string; sex: string };
+  imaging?: { study_type: string; contrast: string; spacing: number[]; shape: number[] };
+  organ_volumes: Record<string, OrganData>;
+  lesions?: Record<string, { voxels: number; volume: number }>;
+  masks_available?: boolean;
   comments: string;
   impression: string[];
+  source_report?: {
+    available: boolean;
+    source: string;
+    text: string;
+    findings: string;
+    impression: string[];
+    reviewed_by_clinician: boolean;
+  };
+  provenance?: {
+    report_source: string;
+    measurements_source: string;
+    image_review_performed: boolean;
+  };
+  coverage?: { status: string; measured_structures: number; limitations: string[] };
 }
 
-export type ReportMeasurements = {
-  section: string | null;
-  volumeCc: number | null;
-  lesionVolumeCc: number | null;
-  organVolumeCc: number | null;
-  meanHu: number | null;
-  organMeanHu: number | null;
-  huSd: number | null;
-  sizeCm: string | null;
-  lesionCount: number;
-};
+const DEFAULT_LIMITATIONS = [
+  'Segmentation measurements do not establish whether a structure is normal or abnormal.',
+  'This summary does not provide a complete diagnostic review. Findings outside the segmented structures may not be assessed.',
+];
 
-export function labelize(organ: string): string {
-  return organ
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function getDetail(organ: string, comments: string): string | null {
-  if (!comments) return null;
-  const sentences = comments.split(/(?<=[.!?])\s+/).filter(s => s.trim());
-  const root = organ.replace(/_(gland|body|tail|head|left|right)$/, '').replace(/_/g, ' ').split(' ')[0];
-  const match = sentences.find(s => s.toLowerCase().includes(root.toLowerCase()));
-  if (!match) return null;
-  let d = match.trim().replace(/^(however|notably|additionally|furthermore|moreover|in addition),?\s+/i, '');
-  if (d.length) d = d[0].toUpperCase() + d.slice(1);
-  if (d.length > 210) d = d.slice(0, d.lastIndexOf(' ', 207)).trim() + '...';
-  return d.endsWith('.') || d.endsWith('...') ? d : d + '.';
+const text = (value: unknown): string => typeof value === 'string' ? value : '';
+const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+const finite = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+function triplet(value: unknown): [number, number, number] | undefined {
+  return Array.isArray(value) && value.length === 3 && value.every(v => finite(v) !== null)
+    ? value as [number, number, number] : undefined;
 }
 
-export function organRoot(organ: string): string {
-  if (organ.startsWith('pancreas')) return 'pancreas';
-  if (organ.startsWith('kidney')) return 'kidney';
-  return organ
-    .replace(/_(gland|body|tail|head|left|right)$/, '')
-    .replace(/_/g, ' ')
-    .toLowerCase();
-}
-
-export function getReportSection(organ: string, comments: string): string | null {
-  if (!comments) return null;
-  const root = organRoot(organ);
-  const lines = comments.split(/\r?\n/);
-  const start = lines.findIndex(line => {
-    const cleaned = line.trim().replace(/:$/, '').toLowerCase();
-    return cleaned === root || cleaned === `${root}s` || cleaned.startsWith(`${root}:`);
-  });
-  if (start === -1) return getDetail(organ, comments);
-  const collected: string[] = [];
-  let lesionsHeadingSeen = false;
-  for (let i = start; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    const cleanedHeading = trimmed.replace(/:$/, '').toLowerCase();
-    if (i > start && cleanedHeading === `${root} lesions`) {
-      lesionsHeadingSeen = true;
-      continue;
+/** Accept source-only reports, and never upgrade missing or legacy status to a clinical assessment. */
+export function normalizeReportData(value: unknown): ReportData | null {
+  if (!isRecord(value) || 'error' in value) return null;
+  if (!('organ_volumes' in value || 'source_report' in value || 'comments' in value || 'impression' in value)) return null;
+  const organ_volumes: Record<string, OrganData> = {};
+  if (isRecord(value.organ_volumes)) {
+    for (const [organ, metrics] of Object.entries(value.organ_volumes)) {
+      if (!isRecord(metrics)) continue;
+      organ_volumes[organ] = {
+        volume: finite(metrics.volume), mean_hu: finite(metrics.mean_hu),
+        status: metrics.status === 'check' ? 'check' : 'not_assessed',
+        centroid_mm: triplet(metrics.centroid_mm), dimensions: triplet(metrics.dimensions),
+      };
     }
-    if (i > start && !lesionsHeadingSeen && /^[A-Za-z][A-Za-z\s_/-]*:\s*$/.test(trimmed)) break;
-    if (i > start && lesionsHeadingSeen && /^[A-Za-z][A-Za-z\s_/-]*:\s*$/.test(trimmed) && !cleanedHeading.startsWith(root)) break;
-    if (i > start && /^IMPRESSION:\s*$/i.test(trimmed)) break;
-    if (trimmed) collected.push(trimmed);
   }
-  return collected.join(' ').replace(/\s+/g, ' ').trim() || null;
-}
-
-export function getReportMeasurements(organ: string, comments: string): ReportMeasurements {
-  const section = getReportSection(organ, comments);
-  const lesionVolumeMatch = section?.match(/lesion[\s\S]*?volume:\s*([\d.]+)\s*cc/i);
-  const lesionHuMatch = section?.match(/hu\s*value\s*is\s*(-?[\d.]+)(?:\s*\+\/-\s*([\d.]+))?/i);
-  const volumeMatch = lesionVolumeMatch ?? section?.match(/volume:\s*([\d.]+)\s*cc/i);
-  const huMatch = lesionHuMatch ?? section?.match(/Mean HU value:\s*([\d.]+)(?:\s*\+\/-\s*([\d.]+))?/i);
-  const sizeMatch = section?.match(/Size:\s*([^()]+?)\s*cm/i);
-
-  const organVolumeMatch = section?.match(/volume:\s*([\d.]+)\s*cc/i);
-  const organHuMatch = section?.match(/Mean HU value:\s*([\d.]+)/i);
-
-  const sizeMatches = section?.match(/Size:\s*[^()]+?cm/gi) ?? [];
-  const lesionCount = sizeMatches.length || (lesionVolumeMatch ? 1 : 0);
-
+  const source = isRecord(value.source_report) ? value.source_report : null;
+  const provenance = isRecord(value.provenance) ? value.provenance : null;
+  const coverage = isRecord(value.coverage) ? value.coverage : null;
+  const patient = isRecord(value.patient) ? value.patient : {};
   return {
-    section,
-    volumeCc: volumeMatch ? Number(volumeMatch[1]) : null,
-    lesionVolumeCc: lesionVolumeMatch ? Number(lesionVolumeMatch[1]) : null,
-    organVolumeCc: organVolumeMatch ? Number(organVolumeMatch[1]) : null,
-    meanHu: huMatch ? Number(huMatch[1]) : null,
-    organMeanHu: organHuMatch ? Number(organHuMatch[1]) : null,
-    huSd: huMatch?.[2] ? Number(huMatch[2]) : null,
-    sizeCm: sizeMatch ? sizeMatch[1].trim() : null,
-    lesionCount,
+    case_id: text(value.case_id), report_schema_version: text(value.report_schema_version),
+    patient: { age: typeof patient.age === 'number' ? patient.age : text(patient.age), sex: text(patient.sex) },
+    organ_volumes, masks_available: value.masks_available !== false,
+    comments: text(value.comments), impression: strings(value.impression),
+    source_report: source ? {
+      available: source.available === true, source: text(source.source), text: text(source.text),
+      findings: text(source.findings), impression: strings(source.impression),
+      reviewed_by_clinician: source.reviewed_by_clinician === true,
+    } : undefined,
+    provenance: provenance ? {
+      report_source: text(provenance.report_source), measurements_source: text(provenance.measurements_source),
+      image_review_performed: provenance.image_review_performed === true,
+    } : undefined,
+    coverage: coverage ? {
+      status: text(coverage.status), measured_structures: finite(coverage.measured_structures) ?? Object.keys(organ_volumes).length,
+      limitations: strings(coverage.limitations),
+    } : undefined,
   };
 }
 
-export function organLocation(organ: string): { type: 'lateral' | 'subregion'; word: string } | null {
-  const suffix = organ.split('_').pop() ?? '';
-  if (suffix === 'left' || suffix === 'right') return { type: 'lateral', word: suffix };
-  if (suffix === 'tail' || suffix === 'head' || suffix === 'body') return { type: 'subregion', word: suffix };
-  return null;
+export function labelize(organ: string): string {
+  return organ.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-export function sizeDescriptor(volumeCc: number | null, sizeCm: string | null): string {
-  let maxDim: number | null = null;
-  if (sizeCm) {
-    const nums = sizeCm.match(/[\d.]+/g)?.map(Number) ?? [];
-    if (nums.length) maxDim = Math.max(...nums);
-  }
-  if (maxDim !== null) {
-    if (maxDim < 1) return 'tiny';
-    if (maxDim < 2) return 'small';
-    if (maxDim < 5) return 'noticeable';
-    return 'sizable';
-  }
-  if (volumeCc !== null) {
-    if (volumeCc < 1) return 'tiny';
-    if (volumeCc < 5) return 'small';
-    if (volumeCc < 20) return 'noticeable';
-    return 'sizable';
-  }
-  return '';
+/** Preserve original wording, including negation, unrecognized headings, and report preamble. */
+export function getSourceReportText(data: ReportData): string {
+  if (data.source_report?.text.trim()) return data.source_report.text;
+  const findings = data.source_report?.findings || data.comments;
+  const impressions = data.source_report?.impression.length ? data.source_report.impression : data.impression;
+  return [
+    findings && findings !== 'Clinical comments unavailable.' ? `FINDINGS:\n${findings}` : '',
+    impressions.filter(item => item !== 'No impression available for this case.').length
+      ? `IMPRESSION:\n${impressions.filter(item => item !== 'No impression available for this case.').join('\n')}` : '',
+  ].filter(Boolean).join('\n\n');
 }
 
-// Definitions, not interpretations — these describe what each clinical
-// word means in plain English without implying severity, urgency, or a
-// diagnosis (never "benign," "concerning," "normal," etc. — only what the
-// source report actually supports). `kind` picks the sentence grammar:
-// 'noun' terms slot into "a small <term>"; 'descriptor' terms (enlarged,
-// dilated) describe a state of the organ itself, so they get their own
-// sentence shape rather than being forced into "a small enlarged."
-type FindingTerm = { term: string; kind: 'noun' | 'descriptor'; definition: string };
-
-function detectFindingTerm(detail: string): FindingTerm | null {
-  const d = detail.toLowerCase();
-  if (d.includes('cyst')) return { term: 'cyst', kind: 'noun', definition: 'A cyst is a fluid-filled sac.' };
-  if (d.includes('nodule')) return { term: 'nodule', kind: 'noun', definition: 'A nodule is a small rounded area.' };
-  if (d.includes('mass')) return { term: 'mass', kind: 'noun', definition: 'A mass is an area of tissue that appears different from the surrounding tissue.' };
-  if (d.includes('tumor')) return { term: 'tumor', kind: 'noun', definition: 'A tumor is a growth made up of abnormal cells.' };
-  if (d.includes('enlarged')) return { term: 'enlarged', kind: 'descriptor', definition: 'Enlarged means larger than expected.' };
-  if (d.includes('dilated') || d.includes('widened')) return { term: 'dilated', kind: 'descriptor', definition: 'Dilated means wider than expected.' };
-  if (d.includes('lesion')) return { term: 'lesion', kind: 'noun', definition: 'A lesion is an area that looks different from the surrounding tissue.' };
-  return null;
+export function getCoverageLimitations(data: ReportData): string[] {
+  return [...new Set([...DEFAULT_LIMITATIONS, ...(data.coverage?.limitations ?? [])])];
 }
 
-export function getImpressionText(data: ReportData | null): string {
-  if (!data?.impression?.length) return '';
-  return data.impression
-    .map(t => t.replace(/^\d+\.\s*/, '').replace(/^\[([^\]]+)\]:\s*/, '$1: '))
-    .join(' ');
-}
-
-export function capFirst(s: string): string {
-  return s.length ? s[0].toUpperCase() + s.slice(1) : s;
-}
-
-// Single job now: explain the finding. What to do about it (see your
-// doctor) is a separate, persistent card element rendered once — not
-// repeated in every sentence, which read as alarming and discharge-
-// paperwork-like when it was baked into every branch here.
-export function patientFindingText(organ: string, measurements: ReportMeasurements): string {
-  const organLabel = labelize(organRoot(organ)).toLowerCase();
-  const loc = organLocation(organ);
-  const subject =
-    loc?.type === 'lateral' ? `your ${loc.word} ${organLabel}`
-    : loc?.type === 'subregion' ? `the ${loc.word} of your ${organLabel}`
-    : `your ${organLabel}`;
-  const detail = measurements.section || '';
-
-  if (!detail) {
-    return `The scan flagged ${subject} for review — the report text wasn't specific enough to describe here.`;
-  }
-
-  const found = detectFindingTerm(detail);
-  if (!found) {
-    return `${capFirst(subject)} was flagged for review, but the report doesn't describe a specific spot or growth.`;
-  }
-
-  const sizeWord = sizeDescriptor(measurements.lesionVolumeCc ?? measurements.volumeCc, measurements.sizeCm);
-  const sizePart = measurements.sizeCm ? ` measuring ${measurements.sizeCm} cm` : '';
-
-  if (found.kind === 'descriptor') {
-    return `The scan found that ${subject} is ${found.term}. ${found.definition}`;
-  }
-
-  const article = sizeWord ? `a ${sizeWord} ${found.term}` : `a ${found.term}`;
-  const countPart = measurements.lesionCount > 1 ? `${measurements.lesionCount} ${found.term}s` : article;
-
-  return `The scan found ${countPart}${sizePart} in ${subject}. ${found.definition}`;
-}
-
-/** Same >5cc-or-flagged filter ReportScreen uses to build its organ list. */
 export function splitOrgans(data: ReportData | null): {
-  all: [string, OrganData][];
-  flagged: [string, OrganData][];
-  normal: [string, OrganData][];
+  all: [string, OrganData][]; flagged: [string, OrganData][]; unassessed: [string, OrganData][];
 } {
-  const all = data
-    ? Object.entries(data.organ_volumes).filter(([, v]) => v.volume > 5 || v.status === 'check')
-    : [];
-  const flagged = all.filter(([, v]) => v.status === 'check');
-  const normal = all.filter(([, v]) => v.status !== 'check');
-  return { all, flagged, normal };
+  const all = Object.entries(data?.organ_volumes ?? {});
+  return { all, flagged: all.filter(([, v]) => v.status === 'check'), unassessed: all.filter(([, v]) => v.status !== 'check') };
+}
+
+export function formatMeasurement(value: number | null | undefined, unit: string): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${Number(value.toFixed(1))} ${unit}` : 'Not available';
 }
