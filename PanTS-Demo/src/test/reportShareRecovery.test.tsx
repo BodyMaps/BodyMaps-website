@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { MemoryRouter as DomMemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -69,6 +69,8 @@ describe('report data recovery', () => {
 });
 
 describe('share report popover', () => {
+  // The report also has a status line of its own that names the step.
+  const popover = () => document.getElementById('rs-share-popover')!;
   function stubReportAndToken(id: string, ...tokenAnswers: Response[]) {
     const tokens = [...tokenAnswers];
     const fetch = vi.fn((url: string) => {
@@ -85,7 +87,7 @@ describe('share report popover', () => {
     render(<ReportScreen id="share-retry" {...props} />);
     fireEvent.click(await screen.findByRole('button', { name: /Share report/ }));
     expect(await screen.findByText("Couldn't create a link.")).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent("Couldn't create a link. Try again.");
+    expect(within(popover()).getByRole('status')).toHaveTextContent("Couldn't create a link. Try again.");
     const retry = screen.getByRole('button', { name: 'Try again' });
     retry.focus();
     fireEvent.click(retry);
@@ -104,7 +106,7 @@ describe('share report popover', () => {
     await waitFor(() => expect(link).toHaveValue(`${window.location.origin}/share/tok456`));
     fireEvent.click(screen.getByRole('button', { name: 'Copy' }));
     await waitFor(() => expect(link).toHaveFocus());
-    expect(screen.getByRole('status')).toHaveTextContent("Couldn't copy the link. Select it and copy it yourself.");
+    expect(within(popover()).getByRole('status')).toHaveTextContent("Couldn't copy the link. Select it and copy it yourself.");
   });
 
   it('returns focus to Share report when Escape closes the popover from inside', async () => {
