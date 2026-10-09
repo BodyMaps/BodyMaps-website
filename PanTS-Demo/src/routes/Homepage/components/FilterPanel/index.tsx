@@ -2,7 +2,6 @@ import type { SearchFilters as Filters, MultiFilterKey } from "../../../../helpe
 import type { FacetData } from "../../types";
 import {
   TUMOR_OPTIONS,
-  DATASET_OPTIONS,
   SEX_OPTIONS,
   AGE_OPTIONS,
   FACET_GROUPS,
@@ -34,29 +33,6 @@ export default function FilterPanel({ filters, setFilters, facetData, toggleMult
 
   return (
     <div className={styles.filterPanel}>
-      {/* Dataset */}
-      <div className="flex flex-col gap-2.5">
-        <span className={styles.filterLabel}>Dataset</span>
-        <div className="flex flex-wrap gap-2">
-          <button
-            className={pillClass(filters.dataset.length === 0)}
-            onClick={() => setFilters((f) => ({ ...f, dataset: [] }))}
-          >
-            Any
-          </button>
-          {DATASET_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              className={pillClass(filters.dataset.includes(opt.value))}
-              onClick={() => toggleMulti("dataset", opt.value)}
-            >
-              {opt.label}
-              <CountBadge count={facetData?.datasetCounts[opt.value] ?? null} />
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Tumor */}
       <div className="flex flex-col gap-2.5">
         <span className={styles.filterLabel}>Tumor</span>
@@ -133,7 +109,7 @@ export default function FilterPanel({ filters, setFilters, facetData, toggleMult
         </div>
       </div>
 
-      {/* Metadata facets: manufacturer / CT phase / site / year */}
+      {/* Facets: tumor type / manufacturer / CT phase / site / year */}
       {FACET_GROUPS.map((g) => {
         const rows = facetData?.counts[g.field] ?? [];
         const selected = filters[g.key];

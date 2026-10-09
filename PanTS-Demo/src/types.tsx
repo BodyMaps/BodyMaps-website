@@ -49,6 +49,8 @@ export type PreviewType = {
 	sex: string;
 	age: number;
 	tumor: 0 | 1 | null;
+	/** Organ(s) with a tumor as display text ("Pancreas", "Liver, Kidney"); only when tumor === 1. */
+	tumorLabel?: string | null;
 }
 
 export type Interactions = "Bounding Box" | "Scribble" | "Point" | "";

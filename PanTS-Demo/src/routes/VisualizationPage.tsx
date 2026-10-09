@@ -251,14 +251,16 @@ const VIEW_MODE_SHORT_LABEL: Record<ViewMode, string> = {
 
 export type MaskEditMode = "brush" | "eraser" | "smartfill" | "lasso" | null;
 
-// Case metadata fields pulled from PanTS/metadata.xlsx (via /api/search), in display
-// order — a curated subset of row_to_item's fields; spacing_sum/shape_sum/complete are
-// internal sort helpers, not meaningful to show a reader.
+// Case metadata fields from the dataset metadata (PanTS or CancerVerse, via /api/search),
+// in display order — a curated subset of row_to_item's fields; spacing_sum/shape_sum/
+// complete are internal sort helpers, not meaningful to show a reader.
 const METADATA_FIELDS: { key: string; label: string }[] = [
-	{ key: "PanTS ID", label: "PanTS ID" },
+	{ key: "PanTS ID", label: "Case ID" },
+	{ key: "dataset", label: "Dataset" },
 	{ key: "sex", label: "Sex" },
 	{ key: "age", label: "Age" },
 	{ key: "tumor", label: "Tumor" },
+	{ key: "tumor label", label: "Tumor Type" },
 	{ key: "ct phase", label: "CT Phase" },
 	{ key: "manufacturer", label: "Manufacturer" },
 	{ key: "manufacturer model", label: "Scanner Model" },

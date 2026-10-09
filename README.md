@@ -68,11 +68,23 @@ Optional dataset vars:
 # Writable dir for precomputed PanTS low-res volumes (make_lowres.py output)
 PANTS_LOWRES_PATH=/home/visitor/pants_lowres
 
-# CancerVerse (second, CT-only dataset). Leave unset to disable it.
+# CancerVerse (second dataset). Leave unset to disable it.
 CANCERVERSE_PATH=/folder/where/CancerVerse
 CANCERVERSE_LOWRES_PATH=/home/visitor/cancerverse_lowres
+# Optional writable overlay with updated/new scans, current metadata and the tumor index
+CANCERVERSE_OVERLAY_PATH=/home/visitor/cancerverse_v351
 ```
-`CANCERVERSE_PATH` holds the `CV_########/ct.nii.gz` cases; the metadata CSV `CancerVerse_dataset_metadata.csv` sits **next to** that folder (in its parent). When set, `/api/search?dataset=cancerverse` (or `dataset=all`) searches it; CancerVerse has no masks yet, so mask endpoints return `{"masks_available": false}`.
+`CANCERVERSE_PATH` holds the cases (`image_only/CV_########/ct.nii.gz`, or the flat `CV_########/ct.nii.gz`); the metadata CSV `CancerVerse_dataset_metadata.csv` sits **next to** that folder (in its parent). Search treats PanTS and CancerVerse as **one collection**: `/api/search`, `/api/facets` and `/api/random` cover both by default (`?dataset=pants` or `?dataset=cancerverse` still narrows them for API clients). CancerVerse has no organ masks, so mask endpoints return `{"masks_available": false}` for it.
+
+**Tumor type.** Every PanTS tumor is pancreatic. CancerVerse annotates 13 organs, so its tumor types come from the released lesion masks: run `scripts/build_cancerverse_index.py --labels CancerVerse_Label.tar.gz --out <overlay>/cancerverse_case_index.json --workers 4` once (about an hour with 2 workers; the stage script runs it for you). It decompresses every mask an annotator touched (a touched mask can be an erased, all-zero annotation, so file size alone is not evidence of a tumor) and skips the untouched ones, verifying that skip on a sample; it exits non-zero if the check ever finds a tumor in a skipped mask. With `--metadata <csv>` it refuses to write the index when the archive lacks more than 0.5% of the CSV's scans, which is what a half-downloaded archive looks like. Without the index file the CancerVerse tumor status simply shows as unknown.
+
+**What "No tumor" means for CancerVerse.** A scan is `tumor = 0` only if it is indexed, none of that patient's scans has an annotated lesion, **and** the patient has no ICD-10 neoplasm code (C00-D49) on any scan. A patient diagnosed with a cancer that was never segmented (metastases, an organ outside the 13) has no lesion mask but is not tumor-free, so their scans count as *unknown* instead. On the current release that is 10,873 scans with no tumor, 9,639 with an annotated tumor and 3,910 unknown. Filter with `tumor_type[]=pancreas&tumor_type[]=liver` (or `tumor_type=liver;kidney`); items carry `dataset`, `tumor types` and `tumor label`. A bare number in `caseid=` always means a PanTS case; CancerVerse ids keep their `CV_` prefix.
+
+**Updating CancerVerse.** The dataset mount is read-only, so updates go into the overlay and the site prefers it. `scripts/plan_cancerverse_update.py` compares the server copy with the published release and writes the list of new or changed CTs; `scripts/stage_cancerverse_update.sh <plan> <overlay>` downloads and verifies them (size and SHA-256), builds the tumor index, draws the card thumbnails of the staged scans into `<overlay>/profile_only` (`MAKE_PREVIEWS=0` skips), and publishes the metadata CSV last, only if every download succeeded. It is resumable (a re-run only needs disk space for what is still missing), stops after `MAX_CONSECUTIVE_FAILS` (5) failed downloads in a row, validates the plan, and can pin the label archive with `LABELS_SHA256`. It never touches `.env` or restarts anything: add `CANCERVERSE_OVERLAY_PATH`, then reload the backend with the usual deploy procedure when no job is running.
+
+Two more things follow from serving files out of the overlay. (1) nginx needs the `/_bodymaps_volume_cancerverse_overlay/` internal location from `flask-server/deploy/nginx-bodymaps.conf` (alias = the overlay folder); without it overlay CTs are streamed by Gunicorn threads instead of nginx. (2) Overlay files are sent with `Cache-Control: no-cache` (revalidated, a cheap 304), and a replaced scan never uses the old low-res copy; but a browser that already holds one of the 103 changed CTs under the old 7-day `immutable` header keeps showing it until that copy expires.
+
+**Order of results.** In Browse-all and Shuffle the quality ranking lists PanTS before CancerVerse inside the same thumbnail-quality tier (PanTS cases have organ masks; CancerVerse scans are larger and would otherwise fill the first pages). Any filter, such as a tumor type, shows CancerVerse as usual.
 
 #### Build the search/shuffle quality index
 

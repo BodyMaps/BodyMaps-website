@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_BASE } from "../helpers/constants";
 import { prefetchViewer } from "../helpers/prefetchViewer";
-import type { CaseId } from "../helpers/search";
+import { formatTumorBadge, type CaseId } from "../helpers/search";
 import type { PreviewType } from "../types";
 
 type Props = {
@@ -72,7 +72,7 @@ export default function Preview({
 	};
 	const tumorLabel =
 		previewMetadata.tumor === 1
-			? "Tumor"
+			? formatTumorBadge(previewMetadata.tumorLabel)
 			: previewMetadata.tumor === 0
 				? "No Tumor"
 				: "Unknown";
@@ -298,7 +298,7 @@ export default function Preview({
 				</div>
 
 				<div
-					className="flex items-center gap-2"
+					className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
 					style={{ fontSize: "11px", fontWeight: 700, color: "#111111" }}
 				>
 					<span>Sex {previewMetadata.sex || "—"}</span>

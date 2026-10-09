@@ -7,6 +7,7 @@ from services.auto_segmentor import run_auto_segmentation
 from services.case_quality import load_case_quality_manifest, merge_case_quality
 from services.manufacturer_normalization import canonicalize_manufacturer
 from services.site_normalization import split_site_codes
+from services import cancerverse_catalog as cv_catalog
 from models.application_session import ApplicationSession
 from models.combined_labels import CombinedLabels
 from models.base import db
@@ -38,6 +39,8 @@ last_session_check = datetime.now()
 
 # Progress tracking structure: {session_id: (start_time, expected_total_seconds)}
 progress_tracker = {}
+
+CV_SORT_OFFSET = 100_000_000   # keeps CancerVerse ids after PanTS ids when sorting by id
 
 def id_is_training(index):
     return index < 9000
@@ -86,11 +89,20 @@ def get_case_nifti_paths(case_id):
     dataset = get_dataset_from_case_id(case_id)
     if dataset == "CancerVerse":
         folder = get_cancerverse_id(case_id)
+        # Overlay (updated scans) first, then the dataset in either on-disk layout.
+        image = cv_catalog.resolve_ct_path(
+            folder, Constants.CANCERVERSE_PATH, Constants.CANCERVERSE_OVERLAY_PATH
+        )
+        if cv_catalog.is_under(image, Constants.CANCERVERSE_OVERLAY_PATH):
+            # The old low-res copy was made from the CT this one replaced: never serve it.
+            lowres = f"{Constants.CANCERVERSE_OVERLAY_PATH}/lowres/image_only/{folder}/ct_lowres.nii.gz"
+        else:
+            lowres = f"{Constants.CANCERVERSE_LOWRES_PATH}/image_only/{folder}/ct_lowres.nii.gz"
         return {
             "dataset": dataset,
             "folder_id": folder,
-            "image": f"{Constants.CANCERVERSE_PATH}/image_only/{folder}/{Constants.MAIN_NIFTI_FILENAME}",
-            "lowres_image": f"{Constants.CANCERVERSE_LOWRES_PATH}/image_only/{folder}/ct_lowres.nii.gz",
+            "image": image,
+            "lowres_image": lowres,
             "mask": None,
             "masks_available": False,
         }
@@ -1146,7 +1158,10 @@ def _norm_cols(df_raw: pd.DataFrame) -> pd.DataFrame:
     # ---- Tumor -> __tumor01 ----
     def _canon(s: str) -> str: return re.sub(r"[^a-z]+", "", str(s).lower())
     tumor_names = [c for c in df.columns if "tumor" in _canon(c)] or []
-    tcol = tumor_names[0] if tumor_names else None
+    # The yes/no flag is the column literally named "tumor" ("tumor?"), never a
+    # descriptive one such as "tumor type", whatever order the columns come in.
+    tumor_flags = [c for c in tumor_names if _canon(c) == "tumor"]
+    tcol = (tumor_flags or tumor_names or [None])[0]
 
     def _to01_v(v):
         if pd.isna(v): return np.nan
@@ -1162,6 +1177,23 @@ def _norm_cols(df_raw: pd.DataFrame) -> pd.DataFrame:
     df["__tumor01"] = (df[tcol].map(_to01_v) if tcol else pd.Series([np.nan]*len(df), index=df.index))
     if tcol:
         df["_orig_cols"] = [{**(df["_orig_cols"].iat[i] or {}), "tumor": tcol} for i in range(len(df))]
+
+    # ---- Dataset + tumor type -> __dataset / __tumor_types ----
+    # Search treats PanTS and CancerVerse as one collection. PanTS is a pancreatic-tumor
+    # dataset, so every PanTS tumor is pancreatic; CancerVerse supplies its own types
+    # (organs with an annotated lesion) in a "tumor type" column, ';'-separated.
+    ds_from_id = df["__case_str"].map(get_dataset_from_case_id)
+    if "dataset" in df.columns:
+        given = df["dataset"].fillna("").astype(str).str.strip()
+        df["__dataset"] = given.where(given != "", ds_from_id)
+    else:
+        df["__dataset"] = ds_from_id
+    given_types = (df["tumor type"].map(cv_catalog.split_tumor_types) if "tumor type" in df.columns
+                   else pd.Series([()] * len(df), index=df.index, dtype=object))
+    df["__tumor_types"] = [
+        t if t else ((cv_catalog.PANTS_TUMOR_TYPE,) if (d == "PanTS" and v == 1) else ())
+        for t, d, v in zip(given_types, df["__dataset"], df["__tumor01"])
+    ]
 
     # ---- Sex -> __sex ----
     df["__sex"] = df.get("sex", pd.Series([""]*len(df))).astype(str).str.strip().str.upper()
@@ -1310,7 +1342,9 @@ def _case_key(row) -> int:
     s = _take_first_str(row, ["PanTS ID","PanTS_ID","case_id","id","__case_str"])
     if not s: return 0
     m = re.search(r"(\d+)", str(s))
-    return int(m.group(1)) if m else 0
+    n = int(m.group(1)) if m else 0
+    # CancerVerse sorts after every PanTS id (otherwise PanTS 12 and CV 12 would interleave).
+    return n + CV_SORT_OFFSET if get_dataset_from_case_id(s) == "CancerVerse" else n
 
 def _parse_3tuple_from_row(row, name_candidates: List[str]) -> List[Optional[float]]:
     # 3 個獨立欄
@@ -1359,17 +1393,35 @@ def _voxel_count(row) -> Optional[float]:
 def _spacing_volume(row) -> Optional[float]:
     return _tuple_product(row, ["spacing","voxel_spacing","voxel_size","pixel_spacing"])
 
+_SPACING_NAMES = ["spacing", "voxel_spacing", "voxel_size", "pixel_spacing"]
+_SHAPE_NAMES = ["shape", "dim", "size", "image_shape", "resolution"]
+
+
+def _sum3(vals) -> Optional[float]:
+    return None if any(v is None for v in vals) else float(vals[0] + vals[1] + vals[2])
+
+
+def _prod3(vals) -> Optional[float]:
+    return None if any(v is None or v <= 0 for v in vals) else float(vals[0] * vals[1] * vals[2])
+
+
 def ensure_sort_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """Add the sort/rank helper columns that are missing (idempotent, edits ``df`` in place).
+
+    Deriving them is row by row and costs seconds for tens of thousands of rows, so the
+    catalog tables get them once at startup; /search then finds them already there.
+    """
     if "__case_sortkey" not in df.columns:
-        df["__case_sortkey"] = df.apply(_case_key, axis=1)
-    if "__spacing_sum" not in df.columns:
-        df["__spacing_sum"] = df.apply(_spacing_sum, axis=1)
-    if "__shape_sum" not in df.columns:
-        df["__shape_sum"] = df.apply(_shape_sum, axis=1)
-    if "__voxel_count" not in df.columns:
-        df["__voxel_count"] = df.apply(_voxel_count, axis=1)
-    if "__spacing_volume" not in df.columns:
-        df["__spacing_volume"] = df.apply(_spacing_volume, axis=1)
+        df["__case_sortkey"] = df.apply(_case_key, axis=1) if len(df) else pd.Series(dtype="int64")
+    # Spacing and shape each feed two columns: parse every row once, not twice.
+    for names, wanted in ((_SPACING_NAMES, (("__spacing_sum", _sum3), ("__spacing_volume", _prod3))),
+                          (_SHAPE_NAMES, (("__shape_sum", _sum3), ("__voxel_count", _prod3)))):
+        missing = [(col, fn) for col, fn in wanted if col not in df.columns]
+        if not missing:
+            continue
+        parsed = df.apply(lambda r: _parse_3tuple_from_row(r, names), axis=1) if len(df) else None
+        for col, fn in missing:
+            df[col] = parsed.map(fn) if parsed is not None else pd.Series(dtype="float64")
 
     # Completeness remains useful to keep shuffle candidates fully described.
     need_cols = ["__spacing_sum", "__shape_sum", "__sex", "__age"]
@@ -1406,49 +1458,98 @@ except Exception as _norm_err:
     print(f"[WARN] metadata normalization failed: {_norm_err} — using empty catalog.")
     DF = pd.DataFrame()
 
-# CancerVerse metadata (CT-only second dataset). Loaded through the SAME _norm_cols
-# so search/sort/row_to_item work unchanged. Optional: if the path/CSV is absent
-# (e.g. local dev) DF_CV stays None and CV search returns empty — never raises.
-# The CSV sits NEXT TO the CancerVerse image folder, not inside it:
-#   <parent>/CancerVerse_dataset_metadata.csv   +   <parent>/CancerVerse/image_only/CV_########/
-CANCERVERSE_META_FILE = (
-    os.path.join(os.path.dirname(os.path.normpath(Constants.CANCERVERSE_PATH)),
-                 "CancerVerse_dataset_metadata.csv")
-    if Constants.CANCERVERSE_PATH else None
+# CancerVerse metadata (second dataset). The CSV is rewritten into the PanTS spreadsheet's
+# columns (cv_catalog.normalize_metadata) and then goes through the SAME _norm_cols, so
+# search/sort/row_to_item treat both datasets identically. Optional: if no CSV is found
+# (e.g. local dev) DF_CV stays None and the catalog is PanTS only; it never raises.
+# Where the CSV / tumor case index are looked for: explicit env paths, then the writable
+# update overlay (CANCERVERSE_OVERLAY_PATH), then beside/inside the dataset folder.
+CANCERVERSE_META_FILE = cv_catalog.resolve_metadata_file(
+    Constants.CANCERVERSE_META_FILE, Constants.CANCERVERSE_OVERLAY_PATH, Constants.CANCERVERSE_PATH
+)
+CANCERVERSE_INDEX_FILE = cv_catalog.resolve_index_file(
+    Constants.CANCERVERSE_INDEX_FILE, Constants.CANCERVERSE_OVERLAY_PATH
 )
 DF_CV = None
-if CANCERVERSE_META_FILE and os.path.exists(CANCERVERSE_META_FILE):
+if CANCERVERSE_META_FILE:
     try:
+        _cv_index = cv_catalog.load_case_index(CANCERVERSE_INDEX_FILE)
+        if _cv_index is None:
+            print("[WARN] No CancerVerse case index: tumor status/type shows as unknown for "
+                  "CancerVerse (build one with scripts/build_cancerverse_index.py).")
         DF_CV = merge_case_quality(
-            _norm_cols(pd.read_csv(CANCERVERSE_META_FILE)),
+            _norm_cols(cv_catalog.normalize_metadata(
+                pd.read_csv(CANCERVERSE_META_FILE, low_memory=False), _cv_index,
+            )),
             _CASE_QUALITY,
         )
     except Exception as _cv_err:
         print(f"[WARN] Could not load CancerVerse metadata: {_cv_err}")
         DF_CV = None
 
-def select_dataset_df() -> pd.DataFrame:
-    """Pick the base DataFrame for search by the ?dataset= query param.
+# The sort/rank helper columns are derived row by row (seconds for ~34k rows). Do that once
+# here: /search used to redo it on every request (about 5 s for PanTS alone).
+if len(DF):
+    DF = ensure_sort_cols(DF)
+if DF_CV is not None and len(DF_CV):
+    DF_CV = ensure_sort_cols(DF_CV)
 
-    'pants' (default) → PanTS only (unchanged behaviour); 'cancerverse'/'cv' → CV;
-    'all'/'both' → union of both. Falls back to PanTS when CV isn't loaded.
+# One catalog for users: PanTS first, then CancerVerse.
+DF_ALL = pd.concat([DF, DF_CV], ignore_index=True) if DF_CV is not None else DF
+
+def select_dataset_df() -> pd.DataFrame:
+    """Base DataFrame for search, facets and random.
+
+    Users do not choose a dataset: the default (and 'all'/'both') is the combined catalog.
+    ?dataset=pants or ?dataset=cancerverse still narrows it for API clients.
     """
     ds = (request.args.get("dataset") or "").strip().lower()
+    if ds == "pants":
+        return DF
     if ds in ("cancerverse", "cv"):
         return DF_CV if DF_CV is not None else DF.iloc[0:0]
-    if ds in ("all", "both"):
-        return pd.concat([DF, DF_CV], ignore_index=True) if DF_CV is not None else DF
-    return DF
+    return DF_ALL
+
+def _is_number(text: str) -> bool:
+    """ASCII digits only: str.isdigit() also accepts '²' and '٣', which int() then rejects."""
+    return text.isascii() and text.isdigit()
+
+
+def _exact_case_mask(df: pd.DataFrame, cid: str) -> pd.Series:
+    """Rows whose case id is exactly ``cid``. A bare number means a PanTS case."""
+    s = df["__case_str"].astype(str).str.strip()
+    if _is_number(cid):
+        n = int(cid)
+        nums = pd.to_numeric(s.str.extract(r"(\d+)")[0], errors="coerce")
+        is_pants = (df["__dataset"] == "PanTS") if "__dataset" in df.columns else True
+        return (nums == n) & is_pants
+    norm = cid.upper()
+    m = re.fullmatch(r"(CV|PANTS)_?(\d+)", norm)
+    if m:
+        norm = ("CV_" if m.group(1) == "CV" else "PANTS_") + m.group(2).zfill(8)
+    return s.str.upper() == norm
+
 
 def apply_filters(base: pd.DataFrame, exclude: Optional[Set[str]] = None) -> pd.DataFrame:
     exclude = exclude or set()
     df = base
 
     # --- Case ID / keyword（精準匹配） ---
-    q = (_arg("q") or _arg("caseid") or "").strip()
-    if q and "caseid" not in exclude and "__case_str" in df.columns:
+    # q      keyword search across BOTH datasets ("77" finds PanTS 77 and CancerVerse 77).
+    # caseid exact lookup of one case: a bare number is a PanTS id (as it always was in the
+    #        UI) and CancerVerse ids keep their "CV_" prefix, so merging the two datasets
+    #        cannot make the viewer's metadata lookup for PanTS 8854 return CV 8854.
+    q = (_arg("q") or "").strip()
+    cid = (_arg("caseid") or "").strip()
+    if cid and not q and "caseid" not in exclude and "__case_str" in df.columns:
+        exact = _exact_case_mask(df, cid)
+        if exact.any() or _is_number(cid):
+            df = df[exact]
+        else:   # not a full id: keep the old substring behaviour for API clients
+            df = df[df["__case_str"].astype(str).str.contains(re.escape(cid), na=False, case=False, regex=False)]
+    elif q and "caseid" not in exclude and "__case_str" in df.columns:
         s = df["__case_str"].astype(str)
-        if q.isdigit():
+        if _is_number(q):
             # 把每列所有數字 token 抓出來，做數值等號；77 不會吃 177/077（前導 0 忽略）
             qq = int(q)
             nums = s.str.findall(r"\d+")
@@ -1471,6 +1572,18 @@ def apply_filters(base: pd.DataFrame, exclude: Optional[Set[str]] = None) -> pd.
             df = df[df["__tumor01"].isna()] if tnull == 1 else df[df["__tumor01"].notna()]
         elif tv in (0, 1):
             df = df[df["__tumor01"] == tv]
+
+    # --- Tumor type (organ of the tumor; PanTS tumors are pancreatic) ---
+    wanted_types = {
+        part.strip().lower()
+        for value in _collect_list_params(["tumor_type", "tumor_type[]"])
+        for part in re.split(r"[;|]+", value)       # commas are already split by the collector
+        if part.strip()
+    }
+    if wanted_types and "__tumor_types" in df.columns and "tumor_type" not in exclude:
+        df = df[df["__tumor_types"].map(
+            lambda ts: bool(wanted_types.intersection(ts)) if isinstance(ts, (tuple, list, set)) else False
+        )]
 
     # --- Sex（多選 + Unknown）---
     sv_list = _collect_list_params(["sex", "sex[]"])
@@ -1655,10 +1768,17 @@ def row_to_item(row: pd.Series) -> Dict[str, Any]:
             return row[col]
         return fallback
 
+    types = row.get("__tumor_types")
+    types = list(types) if isinstance(types, (tuple, list, set)) else []
+
     return {
         "PanTS ID": _nan2none(pick("case") or row.get("__case_str")),
         "case_id":  _nan2none(pick("case") or row.get("__case_str")),
+        "dataset":  _nan2none(row.get("__dataset")),
         "tumor":    (int(row.get("__tumor01")) if pd.notna(row.get("__tumor01")) else None),
+        # Organ(s) with a tumor, e.g. ["pancreas"] or ["liver", "kidney"], and a display string.
+        "tumor types": types,
+        "tumor label": ", ".join(cv_catalog.tumor_type_label(t) for t in types) or None,
         "sex":      _nan2none(row.get("__sex")),
         "age":      _nan2none(row.get("__age")),
         "ct phase": _nan2none(pick("ct_phase") or row.get("__ct")),

@@ -39,6 +39,7 @@ function toPreviewData(items: SearchItem[]) {
       sex: it.sex ?? "",
       age: Number(it.age) || 0,
       tumor: it.tumor === 1 ? 1 : it.tumor === 0 ? 0 : null,
+      tumorLabel: it.tumor === 1 ? (it["tumor label"] ?? null) : null,
     };
   }
   return { ids, meta };
@@ -83,7 +84,13 @@ export function useDashboard() {
 
   const handleToggleSave = (id: CaseId, meta?: PreviewType) => {
     const m = meta ?? previewMetadata[id];
-    toggleSavedCase({ id, sex: m?.sex ?? "", age: m?.age ?? 0, tumor: m?.tumor ?? null });
+    toggleSavedCase({
+      id,
+      sex: m?.sex ?? "",
+      age: m?.age ?? 0,
+      tumor: m?.tumor ?? null,
+      tumorLabel: m?.tumorLabel ?? null,
+    });
   };
 
   // Cases picked for side-by-side comparison (max 2). Adding a third drops the oldest.
@@ -172,7 +179,7 @@ export function useDashboard() {
   const loadFacetOptions = async () => {
     try {
       const params = new URLSearchParams();
-      params.set("fields", "tumor,sex,manufacturer,ct_phase,site_nat,year");
+      params.set("fields", "tumor,tumor_type,sex,manufacturer,ct_phase,site_nat,year");
       params.set("top_k", "8");
       const res = await fetch(`${API_BASE}/api/facets?${params.toString()}`);
       const data = await res.json();
@@ -180,7 +187,6 @@ export function useDashboard() {
         counts: data.facets ?? {},
         unknown: data.unknown_counts ?? {},
         total: data.total ?? 0,
-        datasetCounts: data.dataset_counts ?? {},
       });
     } catch (e) {
       console.error(e);
