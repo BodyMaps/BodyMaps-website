@@ -43,6 +43,7 @@ const SignupRedirect = lazyRoute(() => import("./routes/SignupRedirect"));
 const ResetPassword = lazyRoute(() => import("./routes/ResetPassword"));
 const VerifyEmail = lazyRoute(() => import("./routes/VerifyEmail"));
 const LegalPage = lazyRoute(() => import("./routes/LegalPage"));
+const ContactPage = lazyRoute(() => import("./routes/ContactPage"));
 const SharePatientCard = lazyRoute(() => import("./routes/SharePatientCard"));
 
 const BASENAME = import.meta.env.VITE_BASENAME;
@@ -159,7 +160,7 @@ function ProtectedRoutes() {
 function AuthSurface() {
   const { isAuthenticated, loading } = useAuth();
   const { pathname } = useLocation();
-  const publicPage = ["", "/upload", "/team", "/local-nifti", "/dicom", "/terms", "/privacy", "/reset-password", "/verify-email", "/signup", "/login"].includes(pathname.replace(/\/+$/, ""));
+  const publicPage = ["", "/upload", "/team", "/contact", "/local-nifti", "/dicom", "/terms", "/privacy", "/reset-password", "/verify-email", "/signup", "/login"].includes(pathname.replace(/\/+$/, ""));
   return <AuthModal standalone={!publicPage && !loading && !isAuthenticated} />;
 }
 
@@ -195,6 +196,7 @@ function App() {
                     <Route path="/" element={<UploadPage />} />
                     <Route path="/upload" element={<UploadPage />} />
                     <Route path="/team" element={<TeamPage />} />
+                    <Route path="/contact" element={<ContactPage />} />
                   </Route>
                   <Route path="/dicom" element={<VisualizationPage />} />
                   <Route path="/local-nifti" element={<VisualizationPage />} />
