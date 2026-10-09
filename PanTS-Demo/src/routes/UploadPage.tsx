@@ -16,6 +16,17 @@ const activateOption = (event: React.KeyboardEvent<HTMLElement>) => {
   }
 };
 
+// The LesionSegmenter row only opens its lesion submenu, so from the keyboard Enter,
+// Space or ArrowRight moves into that submenu, on the checked lesion or the first one.
+const focusLesionChoice = (event: React.KeyboardEvent<HTMLElement>) => {
+  if (event.target !== event.currentTarget || !["Enter", " ", "ArrowRight"].includes(event.key)) return;
+  const items = event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitemradio"]');
+  const choice = Array.from(items).find((item) => item.getAttribute("aria-checked") === "true") ?? items[0];
+  if (!choice) return;
+  event.preventDefault();
+  choice.focus();
+};
+
 const LESION_OPTIONS: {
   id: "pancreatic" | "liver" | "kidney" | "colon";
   label: string;
@@ -496,6 +507,13 @@ const UploadPage: React.FC = () => {
   const [couponValue, setCouponValue] = useState("");
   const [couponBusy, setCouponBusy] = useState(false);
   const [couponError, setCouponError] = useState<string | null>(null);
+  // The input is disabled while the server checks a code, so focus falls to the page;
+  // a granted code also removes the whole coupon block. When the check was started from
+  // the keyboard, focus goes back to the input after a refusal and to the open model
+  // menu after a grant. A check started with the mouse leaves focus alone.
+  const couponInputRef = useRef<HTMLInputElement>(null);
+  const couponByPointerRef = useRef(false);
+  const couponRefocusRef = useRef<"input" | "menu" | null>(null);
   // LesionSegmenter computes liver/pancreatic/kidney/colon lesions in one pass;
   // this selects which lesion to feature.
   const [lesionTarget, setLesionTarget] = useState<
@@ -536,6 +554,7 @@ const UploadPage: React.FC = () => {
     event.preventDefault();
     const coupon = couponValue.trim();
     if (!coupon || couponBusy) return;
+    const fromKeyboard = !couponByPointerRef.current;
     setCouponBusy(true);
     setCouponError(null);
     try {
@@ -543,8 +562,10 @@ const UploadPage: React.FC = () => {
       setCouponValue("");
       setCouponOpen(false);
       setMessage("Sponsored access enabled. All models are now available.");
+      if (fromKeyboard) couponRefocusRef.current = "menu";
     } catch (error) {
       setCouponError(error instanceof Error ? error.message : "That access coupon could not be redeemed.");
+      if (fromKeyboard) couponRefocusRef.current = "input";
     } finally {
       setCouponBusy(false);
     }
@@ -1196,6 +1217,21 @@ const UploadPage: React.FC = () => {
     document.addEventListener("keydown", closeMenus);
     return () => document.removeEventListener("keydown", closeMenus);
   }, [modelDropOpen]);
+
+  useEffect(() => {
+    const target = couponRefocusRef.current;
+    if (couponBusy || !target) return;
+    couponRefocusRef.current = null;
+    // Only when focus was lost; someone who moved on meanwhile keeps their place.
+    const active = document.activeElement as HTMLElement | null;
+    if (active && active !== document.body && active.isConnected && !active.matches(":disabled")) return;
+    if (target === "input") {
+      couponInputRef.current?.focus();
+      return;
+    }
+    const menu = modelDropRef.current?.querySelector<HTMLElement>("#segmentation-options");
+    (menu?.querySelector<HTMLElement>('[role="button"].selected') ?? menu?.querySelector<HTMLElement>('[role="button"]'))?.focus();
+  }, [couponBusy]);
 
   const focusComposer = useCallback(() => {
     const target = document.querySelector<HTMLButtonElement>("[data-composer-focus]");
@@ -2585,7 +2621,7 @@ const UploadPage: React.FC = () => {
             {/* Step 2: Model */}
             <div className="pipeline-step" data-tour="model">
               <div className="pipeline-step-header">
-                <div className="pipeline-badge">2</div>
+                <div className="pipeline-badge" aria-hidden="true">2</div>
                 <span className="pipeline-label">Model</span>
               </div>
               <div className="model-dropdown" ref={modelDropRef}>
@@ -2636,7 +2672,8 @@ const UploadPage: React.FC = () => {
                         key={m.id}
                         role="button"
                         tabIndex={0}
-                        onKeyDown={activateOption}
+                        aria-current={!locked && selectedModel === m.id ? "true" : undefined}
+                        onKeyDown={hasSubmenu ? focusLesionChoice : activateOption}
                         className={`model-dropdown-item${selectedModel === m.id ? " selected" : ""}${locked ? " locked" : ""}${hasSubmenu ? " has-submenu" : ""}`}
                         onClick={() => {
                           if (locked) {
@@ -2762,6 +2799,8 @@ const UploadPage: React.FC = () => {
                         <button
                           type="button"
                           className="model-dropdown-access__toggle"
+                          aria-expanded={couponOpen}
+                          aria-controls={couponOpen ? "admin-access-coupon-form" : undefined}
                           onClick={() => {
                             setCouponOpen((open) => !open);
                             setCouponError(null);
@@ -2770,10 +2809,17 @@ const UploadPage: React.FC = () => {
                           Have an admin access coupon?
                         </button>
                         {couponOpen && (
-                          <form className="model-dropdown-access__form" onSubmit={submitAdminCoupon}>
+                          <form
+                            id="admin-access-coupon-form"
+                            className="model-dropdown-access__form"
+                            onSubmit={submitAdminCoupon}
+                            onPointerDown={() => { couponByPointerRef.current = true; }}
+                            onKeyDown={() => { couponByPointerRef.current = false; }}
+                          >
                             <label htmlFor="admin-access-coupon">Access coupon</label>
                             <div className="model-dropdown-access__row">
                               <input
+                                ref={couponInputRef}
                                 id="admin-access-coupon"
                                 type="password"
                                 value={couponValue}
