@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { APP_CONSTANTS } from '../../helpers/constants';
+import { appRootRelativeUrl } from '../../liveRooms/protocol';
 import FindingsTimeline from './FindingsTimeline';
 import SourceReportDetails from './SourceReportDetails';
 import { formatMeasurement, getSourceReportText, labelize, normalizeReportData, splitOrgans } from '../../helpers/reportFindings';
@@ -21,6 +22,9 @@ type Lang = 'patient' | 'clinical';
 type Step = number;
 
 const REPORT_CACHE_TTL_MS = 60_000;
+// A request that hangs (a stalled proxy, or dataset storage that has not been declared
+// down yet) ends here as "Report unavailable." with Try again instead of an endless spinner.
+const REPORT_DATA_TIMEOUT_MS = 30_000;
 const cache = new Map<string, { data: ReportData; expiresAt: number }>();
 const reportDataRequests = new Map<string, Promise<ReportData | null>>();
 
@@ -32,14 +36,22 @@ export function prefetchReportData(id: string): Promise<ReportData | null> {
   cache.delete(key);
   const inFlight = reportDataRequests.get(key);
   if (inFlight) return inFlight;
-  const request = fetch(`${APP_CONSTANTS.API_ORIGIN}/api/get-report-data/${encodeURIComponent(id)}`, { cache: 'no-store' })
+  const loaded = fetch(`${APP_CONSTANTS.API_ORIGIN}/api/get-report-data/${encodeURIComponent(id)}`, { cache: 'no-store' })
     .then(async response => response.ok ? normalizeReportData(await response.json()) : null)
     .then(report => {
       if (report) cache.set(key, { data: report, expiresAt: Date.now() + REPORT_CACHE_TTL_MS });
       return report;
     })
-    .catch(() => null)
-    .finally(() => reportDataRequests.delete(key));
+    .catch(() => null);
+  // The deadline settles the request as unavailable; an answer that still arrives later
+  // fills the cache, so Try again can use it.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), REPORT_DATA_TIMEOUT_MS); });
+  const request = Promise.race([loaded, deadline])
+    .finally(() => {
+      clearTimeout(timer);
+      reportDataRequests.delete(key);
+    });
   reportDataRequests.set(key, request);
   return request;
 }
@@ -155,6 +167,9 @@ function EvidencePanel({ curOrgan, curData, data, anim, lang }: {
   </div>;
 }
 
+const COPY_FAILED_NOTE = "Couldn't copy the link. Select it and copy it yourself.";
+const SHARE_FAILED_NOTE = "Couldn't create a link. Try again.";
+
 export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlight, onClearHighlight, onHideOrgans }: Props) {
   void onViewChange;
   const [requestState, setRequestState] = useState<{ id: string; data: ReportData | null; loading: boolean }>({ id, data: null, loading: true });
@@ -166,6 +181,14 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
   const [modePromptOpen, setModePromptOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const shareLinkRef = useRef<HTMLInputElement>(null);
+  const shareBtnRef = useRef<HTMLButtonElement>(null);
+  const shareCopyBtnRef = useRef<HTMLButtonElement>(null);
+  const shareRetryBtnRef = useRef<HTMLButtonElement>(null);
+  // Set when a retry succeeds while Try again holds focus; see the effect below.
+  const refocusCopyRef = useRef(false);
+  const [shareFailed, setShareFailed] = useState(false);
   // Opaque share link, minted on demand (see mintShareLink below) —
   // this used to be a raw `${API_ORIGIN}/api/report/${id}` string built
   // straight from the real case id. That exposed the real id in the URL and
@@ -174,6 +197,8 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
   const [shareLoading, setShareLoading] = useState(false);
   const currentCaseRef = useRef(id);
   currentCaseRef.current = id;
+  // Bumped by Try again on "Report unavailable." to ask for the report once more.
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -188,12 +213,13 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
       setRequestState({ id, data: report, loading: false });
     });
     return () => { active = false; };
-  }, [id]);
+  }, [id, loadAttempt]);
 
   // Reset any previously-minted link when the case changes, so a stale
   // token for a different case can never be shown/copied.
   useEffect(() => {
     setShareUrl(null);
+    setShareFailed(false);
   }, [id]);
 
   // Mints (or re-derives — the backend token is deterministic per case id)
@@ -205,21 +231,48 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
     setShareLoading(true);
     try {
       const r = await fetch(`${APP_CONSTANTS.API_ORIGIN}/api/share/${id}/token`, { method: 'POST' });
+      if (!r.ok) throw new Error(`Share token request failed with status ${r.status}`);
       const j = await r.json();
       const token = typeof j.url === 'string' ? j.url.split('/').pop() : null;
       if (currentCaseRef.current !== id) return;
-      if (token) setShareUrl(`${window.location.origin}/share/${token}`);
+      if (!token) throw new Error('Share token response had no link');
+      refocusCopyRef.current = !!shareRetryBtnRef.current && document.activeElement === shareRetryBtnRef.current;
+      // Under the app's base path, so a deployment on a sub-path shares a link that opens.
+      setShareUrl(`${window.location.origin}${appRootRelativeUrl(`/share/${token}`)}`);
+      setShareFailed(false);
     } catch (e) {
       console.error('Failed to create share link:', e);
+      if (currentCaseRef.current === id) setShareFailed(true);
     } finally {
       if (currentCaseRef.current === id) setShareLoading(false);
     }
   }, [id, shareUrl, shareLoading]);
 
+  // A successful retry unmounts the focused Try again button, which would drop
+  // focus to <body>. Hand it to the Copy button, which is now enabled.
+  useEffect(() => {
+    if (!shareUrl || !refocusCopyRef.current) return;
+    refocusCopyRef.current = false;
+    shareCopyBtnRef.current?.focus({ preventScroll: true });
+  }, [shareUrl]);
+
+  // A failed copy note belongs to one opening of the popover, so it is cleared on close.
+  useEffect(() => {
+    if (!shareOpen) setCopyFailed(false);
+  }, [shareOpen]);
+
+  // Closing the popover unmounts whatever inside it had focus, which drops focus
+  // to <body>. When focus was inside, hand it back to the Share button.
+  const closeShare = useCallback(() => {
+    const inside = !!document.getElementById('rs-share-popover')?.contains(document.activeElement);
+    setShareOpen(false);
+    if (inside) shareBtnRef.current?.focus({ preventScroll: true });
+  }, []);
+
   useEffect(() => {
     if (!shareOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShareOpen(false); };
-    const onClick = () => setShareOpen(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeShare(); };
+    const onClick = () => closeShare();
     document.addEventListener('keydown', onKey);
     // Deferred so the same click that opened the popover doesn't immediately close it.
     const t = setTimeout(() => document.addEventListener('click', onClick), 0);
@@ -228,16 +281,22 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
       document.removeEventListener('click', onClick);
       clearTimeout(t);
     };
-  }, [shareOpen]);
+  }, [shareOpen, closeShare]);
 
   const handleCopyShareLink = async () => {
     if (!shareUrl) return;
+    setCopyFailed(false);
     try {
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {
       console.error('Copy failed:', e);
+      // No clipboard here (plain http, some in-app browsers): select the link so
+      // the reader can copy it by hand.
+      setCopyFailed(true);
+      shareLinkRef.current?.focus();
+      shareLinkRef.current?.select();
     }
   };
 
@@ -323,7 +382,10 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
             : `.render { filter: none !important; transform: translateX(0) !important; transition: filter 0.45s cubic-bezier(0.22,1,0.36,1), transform 0.45s cubic-bezier(0.22,1,0.36,1) !important; }`}</style>
       <div style={{ position: 'fixed', inset: 0, zIndex: 10001, pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
         <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, margin: 0 }}>Report unavailable.</p>
-        <button onClick={onClose} style={{ fontSize: 11, background: 'rgba(255,255,255,0.06)', border: '0.5px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.5)', borderRadius: 8, padding: '7px 20px', cursor: 'pointer', fontFamily: 'inherit' }}>Close</button>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button type="button" onClick={() => setLoadAttempt(n => n + 1)} style={{ fontSize: 11, background: 'rgba(255,255,255,0.06)', border: '0.5px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.5)', borderRadius: 8, padding: '7px 20px', cursor: 'pointer', fontFamily: 'inherit' }}>Try again</button>
+          <button onClick={onClose} style={{ fontSize: 11, background: 'rgba(255,255,255,0.06)', border: '0.5px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.5)', borderRadius: 8, padding: '7px 20px', cursor: 'pointer', fontFamily: 'inherit' }}>Close</button>
+        </div>
       </div>
     </div>
   );
@@ -390,6 +452,7 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
               )}
               <div style={{ position: 'relative' }}>
                 <button
+                  ref={shareBtnRef}
                   onClick={() => { setShareOpen((v) => !v); mintShareLink(); }}
                   style={{
                     display: 'flex',
@@ -411,6 +474,7 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
 
                 {shareOpen && (
                   <div
+                    id="rs-share-popover"
                     onClick={(e) => e.stopPropagation()}
                     style={{
                     position: 'absolute', top: 'calc(100% + 10px)', right: 0, zIndex: 20000,
@@ -422,14 +486,23 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
                       {getSourceReportText(data) && ' Anyone with the link can expand and read its unverified source reference.'}
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <div style={{
-                        flex: 1, minWidth: 0, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
-                        borderRadius: 10, padding: '8px 10px', fontSize: 12, color: 'rgba(255,255,255,0.65)',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}>
-                        {shareLoading ? 'Generating link…' : (shareUrl || 'Link unavailable')}
-                      </div>
+                      {/* A read-only field, so the link can be selected and copied by hand
+                          when the clipboard is refused. */}
+                      <input
+                        ref={shareLinkRef}
+                        type="text"
+                        readOnly
+                        aria-label="Share link"
+                        value={shareLoading ? 'Generating link…' : (shareUrl || 'Link unavailable')}
+                        onFocus={(e) => e.currentTarget.select()}
+                        style={{
+                          flex: 1, minWidth: 0, boxSizing: 'border-box', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+                          borderRadius: 10, padding: '8px 10px', fontSize: 12, fontFamily: 'inherit', color: 'rgba(255,255,255,0.65)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}
+                      />
                       <button
+                        ref={shareCopyBtnRef}
                         onClick={handleCopyShareLink}
                         disabled={!shareUrl}
                         style={{
@@ -445,7 +518,28 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
                       >
                         {copied ? 'Copied' : 'Copy'}
                       </button>
+                      <span className="sr-only" role="status">{copied ? 'Link copied' : copyFailed ? COPY_FAILED_NOTE : shareFailed && !shareLoading ? SHARE_FAILED_NOTE : ''}</span>
                     </div>
+                    {/* The retry row stays mounted while a retry runs, so the focused Try again button keeps focus. */}
+                    {shareFailed && !shareUrl && (
+                      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, lineHeight: 1.45, color: 'rgba(251,191,36,0.92)' }}>
+                        <span aria-hidden="true">{shareLoading ? 'Generating link…' : "Couldn't create a link."}</span>
+                        <button
+                          ref={shareRetryBtnRef}
+                          type="button"
+                          onClick={mintShareLink}
+                          aria-disabled={shareLoading || undefined}
+                          style={{ flexShrink: 0, background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 10, padding: '6px 10px', cursor: shareLoading ? 'progress' : 'pointer', opacity: shareLoading ? 0.6 : 1, fontFamily: 'inherit', fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.86)' }}
+                        >
+                          Try again
+                        </button>
+                      </div>
+                    )}
+                    {copyFailed && (
+                      <div aria-hidden="true" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.45, color: 'rgba(251,191,36,0.92)' }}>
+                        {COPY_FAILED_NOTE}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
