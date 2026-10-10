@@ -45,5 +45,5 @@ tzlocal==5.4.4
 urllib3==2.2.3
 Werkzeug==3.0.3
 websockets==17.1
-wheel==0.45.1
+wheel==0.48.0
 # flupg
