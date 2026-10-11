@@ -178,3 +178,40 @@ def test_stage_state_failure_prevents_model_execution(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError, match="Cannot persist stage state"):
         adapter.run_auto_segmentation("unused", str(tmp_path), "ePAI", on_start=stage_start)
     assert not calls
+
+
+@pytest.mark.parametrize("activate_conda", [False, True])
+def test_epai_requests_export_and_publishes_mask_and_measurements(monkeypatch, tmp_path, activate_conda):
+    original = save(tmp_path / "scan.nii", np.zeros((3, 3, 3), np.float32))
+    before = Path(original).read_bytes()
+    session = tmp_path / "session"
+    activation = tmp_path / "conda.sh"
+    activation.write_text("# fixture")
+    monkeypatch.setenv("EPAI_REMOTE_ENABLED", "false")
+    monkeypatch.setattr(adapter, "get_least_used_gpu", lambda: "0")
+    monkeypatch.setattr(adapter, "_env_command", lambda *args: "fixture-nnunet")
+
+    def exporter(command, **kwargs):
+        # Mirrors the installed ePAI exporter's observed contract: the CLI can
+        # return success without files when probability export is omitted.
+        if "--save_probabilities" in command.split():
+            native = np.zeros((3, 3, 3), np.uint8)
+            native[0, 0, :3] = [12, 13, 23]  # liver, pancreas, pancreatic lesion
+            save(session / "epai/out/CASE_scan.nii.gz", native)
+            (session / "epai/output.csv").write_text("BDMAP ID,fixture_measurement\nCASE_scan,1\n")
+
+    monkeypatch.setattr(adapter, "_tracked_run", exporter)
+    output = Path(adapter._run_epai_inference(original, str(session), str(activation) if activate_conda else "", "epai", ""))
+    assert np.array_equal(np.asarray(nib.load(str(output / "combined_labels.nii.gz")).dataobj)[0, 0, :3], [14, 17, 22])
+    assert "CASE_scan,1" in (output / "output.csv").read_text()
+    assert Path(original).read_bytes() == before
+
+
+def test_epai_exit_zero_without_mask_is_still_a_failure(monkeypatch, tmp_path):
+    original = save(tmp_path / "scan.nii", np.zeros((3, 3, 3), np.float32))
+    monkeypatch.setenv("EPAI_REMOTE_ENABLED", "false")
+    monkeypatch.setattr(adapter, "get_least_used_gpu", lambda: "0")
+    monkeypatch.setattr(adapter, "_env_command", lambda *args: "fixture-nnunet")
+    monkeypatch.setattr(adapter, "_tracked_run", lambda *args, **kwargs: None)
+    with pytest.raises(RuntimeError, match="Expected ePAI output not found"):
+        adapter._run_epai_inference(original, str(tmp_path / "session"), "", "epai", "")

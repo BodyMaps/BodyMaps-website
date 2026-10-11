@@ -757,6 +757,9 @@ def _ensure_output_csv_template(output_csv_path: str, case_id: str):
 
 
 def _run_epai_inference(input_path: str, session_dir: str, conda_path: str, epai_env_name: str, fallback_script_path: str):
+    # ePAI's custom exporter gates BOTH its mask and measurement CSV on this
+    # flag. Without it the CLI can exit 0 after prediction but write no result.
+    # This applies to ePAI, not to the separate Atlas/LesionSegmenter CLIs.
     case_id = _normalize_case_id(input_path)
 
     epai_workspace = os.path.join(session_dir, "epai")
@@ -821,6 +824,7 @@ def _run_epai_inference(input_path: str, session_dir: str, conda_path: str, epai
                 f"-f all "
                 f"--input_csv {shlex.quote(input_csv_path)} "
                 f"--output_csv {shlex.quote(output_csv_path)} "
+                f"--save_probabilities "
                 f"--continue_prediction "
                 f"-npp {shlex.quote(os.getenv('EPAI_NPP', '3'))} "
                 f"-nps {shlex.quote(os.getenv('EPAI_NPS', '3'))} "
@@ -866,6 +870,7 @@ def _run_epai_inference(input_path: str, session_dir: str, conda_path: str, epai
                     f"-f all "
                     f"--input_csv {shlex.quote(input_csv_path)} "
                     f"--output_csv {shlex.quote(output_csv_path)} "
+                    f"--save_probabilities "
                     f"--continue_prediction "
                     f"-npp {shlex.quote(os.getenv('EPAI_NPP', '3'))} "
                     f"-nps {shlex.quote(os.getenv('EPAI_NPS', '3'))} "
@@ -1445,6 +1450,7 @@ def _run_epai_remote_inference(
         f"-f all "
         f"--input_csv {shlex.quote(remote_input_csv)} "
         f"--output_csv {shlex.quote(remote_output_csv)} "
+        f"--save_probabilities "
         f"--continue_prediction "
         f"-npp {shlex.quote(os.getenv('EPAI_NPP', '3'))} "
         f"-nps {shlex.quote(os.getenv('EPAI_NPS', '3'))} "
