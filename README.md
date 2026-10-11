@@ -15,9 +15,10 @@ start Ollama.
 
 Dataset viewer supports temporary, signed-in collaborative review at `/live/<room-id>#<room-key>`. Up to eight equal editors can collaborate for 24 hours, then room files expire. Exports include edited labelmap, annotations, notes, chat, event history, and report without changing canonical dataset files.
 
-Website features, including dataset browsing, viewers, shared reports and Live
-Rooms, require a signed-in account. Login, account recovery, verification and
-legal pages remain public. See [website access policy](docs/website-access-policy.md),
+Workspace, Team and browser-only local scan viewing are public. Dataset browsing,
+server uploads and inference, saved results, shared reports and Live Rooms require
+a signed-in account. Login, account recovery, verification and legal pages remain
+public. See [website access policy](docs/website-access-policy.md),
 [profile pictures](flask-server/deploy/PROFILE_PICTURES.md) and
 [session retention](flask-server/deploy/SESSION_RETENTION.md) for deployment details.
 

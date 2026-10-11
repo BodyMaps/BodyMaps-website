@@ -17,6 +17,8 @@ export type RecentUpload = {
 	// Choices captured when Run was pressed, never read from later composer state.
 	pipeline?: InferenceSelection;
 	pipelineStages?: PipelineStage[];
+	// Local UI review marker only; excluded from the actual server pipeline.
+	preprocessingPreview?: "OpenVAE";
 	status: RecentUploadStatus;
 	timestamp: number;
 	isReconstruction?: boolean;

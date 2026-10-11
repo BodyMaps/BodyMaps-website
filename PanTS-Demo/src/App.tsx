@@ -82,7 +82,7 @@ function ProtectedRoutes() {
 function AuthSurface() {
   const { isAuthenticated, loading } = useAuth();
   const { pathname } = useLocation();
-  const publicPage = ["/terms", "/privacy", "/reset-password", "/verify-email", "/signup"].includes(pathname.replace(/\/+$/, ""));
+  const publicPage = ["", "/upload", "/team", "/local-nifti", "/dicom", "/terms", "/privacy", "/reset-password", "/verify-email", "/signup", "/login"].includes(pathname.replace(/\/+$/, ""));
   return <AuthModal standalone={!publicPage && !loading && !isAuthenticated} />;
 }
 
@@ -103,12 +103,16 @@ function App() {
               <ScrollToTopButton />
               <Suspense fallback={<RouteFallback />}>
                 <Routes>
+                  <Route element={<DesignShell />}>
+                    <Route path="/" element={<UploadPage />} />
+                    <Route path="/upload" element={<UploadPage />} />
+                    <Route path="/team" element={<TeamPage />} />
+                  </Route>
+                  <Route path="/dicom" element={<VisualizationPage />} />
+                  <Route path="/local-nifti" element={<VisualizationPage />} />
                   <Route element={<ProtectedRoutes />}>
                     <Route element={<DesignShell />}>
-                      <Route path="/" element={<UploadPage />} />
-                      <Route path="/upload" element={<UploadPage />} />
                       <Route path="/dashboard" element={<Homepage />} />
-                      <Route path="/team" element={<TeamPage />} />
                       <Route path="/account" element={<SettingsPage />}>
                         <Route index element={<ProfileSettings />} />
                         <Route path="plan" element={<PlanSettings />} />
@@ -120,8 +124,6 @@ function App() {
                     </Route>
                     <Route path="/case/:caseId" element={<CaseRoute><VisualizationPage /></CaseRoute>} />
                     <Route path="/session/:sessionId" element={<VisualizationPage />} />
-                    <Route path="/dicom" element={<VisualizationPage />} />
-                    <Route path="/local-nifti" element={<VisualizationPage />} />
                     <Route path="/reconstruction/:reconstructionId" element={<VisualizationPage />} />
                     <Route path="/live/:roomId" element={<LiveRoomPage />} />
                     <Route path="/live/challenge/:challengeId" element={<SoloChallengePage />} />
@@ -133,7 +135,7 @@ function App() {
                   </Route>
                   <Route path="/home.html" element={<Navigate to="/" replace />} />
                   <Route path="/api" element={<Navigate to="/upload" replace />} />
-                  <Route path="/login" element={<Navigate to="/" replace />} />
+                  <Route path="/login" element={<SignupRedirect mode="signin" />} />
                   <Route path="/signup" element={<SignupRedirect />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
                   <Route path="/verify-email" element={<VerifyEmail />} />

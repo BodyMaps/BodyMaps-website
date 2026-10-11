@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import DesignShell from "../components/DesignShell";
 import { recentUploadsStorageKey, setRecentUploadsAccount } from "../helpers/recentUploads";
 
+const auth = vi.hoisted(() => ({ isAuthenticated: true }));
+vi.mock("../contexts/authContext", () => ({ useAuth: () => auth }));
+
 vi.mock("../components/AuthButton", () => ({ default: () => <button type="button">Account controls</button> }));
 vi.mock("../components/WorkspaceTour", () => ({ default: () => null }));
 vi.mock("../components/SiteFooter", () => ({ default: () => <footer>Site footer</footer> }));
@@ -12,9 +15,16 @@ const Location = () => { const { pathname, search } = useLocation(); return <out
 const mount = (path = "/dashboard") => render(<MemoryRouter initialEntries={[path]}>
     <Routes><Route element={<DesignShell />}><Route path="*" element={<Location />} /></Route></Routes>
 </MemoryRouter>);
-beforeEach(() => { localStorage.clear(); setRecentUploadsAccount("u1"); });
+beforeEach(() => { localStorage.clear(); setRecentUploadsAccount("u1"); auth.isAuthenticated = true; });
 
 describe("workspace sidebar", () => {
+    it.each(["Workspace", "New run"])("guest %s keeps the public workspace mounted", async (action) => {
+        auth.isAuthenticated = false;
+        const user = userEvent.setup(); mount("/");
+        await user.click(screen.getByRole(action === "Workspace" ? "link" : "button", { name: action }));
+        expect(screen.getByLabelText("Current route")).toHaveTextContent(/^\/$/);
+    });
+
     it("uses real routes for workspace, dataset and team", async () => {
         const user = userEvent.setup();
         mount();

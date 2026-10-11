@@ -4,12 +4,14 @@ import { IconLayoutSidebar, IconLayoutGrid, IconFocusCentered, IconUsers, IconPl
 import AuthButton from "./AuthButton";
 import SiteFooter from "./SiteFooter";
 import WorkspaceTour from "./WorkspaceTour";
+import { useAuth } from "../contexts/authContext";
 import { groupUploads, isGroupInFlight, loadRecentUploads, markRecentUploadViewed, RECENT_UPLOADS_CHANGED, isRecentUploadsStorageKey, type UploadGroup } from "../helpers/recentUploads";
 import "./DesignShell.css";
 
 const COLLAPSED_KEY = "bodymaps.sidebar.collapsed";
 
 export default function DesignShell() {
+  const { isAuthenticated } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => {
@@ -19,8 +21,24 @@ export default function DesignShell() {
   const [recent, setRecent] = useState(loadRecentUploads);
   const [tourRequest, setTourRequest] = useState(0);
   const sidebar = useRef<HTMLElement>(null);
+  const content = useRef<HTMLElement>(null);
   const mobileButton = useRef<HTMLButtonElement>(null);
   const previousPath = useRef(location.pathname);
+  const isWorkspace = location.pathname === "/" || location.pathname === "/upload";
+  const navIndex = location.pathname === "/team" ? 2 : location.pathname === "/dashboard" ? 1 : isWorkspace ? 0 : -1;
+
+  useEffect(() => {
+    const element = content.current;
+    if (!element) return;
+    element.scrollTop = 0;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || !element.animate) return;
+    // Animate the existing outlet, without remounting upload/session state.
+    const animation = element.animate([
+      { opacity: 0, transform: "translateY(14px)" },
+      { opacity: 1, transform: "translateY(0)" },
+    ], { duration: 650, easing: "cubic-bezier(.22,1,.36,1)" });
+    return () => animation.cancel();
+  }, [location.pathname]);
 
   useEffect(() => {
     const refresh = () => setRecent(loadRecentUploads());
@@ -80,7 +98,7 @@ export default function DesignShell() {
     setMobileOpen(false);
   };
 
-  return <div className={`design-shell${collapsed ? " is-collapsed" : ""}${mobileOpen ? " is-mobile-open" : ""}`}>
+  return <div className={`design-shell${isWorkspace ? " is-workspace" : ""}${collapsed ? " is-collapsed" : ""}${mobileOpen ? " is-mobile-open" : ""}`}>
     <a className="design-skip-link" href="#workspace-content">Skip to content</a>
     <div className="design-frame">
       <header className="design-mobile-bar" data-tour="mobile-navigation">
@@ -97,6 +115,7 @@ export default function DesignShell() {
         <button className="design-new-run" type="button" onClick={newRun} title="New run" data-tour="new-run"><IconPlus size={19} /><span className="sidebar-label">New run</span></button>
         <div className="design-nav-caption sidebar-label">Explore</div>
         <nav className="design-nav" aria-label="Main navigation" data-tour="explore">
+          <span className="design-nav-indicator" aria-hidden="true" style={{ opacity: navIndex < 0 ? 0 : 1, transform: `translateY(${Math.max(0, navIndex) * 44}px)` }} />
           <NavLink to="/" end className={({ isActive }) => isActive || location.pathname === "/upload" ? "active" : ""} title="Workspace"><IconFocusCentered size={19} /><span className="sidebar-label">Workspace</span></NavLink>
           <NavLink to="/dashboard" title="Dataset"><IconLayoutGrid size={19} /><span className="sidebar-label">Dataset</span></NavLink>
           <NavLink to="/team" title="Team"><IconUsers size={19} /><span className="sidebar-label">Team</span></NavLink>
@@ -116,10 +135,10 @@ export default function DesignShell() {
         <div className="design-sidebar-account" data-tour="settings"><AuthButton variant="sidebar" collapsed={collapsed && !mobileOpen} onWalkthrough={() => { setMobileOpen(false); setTourRequest((n) => n + 1); }} /></div>
       </aside>
       <div className="design-main-column">
-        <main id="workspace-content" className="design-content" tabIndex={-1}><Outlet /></main>
+        <main ref={content} id="workspace-content" className="design-content" tabIndex={-1}><Outlet /></main>
         <div className="design-footer"><SiteFooter /></div>
       </div>
     </div>
-    <WorkspaceTour replay={tourRequest} />
+    {isAuthenticated && <WorkspaceTour replay={tourRequest} />}
   </div>;
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,7 +23,7 @@ vi.mock("../components/CtPreview/CtPreview", () => ({ default: () => <div>CT pre
 const ACCOUNT = { id: "pipeline-user", email: "test@example.com", plan: "pro", roles: [] };
 const capability = { version: 1, preprocessing: [{ id: "OpenVAE", label: "OpenVAE", available: true, reason: null, supported_models: ["ePAI", "LesionSegmenter"] }],
   postprocessing: [{ id: "ShapeKit", label: "ShapeKit", available: true, reason: null, supported_models: ["ePAI", "LesionSegmenter"] }] };
-const json = (data: unknown) => ({ ok: true, status: 200, json: async () => data, headers: { get: () => "application/json" } });
+const json = (data: unknown, status = 200) => ({ ok: status < 400, status, json: async () => data, headers: { get: () => "application/json" } });
 let requests: FormData[];
 let releaseUpload: (() => void) | undefined;
 let transferGate: Promise<void> | null;
@@ -31,9 +31,12 @@ let availableOptions: unknown;
 let accountPlan: string;
 let acknowledgePipeline: boolean;
 let replayStatus: "running" | "completed" | undefined;
+let admissionRemaining: number;
 beforeEach(() => {
+  vi.stubEnv("VITE_OPENVAE_UI_PREVIEW", "false");
   localStorage.clear(); setRecentUploadsAccount(null); store.pending = []; requests = []; transferGate = null; releaseUpload = undefined;
   availableOptions = capability; accountPlan = "pro"; acknowledgePipeline = true; replayStatus = undefined;
+  admissionRemaining = 0;
   global.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const path = String(url);
     if (path.endsWith("/api/auth/me")) return json({ user: { ...ACCOUNT, plan: accountPlan } });
@@ -42,6 +45,7 @@ beforeEach(() => {
     if (path.includes("/api/finalize-")) return json({ uploaded_filename: "ct.nii.gz" });
     if (path.includes("/api/run-epai-inference")) {
       const request = init!.body as FormData; requests.push(request);
+      if (admissionRemaining-- > 0) return json({ code: "inference_admitting", error: "Admission in progress" }, 409);
       return json({ session_id: request.get("session_id"), ...(replayStatus ? { status: replayStatus, reused: true } : {}), ...(acknowledgePipeline ? { pipeline: { version: 1, model: request.get("model_name"),
         preprocessing: request.get("preprocessing"), postprocessing: request.get("postprocessing") } } : {}) });
     }
@@ -49,7 +53,7 @@ beforeEach(() => {
     return json({ jobs: [], user_id: ACCOUNT.id, items: [] });
   }) as unknown as typeof fetch;
 });
-afterEach(() => { releaseUpload?.(); vi.restoreAllMocks(); });
+afterEach(() => { releaseUpload?.(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 const show = () => render(<AuthProvider><MemoryRouter><UploadPage /></MemoryRouter></AuthProvider>);
 // Auth hydrates asynchronously before the plan-aware default model appears.
 // Allow startup under parallel suite/build load; interaction waits stay unchanged.
@@ -66,6 +70,35 @@ const chooseModel = async (user: ReturnType<typeof userEvent.setup>, current: st
 const run: RecentUpload = { sessionId: "resumed", label: "Saved run", model: "LesionSegmenter", status: "Processing", timestamp: Date.now() };
 
 describe("server-backed pipeline", () => {
+  it("previews unavailable OpenVAE locally without executing it, bypassing real-stage permissions, or claiming completion", async () => {
+    vi.stubEnv("MODE", "development"); vi.stubEnv("VITE_OPENVAE_UI_PREVIEW", "true"); accountPlan = "free";
+    availableOptions = { ...capability, preprocessing: [{ ...capability.preprocessing[0], available: false, reason: "Weights missing" }] };
+    const user = userEvent.setup(); const { container } = show();
+    await waitForAccountModel(/LesionSegmenter/);
+    expect(screen.queryByText("Preview only — not run. Segmentation uses the original CT.")).not.toBeInTheDocument();
+    await chooseOptional(user, "Preprocessing", "OpenVAE");
+    expect(screen.getByText("Preview only — not run. Segmentation uses the original CT.")).toBeInTheDocument();
+    expect(screen.queryByText("OpenVAE needs Pro")).not.toBeInTheDocument();
+    await user.upload(container.querySelector<HTMLInputElement>('input[accept=".nii,.gz"]')!, new File(["scan"], "preview.nii.gz"));
+    await user.click(screen.getByRole("button", { name: "Run", exact: true }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].get("model_name")).toBe("LesionSegmenter");
+    expect(requests[0].has("preprocessing")).toBe(false);
+    expect(requests[0].has("preprocessingPreview")).toBe(false);
+    expect(screen.getByText("OpenVAE was previewed only and did not run. Segmentation uses the original CT.")).toBeInTheDocument();
+    expect(screen.queryByText(/Reconstruct CT · OpenVAE/)).not.toBeInTheDocument();
+    const saved = JSON.parse(localStorage.getItem(recentUploadsStorageKey(ACCOUNT.id))!);
+    expect(saved[0]).toMatchObject({ preprocessingPreview: "OpenVAE", pipeline: { preprocessing: null } });
+  });
+
+  it("cannot turn on the OpenVAE visual preview in a production build", async () => {
+    vi.stubEnv("MODE", "production"); vi.stubEnv("DEV", false); vi.stubEnv("VITE_OPENVAE_UI_PREVIEW", "true");
+    availableOptions = { ...capability, preprocessing: [{ ...capability.preprocessing[0], available: false, reason: "Weights missing" }] };
+    show(); await waitForAccountModel();
+    expect(await screen.findByText("Weights missing")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Preprocessing: None (skip)" })).toBeDisabled();
+  });
+
   it("shows the server's unavailability reason and prevents selecting missing installations", async () => {
     availableOptions = { ...capability, preprocessing: [{ ...capability.preprocessing[0], available: false, reason: "OpenVAE weights are not installed" }],
       postprocessing: [{ ...capability.postprocessing[0], available: false, reason: "ShapeKit is not installed" }] };
@@ -173,6 +206,41 @@ describe("server-backed pipeline", () => {
     const urls = vi.mocked(global.fetch).mock.calls.map(([url]) => String(url));
     expect(urls.some((url) => /upload-inference-chunk|finalize-upload|cancel-inference/.test(url))).toBe(false);
     if (status === "completed") expect(urls.some((url) => url.includes("inference-status/"))).toBe(false);
+  });
+
+  it("keeps an exhausted admission resumable and retries the same session without transferring its file again", async () => {
+    admissionRemaining = 10;
+    localStorage.setItem(recentUploadsStorageKey(ACCOUNT.id), JSON.stringify([run]));
+    store.pending = [{ sessionId: run.sessionId, model: run.model, filename: "ct.nii.gz", file: new Blob(), bdmapId: "", totalChunks: 0, nextChunk: 0,
+      uploadedFilename: "ct.nii.gz", pipeline: { preprocessing: "OpenVAE", postprocessing: null } }];
+    const user = userEvent.setup(); show();
+    const retry = await screen.findByRole("button", { name: "Retry start" }, { timeout: 15000 });
+    expect(store.pending).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem(recentUploadsStorageKey(ACCOUNT.id))!)[0].status).toBe("Processing");
+    // A browser may revoke IndexedDB access after transfer. Same-tab retry
+    // still has the immutable dispatch arguments and must remain usable.
+    store.pending = [];
+    await user.click(retry);
+    await screen.findByRole("heading", { name: "Queued for GPU" });
+    expect(requests).toHaveLength(11);
+    expect(new Set(requests.map((request) => request.get("session_id")))).toEqual(new Set([run.sessionId]));
+    expect(requests.every((request) => request.get("preprocessing") === "OpenVAE")).toBe(true);
+    expect(store.pending).toEqual([]);
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => /upload-inference-chunk|finalize-upload|cancel-inference/.test(String(url)))).toBe(false);
+  }, 20000);
+
+  it.each(["cancel", "account switch"])("stops waiting admission after %s and never dispatches another attempt", async (action) => {
+    admissionRemaining = 10;
+    localStorage.setItem(recentUploadsStorageKey(ACCOUNT.id), JSON.stringify([run]));
+    store.pending = [{ sessionId: run.sessionId, model: run.model, filename: "ct.nii.gz", file: new Blob(), bdmapId: "", totalChunks: 0, nextChunk: 0, uploadedFilename: "ct.nii.gz" }];
+    const user = userEvent.setup(); show(); await waitFor(() => expect(requests).toHaveLength(1));
+    if (action === "cancel") await user.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    else act(() => setRecentUploadsAccount("different-user"));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1100)); });
+    expect(requests).toHaveLength(1);
+    expect(store.pending.length).toBe(action === "cancel" ? 0 : 1);
+    const saved = JSON.parse(localStorage.getItem(recentUploadsStorageKey(ACCOUNT.id))!);
+    expect(saved[0].status).toBe(action === "cancel" ? "Cancelled" : "Processing");
   });
 
   it("keeps old saved runs model-only and rejects unknown capability versions", () => {

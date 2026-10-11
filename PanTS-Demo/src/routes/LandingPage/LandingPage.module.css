@@ -1,7 +1,11 @@
-﻿.root { width:100%; }
-.hero { display:flex; flex-direction:column; align-items:center; text-align:center; padding:42px 24px 26px; color:#0f172a; }
-.brandMark { display:flex; align-items:center; justify-content:center; width:58px; height:58px; margin-bottom:16px; border:1px solid #0f172a0f; border-radius:20px; background:#fff; box-shadow:0 0 24px #002d7218; }
-.brandMark img { width:46px; height:46px; }
+.root { width:100%; flex:none; display:grid; grid-template-rows:1fr; opacity:1; transition:grid-template-rows .75s cubic-bezier(.22,1,.36,1),opacity .45s ease; }
+.root[data-collapsed="true"] { grid-template-rows:0fr; opacity:0; pointer-events:none; }
+.content { min-height:0; overflow:hidden; }
+.hero { display:flex; flex-direction:column; align-items:center; text-align:center; padding:50px 24px 26px; color:#0f172a; }
+.brandMark { position:relative; isolation:isolate; display:flex; align-items:center; justify-content:center; width:58px; height:58px; margin-bottom:16px; border-radius:20px; }
+.brandMark::before { content:""; position:absolute; left:50%; top:50%; width:132px; height:132px; margin:-66px 0 0 -66px; border-radius:50%; background:radial-gradient(closest-side,rgba(104,172,229,.42) 0%,rgba(104,172,229,.22) 40%,rgba(104,172,229,.07) 72%,rgba(104,172,229,0) 100%); animation:hero-breathe 5.5s ease-in-out infinite; pointer-events:none; z-index:0; }
+.brandMark::after { content:""; position:absolute; inset:0; border:1px solid #0f172a0f; border-radius:inherit; background:#fff; box-shadow:0 0 0 1px #ffffff99,0 0 24px #002d721a; pointer-events:none; z-index:1; }
+.brandMark img { position:relative; z-index:2; width:46px; height:46px; }
 .welcome { font-size:14.5px; color:#6b7285; margin:0 0 10px; }
 .heroTitle { margin:0; color:#002d72; font-size:60px; font-weight:600; line-height:1; letter-spacing:-.04em; }
 .heroTitleAlt { color:#111; }
@@ -9,9 +13,12 @@
 .heroStats { display:flex; justify-content:center; flex-wrap:wrap; background:#fff; border:1px solid #0f172a0d; border-radius:20px; box-shadow:0 2px 8px #0f172a03; margin:24px 0 0; padding:14px 0; }
 .statGroup { display:flex; align-items:center; }
 .heroStatItem { min-width:118px; padding:0 22px; }
-.heroStatValue { color:#002d72; font-size:23px; font-weight:600; letter-spacing:-.035em; }
+.heroStatValue { color:#002d72; font-size:23px; font-weight:600; letter-spacing:-.035em; font-variant-numeric:tabular-nums; }
 .heroStatLabel { margin-top:4px; font:11px/1.4 'IBM Plex Mono',monospace; text-transform:uppercase; letter-spacing:.06em; color:#5a6175; }
 .heroStatDivider { height:28px; width:1px; background:#0f172a0d; }
 .heroOverview { max-width:640px; margin:22px 0 0; font-size:13px; line-height:1.65; color:#6b7285; }
-@media(max-width:1100px) { .hero { padding-top:28px; }.heroTitle { font-size:50px; }.heroStatItem { padding:0 15px; min-width:100px; }.heroStatLabel { font-size:10px; } }
-@media(max-width:550px) { .hero { padding:28px 16px 20px; }.brandMark { width:48px; height:48px; border-radius:16px; }.brandMark img { width:38px; height:38px; }.heroTitle { font-size:44px; }.heroSubtitle { font-size:16px; }.heroStats { width:100%; padding:12px 0; row-gap:16px; }.statGroup { width:50%; justify-content:center; }.heroStatDivider { display:none; }.heroStatItem { padding:0 8px; }.heroOverview { font-size:12px; } }
+@media(max-width:1100px) { .heroTitle { font-size:50px; }.heroStatItem { padding:0 15px; min-width:100px; }.heroStatLabel { font-size:10px; } }
+@media(max-width:550px) { .hero { padding:54px 16px 20px; }.brandMark { width:48px; height:48px; border-radius:16px; }.brandMark img { width:38px; height:38px; }.heroTitle { font-size:44px; }.heroSubtitle { font-size:16px; }.heroStats { width:100%; padding:12px 0; row-gap:16px; }.statGroup { width:50%; justify-content:center; }.heroStatDivider { display:none; }.heroStatItem { padding:0 8px; }.heroOverview { font-size:12px; } }
+@keyframes hero-breathe { 0%,100% { transform:scale(.92); opacity:.7; } 50% { transform:scale(1.12); opacity:1; } }
+@container workspace (max-height:850px) { .hero { padding-bottom:8px; }.heroTitle { font-size:54px; }.heroSubtitle { margin-top:10px; }.heroStats { margin-top:16px; padding:12px 0; }.heroOverview { margin-top:14px; } }
+@media(prefers-reduced-motion:reduce) { .root { transition:none; }.brandMark::before { animation:none; transform:none; opacity:.85; } }

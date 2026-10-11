@@ -26,6 +26,7 @@ import { API_BASE } from "../../../helpers/constants";
 import { CARD_COUNT, PER_PAGE } from "../constants";
 import type { FacetData } from "../types";
 import { track } from "../../../helpers/analytics";
+import { scrollPageToTop } from "../../../helpers/pageScroll";
 
 // Pure so it can seed both the lazy initial state (skips the first-paint skeleton
 // entirely when the curated cache is already warm) and the post-fetch ingest path.
@@ -177,7 +178,7 @@ export function useDashboard() {
     const pages = resultCount ? Math.max(1, Math.ceil(resultCount / PER_PAGE)) : 1;
     const next = Math.min(Math.max(1, p), pages);
     runSearch(filters, next);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollPageToTop();
   };
 
   // Facet option lists + baseline counts — fetched once, unfiltered, so available

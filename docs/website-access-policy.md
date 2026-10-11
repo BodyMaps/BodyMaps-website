@@ -1,8 +1,14 @@
 # Website access policy
 
-The redesigned website requires sign-in for dataset browsing, scan viewing,
-uploads, AI, shared reports, Live Rooms, quizzes, and account features. The React
-route gate is backed by `api/access_policy.py`, installed once by `create_app`.
+Workspace, Team, and browser-only local scan viewing are public. Visitors can
+select and view their own files locally. Starting server inference or loading a
+dataset sample prompts sign-in/sign-up before any protected upload or request.
+First sign-in resets the local file selection at the account-isolation boundary;
+the user then selects the scan for their signed-in workspace.
+
+Dataset browsing/viewing, server uploads and inference, saved server results, AI,
+shared reports, Live Rooms, quizzes and account features require sign-in. The
+React route gate is backed by `api/access_policy.py`, installed once by `create_app`.
 New API routes require a valid `bm_session` by default. Existing ownership,
 role, quota, room-key, and attempt-key checks still run after the session gate.
 

@@ -43,9 +43,9 @@ describe("team page", () => {
     ];
     const added = [
       "Aditya Sanjeev",
-      "Yusuf Abdulkadir",
+      "Ahmad Durre Rehman",
       "Alexander Poon",
-      "Ahmad Rehman",
+      "Yusuf Abdulkadir",
       "Ishita Ahelleya",
       "Harleen Sachdev",
     ];

@@ -23,6 +23,7 @@ export default function WorkspaceRunCard({ upload, phase, queuePosition, estimat
   const headline = complete ? "Your results are ready" : stopped ? `Run ${upload.status.toLowerCase()}`
     : phase === "waiting" ? "Waiting to upload" : phase === "uploading" ? "Uploading your scan"
     : phase === "queued" ? (queuePosition ? `Number ${queuePosition} in the GPU queue` : "Queued for GPU")
+    : phase === "admitting" ? "Starting your run" : phase === "admission-pending" ? "Waiting for server confirmation"
     : phase === "running" ? "Processing your scan" : "Checking run status";
   const steps = [
     { label: "Upload scan", detail: admitted ? "Scan received" : phase === "waiting" ? "Waiting for the current transfer" : phase === "uploading" ? "Transferring scan data" : "",
@@ -45,6 +46,7 @@ export default function WorkspaceRunCard({ upload, phase, queuePosition, estimat
       <div className="workspace-run-file"><strong title={upload.sourceName || upload.label}>{upload.sourceName || upload.label}</strong>
         <span>{upload.label} · {formatRelativeTime(upload.timestamp)}</span></div>
       <div className="workspace-run-chips">
+        {upload.preprocessingPreview === "OpenVAE" && <span><small>Preview only — not run</small>OpenVAE</span>}
         {upload.pipeline?.preprocessing && <span><small>Preprocessing</small>{upload.pipeline.preprocessing}</span>}
         <span><small>Model</small>{upload.model}</span>
         {upload.pipeline?.postprocessing && <span><small>Postprocessing</small>{upload.pipeline.postprocessing}</span>}
@@ -62,6 +64,7 @@ export default function WorkspaceRunCard({ upload, phase, queuePosition, estimat
           </li>)}
         </ol>
         {phase === "running" && !stopped && !complete && estimate && <p className="workspace-run-note">Estimated timing: {estimate}</p>}
+        {upload.preprocessingPreview === "OpenVAE" && <p className="workspace-run-note">OpenVAE was previewed only and did not run. Segmentation uses the original CT.</p>}
         {upload.pipeline?.preprocessing === "OpenVAE" && observedStages?.some((stage) => stage.id === "segmentation" && stage.status === "completed")
           && <p className="workspace-run-note">Segmentation used the reconstructed CT; the viewer retains the original CT.</p>}
         {closeNote && !stopped && !complete && <p className="workspace-run-note">{closeNote}</p>}

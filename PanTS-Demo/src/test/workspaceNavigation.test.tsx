@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DesignShell from "../components/DesignShell";
+vi.mock("../contexts/authContext", () => ({ useAuth: () => ({ isAuthenticated: true }) }));
 
 vi.mock("../components/AuthButton", () => ({ default: () => <button type="button">Account</button> }));
 vi.mock("../components/WorkspaceTour", () => ({ default: () => null }));

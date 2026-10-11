@@ -2,16 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import type { PipelineOption } from "../helpers/inferencePipeline";
 
 type Props = { stage: "preprocessing" | "postprocessing"; value: string | null; option?: PipelineOption;
-  model: string; locked: boolean; onChange: (value: string | null) => void; onLocked: () => void };
+  model: string; locked: boolean; previewOnly?: boolean; signedOut?: boolean; onChange: (value: string | null) => void; onLocked: () => void };
 
 /** Optional stages come from server capability checks, never from prototype data. */
-export default function PipelineStepSelector({ stage, value, option, model, locked, onChange, onLocked }: Props) {
+export default function PipelineStepSelector({ stage, value, option, model, locked, previewOnly = false, signedOut = false, onChange, onLocked }: Props) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const title = stage === "preprocessing" ? "Preprocessing" : "Postprocessing";
   const supported = !!option?.supported_models.includes(model);
-  const unavailable = !option?.available || !supported;
+  const unavailable = (signedOut && !previewOnly) || !option?.available || !supported;
   const reason = model === "None" ? "Skipped in view-only mode"
+    : previewOnly ? value ? "Preview only — not run. Segmentation uses the original CT." : ""
+    : signedOut ? "Sign in to check availability"
     : !option ? "Server availability could not be checked"
     : !option.available ? option.reason || "Not available on this server"
     : !supported ? "Not available for this model" : "";
@@ -49,7 +51,7 @@ export default function PipelineStepSelector({ stage, value, option, model, lock
           className={`model-dropdown-item${value === option.id ? " selected" : ""}${locked ? " locked" : ""}`}
           onClick={() => choose(option.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(option.id); } }}>
           <div className="model-dropdown-item-content"><span className="model-dropdown-item-name">{option.label}</span>
-            <span className="model-dropdown-item-desc">{stage === "preprocessing" ? "Reconstruct CT with OpenVAE before segmentation" : "Refine supported whole-organ masks; lesions are preserved"}</span></div>
+            <span className="model-dropdown-item-desc">{previewOnly ? "Preview only — not run" : stage === "preprocessing" ? "Reconstruct CT with OpenVAE before segmentation" : "Refine supported whole-organ masks; lesions are preserved"}</span></div>
           {locked && <span className="model-dropdown-lock">Donate</span>}
         </div>}
       </div>}
