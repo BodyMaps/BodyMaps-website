@@ -1722,6 +1722,8 @@ def _write_owner_marker(session_id, user_id):
 
 _dispatching_sessions = set()
 _dispatching_owners = {}
+_admitting_sessions = set()
+_cancelled_admissions = set()
 _dispatching_sessions_lock = threading.Lock()
 
 
@@ -1737,7 +1739,10 @@ def _single_session_dispatch(fn):
         with _dispatching_sessions_lock:
             job = _get_inference_job(session_id) or {}
             if session_id in _dispatching_sessions or job.get("status") == "completed":
-                if not job and user and _dispatching_owners.get(session_id) == user["id"]:
+                if session_id in _admitting_sessions and user and _dispatching_owners.get(session_id) == user["id"]:
+                    if session_id in _cancelled_admissions:
+                        return jsonify({"error": "Cancelled by user", "code": "inference_cancelled",
+                                        "status": "cancelled", "session_id": session_id}), 409
                     response = jsonify({"error": "Inference admission is still in progress; retry shortly.",
                                         "code": "inference_admitting"})
                     response.headers["Retry-After"] = "1"
@@ -1762,6 +1767,8 @@ def _single_session_dispatch(fn):
                                 "code": "inference_already_running"}), 409
             _dispatching_sessions.add(session_id)
             _dispatching_owners[session_id] = user["id"] if user else None
+            _admitting_sessions.add(session_id)
+            _cancelled_admissions.discard(session_id)
         accepted = False
         try:
             response = fn(session_id, *args, **kwargs)
@@ -1772,6 +1779,8 @@ def _single_session_dispatch(fn):
                 with _dispatching_sessions_lock:
                     _dispatching_sessions.discard(session_id)
                     _dispatching_owners.pop(session_id, None)
+                    _admitting_sessions.discard(session_id)
+                    _cancelled_admissions.discard(session_id)
     return wrapped
 
 
@@ -1906,33 +1915,46 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
         response.headers["Retry-After"] = "30"
         return response, 429
 
-    try:
-        plan_store.record_inference(user["id"], session_id, model_name)
-    except Exception:
-        _INFERENCE_PENDING_SLOTS.release()
-        raise
-
     # "queued": the worker thread starts immediately but real GPU work waits on
     # the segmentor's one-at-a-time lock; the on_start callback below flips the
     # job to "running" when it actually gets the GPU.
     try:
-        job_store.create_job(session_id, model_name, input_path, session_path,
-                             os.path.join(session_path, "auto_masks.zip"), user["id"])
-        _set_inference_job(
-            session_id,
-            user_id=user["id"],
-            status="queued",
-            model=model_name,
-            error=None,
-            ct_path=input_path,
-            session_path=session_path,
-            zip_path=os.path.join(session_path, "auto_masks.zip"),
-            output_mask_dir=None,
-            reconstruction_path=None,
-            cancel_requested=False,
-            pipeline=selected_pipeline,
-            pipeline_stages=inference_pipeline.initial_stages(selected_pipeline),
-        )
+        # Cancellation can arrive during the input copy/validation, before a
+        # Job row exists. The claim check and durable queue admission share
+        # the same lock as /cancel, so a cancelled claim cannot be charged or
+        # enqueue later. Lock order stays dispatch -> inference-state.
+        with _dispatching_sessions_lock:
+            if session_id in _cancelled_admissions:
+                _INFERENCE_PENDING_SLOTS.release()
+                # Remove only a newly created, owned input file. A prior failed
+                # job's artifacts remain available until an explicit retry.
+                if existing_job is None and model_name != "ShapeKit":
+                    try:
+                        os.remove(input_path)
+                        os.rmdir(session_path)  # only succeeds if now empty
+                    except OSError:
+                        pass
+                return jsonify({"error": "Cancelled by user", "code": "inference_cancelled",
+                                "status": "cancelled", "session_id": session_id}), 409
+            plan_store.record_inference(user["id"], session_id, model_name)
+            job_store.create_job(session_id, model_name, input_path, session_path,
+                                 os.path.join(session_path, "auto_masks.zip"), user["id"])
+            _set_inference_job(
+                session_id,
+                user_id=user["id"],
+                status="queued",
+                model=model_name,
+                error=None,
+                ct_path=input_path,
+                session_path=session_path,
+                zip_path=os.path.join(session_path, "auto_masks.zip"),
+                output_mask_dir=None,
+                reconstruction_path=None,
+                cancel_requested=False,
+                pipeline=selected_pipeline,
+                pipeline_stages=inference_pipeline.initial_stages(selected_pipeline),
+            )
+            _admitting_sessions.discard(session_id)
     except Exception:
         _INFERENCE_PENDING_SLOTS.release()
         raise
@@ -2074,6 +2096,8 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
             with _dispatching_sessions_lock:
                 _dispatching_sessions.discard(session_id)
                 _dispatching_owners.pop(session_id, None)
+                _admitting_sessions.discard(session_id)
+                _cancelled_admissions.discard(session_id)
 
     try:
         threading.Thread(target=do_segmentation_and_zip, daemon=True).start()
@@ -2337,15 +2361,23 @@ def cancel_inference_session(session_id):
     try:
         if not _is_safe_id(session_id):
             return jsonify({"error": "Invalid session ID"}), 400
-        job, access_error = _job_for_current_user(session_id)
-        if access_error:
-            return access_error
-        status = (job.get("status") or "").lower()
-        if status in ("completed", "failed", "cancelled"):
-            return jsonify({"status": status, "message": "Job already finished"}), 200
-        # Mark first so a queued job aborts at the GPU-slot check even if
-        # there is no subprocess to kill yet.
-        _set_inference_job(session_id, status="cancelled", error="Cancelled by user", cancel_requested=True)
+        with _dispatching_sessions_lock:
+            if session_id in _admitting_sessions:
+                user = current_user()
+                owner = _dispatching_owners.get(session_id)
+                if not user or (owner != user["id"] and not role_store.has_role(user["id"], role_store.ROLE_ADMIN)):
+                    return jsonify({"error": "You don't have access to this session."}), 403
+                _cancelled_admissions.add(session_id)
+                return jsonify({"status": "cancelled", "session_id": session_id}), 200
+            job, access_error = _job_for_current_user(session_id)
+            if access_error:
+                return access_error
+            status = (job.get("status") or "").lower()
+            if status in ("completed", "failed", "cancelled"):
+                return jsonify({"status": status, "message": "Job already finished"}), 200
+            # Mark first so a queued job aborts at the GPU-slot check even if
+            # there is no subprocess to kill yet.
+            _set_inference_job(session_id, status="cancelled", error="Cancelled by user", cancel_requested=True)
         try:
             killed = cancel_session(session_id)
             print(f"🛑 Cancel requested for {session_id} (process killed: {killed})")

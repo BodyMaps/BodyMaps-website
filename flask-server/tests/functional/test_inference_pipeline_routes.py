@@ -311,6 +311,7 @@ def test_replay_during_input_admission_is_retryable_not_forbidden(rig):
     api = rig["api"]
     api._dispatching_sessions.add(sid)
     api._dispatching_owners[sid] = rig["owner"]["id"]
+    api._admitting_sessions.add(sid)
     try:
         response, _ = rig["submit"](session_id=sid)
         assert response.status_code == 409
@@ -322,3 +323,67 @@ def test_replay_during_input_admission_is_retryable_not_forbidden(rig):
     finally:
         api._dispatching_sessions.discard(sid)
         api._dispatching_owners.pop(sid)
+        api._admitting_sessions.discard(sid)
+
+
+@pytest.mark.parametrize("retry_failed_job", [False, True])
+def test_cancel_during_admission_prevents_queue_and_charge(rig, monkeypatch, retry_failed_job):
+    """Pause at real NIfTI validation and cancel through the real owner route.
+
+    Covers both an entirely new session and a retry whose old failed Job exists:
+    the latter must cancel the new claim, not return 'old job already finished'.
+    """
+    from models.engine import session_scope
+    from models.usage_event import UsageEvent
+    from sqlalchemy import select
+    api, store = rig["api"], rig["store"]
+    sid = str(uuid.uuid4())
+    if retry_failed_job:
+        store.create_job(sid, "ePAI", None, None, None, rig["owner"]["id"])
+        store.update_job(sid, status="failed", error="Previous failure",
+                         pipeline=api.inference_pipeline.selection("ePAI"))
+    real_load = api.nib.load
+    cancelled = []
+
+    def cancel_while_validating(path, *args, **kwargs):
+        if Path(path).parent.name == sid and not cancelled:
+            assert sid in api._admitting_sessions
+            # Presenting somebody else's session ID must not stop their upload.
+            # Separate app contexts model concurrent requests; nested clients
+            # otherwise share Flask.g's cached current user with the outer POST.
+            with rig["app"].app_context():
+                denied = rig["other_client"].post(f"/api/cancel-inference/{sid}")
+            assert denied.status_code == 403
+            assert sid not in api._cancelled_admissions
+            with rig["app"].app_context():
+                response = rig["client"].post(f"/api/cancel-inference/{sid}")
+            assert response.status_code == 200
+            assert response.json["status"] == "cancelled"
+            cancelled.append(True)
+            with rig["app"].app_context():
+                replay, _ = rig["submit"](session_id=sid)
+            assert replay.status_code == 409
+            assert replay.json["code"] == "inference_cancelled"
+        return real_load(path, *args, **kwargs)
+
+    monkeypatch.setattr(api.nib, "load", cancel_while_validating)
+    response, _ = rig["submit"](session_id=sid)
+    assert cancelled == [True]
+    assert response.status_code == 409, response.json
+    assert response.json["code"] == "inference_cancelled"
+    assert not rig["calls"]
+    assert not rig["collected"]
+    old = store.get_job(sid)
+    assert (old and old["status"] == "failed") if retry_failed_job else old is None
+    with session_scope() as session:
+        assert session.execute(select(UsageEvent).where(UsageEvent.ref_id == sid)).scalars().all() == []
+    assert sid not in api._dispatching_sessions
+    assert sid not in api._dispatching_owners
+    assert sid not in api._admitting_sessions
+    assert sid not in api._cancelled_admissions
+    if not retry_failed_job:
+        assert not (Path(api.SESSIONS_DIR) / sid / "scan.nii.gz").exists()
+    # Claim/queue capacity cleanup permits a deliberate later retry.
+    retry, _ = rig["submit"](session_id=sid)
+    assert retry.status_code == 200, retry.json
+    assert rig["calls"] == ["ePAI"]
