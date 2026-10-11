@@ -1,0 +1,32 @@
+/* V6 presentation; UploadPage retains the real file and inference handlers. */
+.workspace-page.upload-page-wrapper { min-height:0; background:transparent; overflow:visible; color:#0f172a; font-family:'IBM Plex Sans',system-ui,sans-serif; }
+.workspace-page .upload-main { max-width:820px; width:100%; padding:0 28px 24px; }
+.workspace-page .upload-card { padding:20px; border-radius:34px; border:1px solid rgba(104,172,229,.3); background:linear-gradient(135deg,#f0f5fc 0%,#f7fafd 45%,#edf3fc 100%); box-shadow:0 14px 48px rgba(0,45,114,.055),inset 0 1px 0 #fff; }
+.workspace-page .dropzone { min-height:205px; padding:24px 20px; margin-bottom:20px; border:1px dashed #002d722b; border-radius:24px; background:#ffffffb8; }
+.workspace-page .dropzone:hover { background:#fff; border-color:#68ace5; }.workspace-page .dropzone.drag-over { background:#e2efff; border-color:#002d72; }
+.workspace-page .dropzone-icon { color:#002d72; width:30px; height:30px; margin-bottom:12px; }
+.workspace-page .dropzone-text { color:#0f172a; font-size:18px; letter-spacing:-.02em; font-weight:500; }
+.workspace-format-note { margin:4px 0 0; font-size:12px; color:#6b7285; }
+.workspace-file-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:18px; }
+.workspace-page .dropzone-btn { border:1px solid #0f172a1a; border-radius:11px; background:#fff; padding:9px 13px; color:#0f172a; font:12px 'IBM Plex Sans',sans-serif; box-shadow:0 1px 2px #0f172a05; }
+.workspace-page .dropzone-btn:hover { border-color:#68ace5; color:#002d72; }.workspace-page .workspace-sample { background:#002d7209; border-color:transparent; color:#002d72; }
+.workspace-page .pipeline-row { gap:9px; align-items:flex-end; }
+.workspace-page .pipeline-step-header { gap:5px; margin-bottom:8px; }.workspace-page .pipeline-badge { background:#002d72; font-size:8px; width:16px; height:16px; }
+.workspace-page .pipeline-label { font:9px 'IBM Plex Mono',monospace; text-transform:uppercase; letter-spacing:.055em; color:#5a6175; }.workspace-page .pipeline-optional { font-size:9px; color:#8b91a0; }
+.workspace-page .pipeline-arrow { color:#929bb0; padding-bottom:11px; }
+.workspace-page .model-dropdown-btn { border:1px solid #0f172a14; border-radius:11px; background:#fff; color:#5a6175; padding:10px 12px; height:40px; font:12px 'IBM Plex Sans',sans-serif; }
+.workspace-page .model-dropdown-btn.has-value { border-color:#68ace570; color:#002d72; background:#fff; }.workspace-page .model-dropdown-btn.open { border-color:#68ace5; }
+.workspace-page .model-dropdown-menu,.workspace-page .model-submenu { background:#fff; border:1px solid #0f172a14; border-radius:15px; box-shadow:0 14px 38px #0f172a18; }
+.workspace-page .model-dropdown-item { padding:10px 13px; }.workspace-page .model-dropdown-item-name { font-size:12px; }.workspace-page .model-dropdown-item-desc { font-size:11px; line-height:1.45; }
+.workspace-page .model-dropdown-item.selected,.workspace-page .model-submenu-item.selected { color:#002d72; background:#002d7209; }.workspace-page .model-dropdown-check { color:#002d72; }
+.workspace-page .run-btn { min-width:67px; height:40px; padding:8px 16px; border-radius:12px; background:#002d72; border:1px solid #002d72; color:#fff; font:500 12px 'IBM Plex Sans',sans-serif; }
+.workspace-selected-model { display:flex; gap:12px; align-items:flex-start; border-top:1px solid #002d7210; padding:15px 4px 0; margin-top:16px; text-align:left; }
+.workspace-model-symbol { flex:none; display:grid; place-items:center; width:32px; height:32px; border-radius:10px; background:#002d720a; color:#002d72; font-size:24px; }
+.workspace-selected-model strong { font-size:12px; font-weight:500; color:#002d72; }.workspace-selected-model p { font-size:11px; color:#6b7285; line-height:1.5; margin:3px 0 0; }.workspace-selected-model small { font-size:10px; color:#5a6175; }
+.workspace-model-comparison { margin-top:22px; padding:0 4px; }.workspace-model-comparison>summary { cursor:pointer; color:#5a6175; font-size:12px; width:fit-content; margin:0 auto; padding:8px; }.workspace-model-comparison[open]>summary { margin-bottom:20px; }
+.workspace-page .status-msg { font-size:12px; border-radius:12px; }.workspace-page .upload-history-link { font-size:12px; }
+.auth-route-pending { min-height:100dvh; background:#f4f6f8; color:#5a6175; display:grid; place-content:center; font-family:'IBM Plex Sans',sans-serif; }
+@media(max-width:1100px) { .workspace-page .upload-main { padding-left:20px; padding-right:20px; }.workspace-page .pipeline-optional { display:none; } }
+@media(max-width:1100px) { .workspace-page .model-submenu { position:static; margin:8px 0 0; width:100%; min-width:0; box-shadow:none; }.workspace-page .has-submenu { flex-wrap:wrap; }.workspace-page .model-submenu::before { display:none; } }
+@media(max-width:850px) { .workspace-page .pipeline-row { flex-wrap:wrap; }.workspace-page .pipeline-step { flex:1 1 140px; }.workspace-page .pipeline-arrow { display:none; } }
+@media(max-width:550px) { .workspace-page .upload-main { padding:0 12px 24px; }.workspace-page .upload-card { padding:14px; border-radius:26px; }.workspace-page .dropzone { padding:22px 12px; border-radius:18px; min-height:230px; }.workspace-page .pipeline-step { flex:1 1 100%; }.workspace-page .pipeline-step-header { margin:4px 0 6px; }.workspace-page .run-btn { width:100%; margin-top:6px; }.workspace-page .model-submenu { position:static; display:block; visibility:visible; opacity:1; margin:8px 0 0; width:100%; box-shadow:none; }.workspace-page .has-submenu { flex-wrap:wrap; }.workspace-page .model-submenu::before { display:none; } }

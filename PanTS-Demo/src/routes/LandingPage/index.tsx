@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { segmentation_categories, API_BASE } from "../../helpers/constants";
-import Header from "../../components/Header";
-import SiteFooter from "../../components/SiteFooter";
+import { useAuth } from "../../contexts/authContext";
+
 import { LANDING_OVERVIEW, LANDING_SUBTITLE } from "../../helpers/copy";
 import styles from "./LandingPage.module.css";
 
@@ -31,7 +31,8 @@ const easeOutCubic = (progress: number): number => {
   return 1 - Math.pow(1 - progress, 3);
 };
 
-export default function LandingPage() {
+export default function WorkspaceIntro() {
+  const { isAuthenticated } = useAuth();
   const [animationProgress, setAnimationProgress] = useState(0);
   // Pull the live CT-volume count so the hero stat reflects the real library size
   // (PanTS + CancerVerse) instead of a hardcoded figure. Falls back to TARGETS.
@@ -67,7 +68,7 @@ export default function LandingPage() {
 
     const animate = (currentTime: number) => {
       const elapsed = currentTime - startTime;
-      const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
+      const progress = Math.max(0, Math.min(elapsed / ANIMATION_DURATION, 1));
 
       setAnimationProgress(easeOutCubic(progress));
 
@@ -107,8 +108,9 @@ export default function LandingPage() {
 
   return (
     <div className={styles.root}>
-      <Header />
-      <main className={styles.hero}>
+      <section className={styles.hero} aria-label="Welcome to BodyMaps">
+        <div className={styles.brandMark}><img src="/bodymaps-logo.svg" alt="" /></div>
+        <p className={styles.welcome}>{isAuthenticated ? "Welcome back" : "Welcome to"}</p>
         <h1 className={styles.heroTitle}>
           Body<span className={styles.heroTitleAlt}>Maps</span>
         </h1>
@@ -128,8 +130,7 @@ export default function LandingPage() {
           ))}
         </div>
         <p className={styles.heroOverview}>{LANDING_OVERVIEW}</p>
-      </main>
-      <SiteFooter />
+      </section>
     </div>
   );
 }

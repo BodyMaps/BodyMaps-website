@@ -59,6 +59,7 @@ export function useDashboard() {
     initialData?.meta ?? {},
   );
   const [loading, setLoading] = useState(!initialData);
+  const [error, setError] = useState<string | null>(null);
   const [searchId, setSearchId] = useState<number>(0);
   const [showFilters, setShowFilters] = useState(false);
   const [facetData, setFacetData] = useState<FacetData | null>(null);
@@ -134,6 +135,7 @@ export function useDashboard() {
   // no spinner and no network round trip -- the fix for Team/Overview -> Dataset
   // tab switches paying a full refetch every time despite the data being static.
   const loadCurated = async () => {
+    setError(null);
     const cached = getCachedCurated();
     if (cached) {
       ingestItems(cached);
@@ -145,11 +147,13 @@ export function useDashboard() {
       ingestItems(await fetchCurated());
     } catch (e) {
       console.error(e);
+      setError("The library could not be loaded. Try Browse all or Shuffle cases again.");
       setLoading(false);
     }
   };
 
   const runSearch = async (f: Filters, p = 1) => {
+    setError(null);
     setLoading(true);
     setPreviewMetadata({});
     try {
@@ -163,6 +167,7 @@ export function useDashboard() {
       ingestItems(data.items ?? []);
     } catch (e) {
       console.error(e);
+      setError("The search could not be completed. Please try again.");
       setLoading(false);
     }
   };
@@ -226,6 +231,8 @@ export function useDashboard() {
   }, []);
 
   const handleShuffle = async () => {
+    setShowSaved(false);
+    setError(null);
     setLoading(true);
     setPreviewMetadata({});
     setResultCount(null);
@@ -256,11 +263,13 @@ export function useDashboard() {
       });
     } catch (e) {
       console.error(e);
+      setError("Cases could not be shuffled. Please try again.");
       setLoading(false);
     }
   };
 
   const handleBrowseAll = () => {
+    setShowSaved(false);
     setFilters(EMPTY_FILTERS);
     setSearchParams({});
     runSearch(EMPTY_FILTERS, 1);
@@ -276,6 +285,7 @@ export function useDashboard() {
   };
 
   const handleApplyFilters = () => {
+    setShowSaved(false);
     setSearchParams(buildSearchParams(filters));
     runSearch(filters, 1);
     setShowFilters(false);
@@ -308,6 +318,7 @@ export function useDashboard() {
     previewIds,
     previewMetadata,
     loading,
+    error,
     searchId,
     setSearchId,
     showFilters,

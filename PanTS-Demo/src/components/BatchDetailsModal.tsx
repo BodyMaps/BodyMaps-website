@@ -12,6 +12,8 @@ type Props = {
 	onView: (upload: RecentUpload) => void;
 	onDownloadScan: (upload: RecentUpload) => void;
 	onDownloadAll: () => void;
+	downloadBusy?: boolean;
+	downloadMessage?: string;
 };
 
 // Only a finished scan can be viewed/downloaded; a still-processing one just
@@ -25,6 +27,8 @@ const BatchDetailsModal: React.FC<Props> = ({
 	onView,
 	onDownloadScan,
 	onDownloadAll,
+	downloadBusy = false,
+	downloadMessage,
 }) => {
 	// Close on Esc.
 	useEffect(() => {
@@ -52,8 +56,8 @@ const BatchDetailsModal: React.FC<Props> = ({
 						</div>
 					</div>
 					<div className="bdm-header-actions">
-						<button type="button" className="bdm-download-all" onClick={onDownloadAll}>
-							Download all
+						<button type="button" className="bdm-download-all" disabled={downloadBusy || done === 0} onClick={onDownloadAll}>
+							{downloadBusy ? "Preparing..." : "Download completed"}
 						</button>
 						<button type="button" className="bdm-close" aria-label="Close" onClick={onClose}>
 							×
@@ -61,6 +65,7 @@ const BatchDetailsModal: React.FC<Props> = ({
 					</div>
 				</div>
 
+				{downloadMessage && <p role="status" style={{ margin: "0 24px 16px", fontSize: 14 }}>{downloadMessage}</p>}
 				<div className="bdm-list">
 					{uploads.map((u) => {
 						const done = isDone(u.status);
@@ -82,7 +87,7 @@ const BatchDetailsModal: React.FC<Props> = ({
 											<button type="button" className="bdm-btn" onClick={() => onView(u)}>
 												View
 											</button>
-											<button type="button" className="bdm-btn" onClick={() => onDownloadScan(u)}>
+											<button type="button" className="bdm-btn" disabled={downloadBusy} onClick={() => onDownloadScan(u)}>
 												Download
 											</button>
 										</>

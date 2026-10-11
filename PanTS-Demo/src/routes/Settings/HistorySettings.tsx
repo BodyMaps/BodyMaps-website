@@ -1,10 +1,12 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
 	formatRelativeTime,
 	groupUploads,
 	isGroupInFlight,
 	loadRecentUploads,
+	isRecentUploadsStorageKey,
+	RECENT_UPLOADS_CHANGED,
 	removeRecentUpload,
 	splitByAge,
 	type RecentUpload,
@@ -16,13 +18,22 @@ import {
 // it stays a workbench rather than a filing cabinet; everything else lives
 // here (see splitByAge).
 //
-// Reads the same localStorage list the Upload page does, so labels and batch
-// grouping carry over. That means history is per-browser — the server's own
-// record (GET /api/me/jobs) is only written by the queue path, not the one the
-// Upload page actually uses, so it would show an empty list here.
+// Labels and grouping use the same account-scoped browser history as Upload.
+// The legacy list is visible only after server-side ownership verification.
 const HistorySettings: React.FC = () => {
 	const navigate = useNavigate();
 	const [uploads, setUploads] = useState<RecentUpload[]>(() => loadRecentUploads());
+
+	useEffect(() => {
+		const refresh = () => setUploads(loadRecentUploads());
+		const storage = (event: StorageEvent) => { if (isRecentUploadsStorageKey(event.key)) refresh(); };
+		window.addEventListener(RECENT_UPLOADS_CHANGED, refresh);
+		window.addEventListener("storage", storage);
+		return () => {
+			window.removeEventListener(RECENT_UPLOADS_CHANGED, refresh);
+			window.removeEventListener("storage", storage);
+		};
+	}, []);
 
 	const finished = groupUploads(uploads).filter((g) => !isGroupInFlight(g));
 	const { older } = splitByAge(finished);
@@ -42,7 +53,7 @@ const HistorySettings: React.FC = () => {
 		<div className="set-group">
 			<h2 className="set-heading">History</h2>
 			<p className="set-sub">
-				Scans older than a day. Newer ones stay on the Upload page.
+				Viewed scans and scans older than a day. Newer, unviewed scans stay in your workspace.
 			</p>
 
 			{older.length === 0 ? (

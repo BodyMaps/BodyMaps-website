@@ -125,3 +125,33 @@
 .menuItem:hover {
 	background: rgba(0, 0, 0, 0.05);
 }
+
+/* Account popup matches the V6 sidebar while the default header stays usable. */
+.avatar { overflow:hidden; }
+.avatar img,.menuAvatar img { width:100%; height:100%; object-fit:cover; }
+.menu { border-radius:22px; border-color:rgba(15,23,42,.07); box-shadow:0 24px 56px rgba(15,23,42,.16),0 2px 6px rgba(15,23,42,.05); }
+.menuHeader { display:flex; gap:12px; align-items:center; }
+.menuAvatar { display:flex; align-items:center; justify-content:center; flex:none; width:40px; height:40px; border-radius:50%; overflow:hidden; background:#002d72; color:#fff; font-size:15px; font-weight:600; }
+.menuIdentity { min-width:0; }
+.menuName,.menuEmail { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.menuName { color:#0f172a; font-size:14px; }
+.menuEmail { color:#6b7285; font-family:inherit; font-size:12px; }
+.menuItem { min-height:42px; padding:10px; border-radius:14px; color:#0f172a; font-size:14px; }
+.menuItem svg { flex:none; }
+.menuItem span { display:flex; flex-direction:column; gap:2px; }
+.menuItem small { color:#6b7285; font-size:11.5px; }
+.signOut { color:#b42318; margin-top:4px; border-top:1px solid rgba(15,23,42,.06); }
+.signOut:hover { background:rgba(180,35,24,.06); }
+.menuError { margin:8px 10px; color:#b42318; font-size:12px; line-height:1.5; }
+.sidebarRoot { width:100%; }
+.sidebarTrigger { width:100%; max-width:none; height:42px; border:0; border-radius:10px; padding:0 14px; gap:12px; color:#5a6175; }
+.sidebarTrigger .accountEmail { font-size:14px; color:inherit; }
+.sidebarSignIn { width:100%; min-height:42px; display:flex; gap:12px; align-items:center; justify-content:center; border-radius:12px; padding:10px; font-size:14px; letter-spacing:0; }
+.sidebarIdentity { display:flex; align-items:center; gap:10px; width:100%; margin-top:8px; border:0; border-top:1px solid rgba(15,23,42,.06); background:transparent; padding:14px 8px 2px; border-radius:10px; text-align:left; cursor:pointer; font-family:inherit; }
+.sidebarIdentity:hover { background:rgba(15,23,42,.035); }
+.identityText { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.identityText strong { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:#0f172a; font-size:13px; font-weight:500; }
+.identityText small { color:#6b7285; font-size:11.5px; }
+.sidebarMenu { position:fixed; top:auto; right:auto; width:min(280px,calc(100vw - 24px)); min-width:0; max-height:calc(100dvh - 36px); overflow-y:auto; z-index:1100; font-family:"IBM Plex Sans",system-ui,sans-serif; }
+.accountRoot button:focus-visible,.menu button:focus-visible,.signInBtn:focus-visible { outline:3px solid #68ace5; outline-offset:2px; }
+@media(prefers-reduced-motion:reduce) { .accountRoot *,.menu *,.signInBtn { transition:none; } }

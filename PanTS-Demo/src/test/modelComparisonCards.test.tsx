@@ -45,12 +45,13 @@ describe("model comparison cards", () => {
 
   it("shows an info card for every real model (not None) before a choice is made", async () => {
     await renderPage();
+    await userEvent.click(screen.getByText("Compare available models"));
     await screen.findByText("Choose a model");
     // The dropdown is closed, so each model's description text appears exactly
     // once - in its own comparison card. "None" (view-only) isn't a model to
     // compare, so it has no card here even though it's still a dropdown option.
-    expect(screen.getByText(/Full abdominal organ segmentation/)).toBeInTheDocument();
-    expect(screen.getByText(/anatomically consistent/)).toBeInTheDocument();
+    expect(within(screen.getByRole("radiogroup", { name: "Segmentation model" })).getByText(/Full abdominal organ segmentation/)).toBeInTheDocument();
+    expect(within(screen.getByRole("radiogroup", { name: "Segmentation model" })).getByText(/anatomically consistent/)).toBeInTheDocument();
     expect(screen.getByText(/fast pancreatic lesion detection/)).toBeInTheDocument();
     expect(screen.queryByText(/View only — files never leave your browser/)).not.toBeInTheDocument();
   });
@@ -58,11 +59,12 @@ describe("model comparison cards", () => {
   it("stays put after a pick and moves the Selected badge to the clicked card", async () => {
     const user = userEvent.setup();
     await renderPage();
+    await userEvent.click(screen.getByText("Compare available models"));
     await screen.findByText("Choose a model");
 
     // Default (pro) is ePAI - its card carries the Selected badge.
-    const epaiCard = screen.getByText(/Full abdominal organ segmentation/).closest("[role=radio]")!;
-    const atlasCard = screen.getByText(/anatomically consistent/).closest("[role=radio]")!;
+    const epaiCard = within(screen.getByRole("radiogroup", { name: "Segmentation model" })).getByText(/Full abdominal organ segmentation/).closest("[role=radio]")!;
+    const atlasCard = within(screen.getByRole("radiogroup", { name: "Segmentation model" })).getByText(/anatomically consistent/).closest("[role=radio]")!;
     expect(within(epaiCard as HTMLElement).getByText("Selected")).toBeInTheDocument();
 
     await user.click(atlasCard);
@@ -70,7 +72,7 @@ describe("model comparison cards", () => {
     // The section is still there and every card is still shown; the badge just
     // moved to Atlas-Net.
     expect(screen.getByText("Choose a model")).toBeInTheDocument();
-    expect(screen.getByText(/Full abdominal organ segmentation/)).toBeInTheDocument();
+    expect(within(screen.getByRole("radiogroup", { name: "Segmentation model" })).getByText(/Full abdominal organ segmentation/)).toBeInTheDocument();
     await waitFor(() =>
       expect(within(atlasCard as HTMLElement).getByText("Selected")).toBeInTheDocument(),
     );

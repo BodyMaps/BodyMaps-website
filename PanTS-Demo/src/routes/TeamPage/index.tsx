@@ -1,6 +1,4 @@
 import { preload } from "react-dom";
-import Header from "../../components/Header";
-import SiteFooter from "../../components/SiteFooter";
 import styles from "./TeamPage.module.css";
 
 type Member = {
@@ -123,9 +121,8 @@ function MemberCard({
 export default function TeamPage() {
   return (
     <div className={styles.page}>
-      <Header />
-      <main className={styles.main}>
-        <h1 className={styles.title}>
+      <section className={styles.main} aria-labelledby="team-title">
+        <h1 className={styles.title} id="team-title">
           Meet the <span className={styles.titleBold}>team.</span>
         </h1>
         <div className={styles.grid}>
@@ -133,8 +130,7 @@ export default function TeamPage() {
             <MemberCard key={m.name} member={m} priority={i === 0} />
           ))}
         </div>
-      </main>
-      <SiteFooter />
+      </section>
     </div>
   );
 }

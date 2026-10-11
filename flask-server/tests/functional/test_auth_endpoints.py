@@ -60,6 +60,47 @@ def test_me_requires_auth(client):
     assert client.get("/api/me/jobs").status_code == 401
 
 
+@pytest.mark.parametrize("remember_me", [None, False, True])
+def test_session_persistence_requires_explicit_choice(client, remember_me):
+    body = {"email": "remember@example.test", "password": "password1"}
+    if remember_me is not None:
+        body["remember_me"] = remember_me
+    created = client.post("/api/auth/register", json=body)
+    assert created.status_code == 201
+    for response in (created, client.post("/api/auth/login", json=body)):
+        cookie = response.headers["Set-Cookie"]
+        assert "HttpOnly" in cookie and "SameSite=Lax" in cookie
+        assert ("Max-Age=1209600" in cookie) is (remember_me is True)
+        assert ("Expires=" in cookie) is (remember_me is True)
+    # Browser-retention preference never disables the server-side TTL.
+    from models.engine import session_scope
+    from models.auth_session import AuthSession
+    from sqlalchemy import select
+    with session_scope() as session:
+        records = session.execute(select(AuthSession)).scalars().all()
+        assert len(records) == 2
+        assert all((record.expires_at - record.created_at).days == 14 for record in records)
+
+
+@pytest.mark.parametrize("remember_me", ["false", "true", 1, None, {}, []])
+def test_invalid_remember_me_does_not_create_a_session(client, remember_me):
+    body = {"email": "invalid-remember@example.test", "password": "password1", "remember_me": remember_me}
+    assert client.post("/api/auth/register", json=body).status_code == 400
+    assert client.post("/api/auth/login", json=body).status_code == 400
+    assert client.get("/api/auth/me").status_code == 401
+
+
+def test_password_reset_does_not_implicitly_remember_the_browser(client):
+    client.post("/api/auth/register", json={"email": "reset-cookie@example.test", "password": "password1", "remember_me": True})
+    from services import auth_store
+    _, token = auth_store.create_password_reset("reset-cookie@example.test")
+    response = client.post("/api/auth/reset-password", json={"token": token, "password": "replacement-password"})
+    assert response.status_code == 200
+    cookie = response.headers["Set-Cookie"]
+    assert "Max-Age=" not in cookie and "Expires=" not in cookie
+    assert "HttpOnly" in cookie
+
+
 def test_register_validation_and_duplicate(client):
     assert client.post("/api/auth/register", json={"email": "x@y.com", "password": "short"}).status_code == 400
     assert client.post("/api/auth/register", json={"email": "", "password": "password1"}).status_code == 400
@@ -195,10 +236,10 @@ def test_logout_clears_session(client):
 
 
 def test_me_jobs_empty_for_new_user(client):
-    client.post("/api/auth/register", json={"email": "g@h.com", "password": "password1"})
+    registered = client.post("/api/auth/register", json={"email": "g@h.com", "password": "password1"})
     r = client.get("/api/me/jobs")
     assert r.status_code == 200
-    assert r.get_json() == {"jobs": []}
+    assert r.get_json() == {"user_id": registered.get_json()["user"]["id"], "jobs": []}
 
 
 # ---- display name ---------------------------------------------------------

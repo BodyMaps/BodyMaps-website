@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "../contexts/authContext";
 import UploadPage from "../routes/UploadPage";
-import { RECENT_UPLOADS_KEY, type RecentUpload } from "../helpers/recentUploads";
+import { recentUploadsStorageKey, setRecentUploadsAccount, type RecentUpload } from "../helpers/recentUploads";
 
 // What a Free account runs into on the Upload page, and what it's told.
 //
@@ -35,6 +35,7 @@ beforeEach(() => {
   inferenceRefusal = null;
   adminCouponResponse = null;
   localStorage.clear();
+  setRecentUploadsAccount(null);
   global.fetch = vi.fn(async (url: RequestInfo | URL) => {
     const u = String(url);
     if (u.includes("/api/auth/me")) return json({ user: USER });
@@ -128,6 +129,7 @@ describe("model access", () => {
     await settled();
     await openModelMenu(user);
     await user.click(modelOption("LesionSegmenter"));
+    await user.click(screen.getByRole("menuitemradio", { name: "Pancreatic lesion" }));
 
     expect(screen.queryByText(/needs Pro/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /LesionSegmenter/ })).toBeInTheDocument();
@@ -235,7 +237,7 @@ describe("running several scans at once", () => {
       sessionId: "s-running", label: "earlier.nii.gz", model: "LesionSegmenter",
       status: "Processing", timestamp: Date.now(),
     };
-    localStorage.setItem(RECENT_UPLOADS_KEY, JSON.stringify([running]));
+    localStorage.setItem(recentUploadsStorageKey(USER.id), JSON.stringify([running]));
 
     const user = userEvent.setup();
     const { container } = renderUpload();
@@ -298,7 +300,7 @@ describe("the server's own refusal", () => {
 
     await screen.findByText("You've used your scans for today", {}, { timeout: 5000 });
     await waitFor(() => {
-      const stored = JSON.parse(localStorage.getItem(RECENT_UPLOADS_KEY) || "[]");
+      const stored = JSON.parse(localStorage.getItem(recentUploadsStorageKey(USER.id)) || "[]");
       expect(stored[0]?.status).toBe("Cancelled");
     });
   });

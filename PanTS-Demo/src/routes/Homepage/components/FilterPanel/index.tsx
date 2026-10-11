@@ -32,7 +32,7 @@ export default function FilterPanel({ filters, setFilters, facetData, toggleMult
   };
 
   return (
-    <div className={styles.filterPanel}>
+    <div className={styles.filterPanel} id="dataset-filters" aria-label="Advanced filters">
       {/* Tumor */}
       <div className="flex flex-col gap-2.5">
         <span className={styles.filterLabel}>Tumor</span>
