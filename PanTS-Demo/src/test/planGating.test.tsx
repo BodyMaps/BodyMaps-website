@@ -197,19 +197,28 @@ describe("model access", () => {
   });
 });
 
-describe("postprocessing", () => {
-  it("is locked on Free", async () => {
+describe("unavailable pipeline stages", () => {
+  it.each(["free", "pro", "admin"])("does not offer unsupported preprocessing or postprocessing to %s accounts", async (access) => {
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) =>
+      String(url).endsWith("/api/auth/me")
+        ? json({ user: { ...USER, plan: access === "pro" ? "pro" : "free", roles: access === "admin" ? ["admin"] : [] } })
+        : originalFetch(url, init)) as unknown as typeof fetch;
     const user = userEvent.setup();
     renderUpload();
-    await settled();
-
-    // Preprocessing (step 1) and postprocessing (step 3) share the placeholder;
-    // the second is the one ShapeKit lives under.
-    const skipButtons = screen.getAllByRole("button", { name: /None \(skip\)/ });
-    await user.click(skipButtons[skipButtons.length - 1]);
-    await user.click(screen.getByText("ShapeKit"));
-
-    expect(await screen.findByText("ShapeKit needs Pro")).toBeInTheDocument();
+    await screen.findByRole("button", { name: access === "free" ? /LesionSegmenter/ : /^ePAI$/ });
+    for (const stage of ["Preprocessing", "Postprocessing"]) {
+      const control = screen.getByRole("button", { name: `${stage}: None (skip)` });
+      expect(control).toBeDisabled();
+      expect(control).toHaveAccessibleDescription("Server availability could not be checked");
+      await user.click(control);
+    }
+    expect(screen.getAllByText("Server availability could not be checked")).toHaveLength(2);
+    expect(document.querySelector("#preprocessing-options")).not.toBeInTheDocument();
+    expect(document.querySelector("#postprocessing-options")).not.toBeInTheDocument();
+    expect(screen.queryByText("ShapeKit")).not.toBeInTheDocument();
+    expect(screen.queryByText("ShapeKit needs Pro")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run", exact: true })).toBeEnabled();
   });
 });
 

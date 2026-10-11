@@ -8,7 +8,7 @@ import { recentUploadsStorageKey, setRecentUploadsAccount } from "../helpers/rec
 vi.mock("../components/AuthButton", () => ({ default: () => <button type="button">Account controls</button> }));
 vi.mock("../components/WorkspaceTour", () => ({ default: () => null }));
 vi.mock("../components/SiteFooter", () => ({ default: () => <footer>Site footer</footer> }));
-const Location = () => <output aria-label="Current route">{useLocation().pathname}</output>;
+const Location = () => { const { pathname, search } = useLocation(); return <output aria-label="Current route">{pathname + search}</output>; };
 const mount = (path = "/dashboard") => render(<MemoryRouter initialEntries={[path]}>
     <Routes><Route element={<DesignShell />}><Route path="*" element={<Location />} /></Route></Routes>
 </MemoryRouter>);
@@ -54,6 +54,37 @@ describe("workspace sidebar", () => {
         await user.click(screen.getByRole("button", { name: "New run" }));
         expect(screen.getByLabelText("Current route")).toHaveTextContent("/upload");
         expect(localStorage.getItem(recentUploadsStorageKey("u1"))).toBe(saved);
+    });
+
+    it("opens archived batches directly in History with their identifier", async () => {
+        const user = userEvent.setup();
+        localStorage.setItem(recentUploadsStorageKey("u1"), JSON.stringify([
+            { sessionId: "scan-a", label: "First scan", batchId: "batch-a", batchLabel: "Archived batch", model: "epai", status: "Completed", viewed: true, timestamp: Date.now() - 172800000 },
+            { sessionId: "scan-b", label: "Second scan", batchId: "batch-a", batchLabel: "Archived batch", model: "epai", status: "Failed", timestamp: Date.now() - 172800000 },
+        ]));
+        mount();
+        await user.click(screen.getByRole("button", { name: /Archived batch/ }));
+        expect(screen.getByLabelText("Current route")).toHaveTextContent("/account/history?batch=batch-a");
+    });
+
+    it("preserves the selected failed scan when opening History", async () => {
+        const user = userEvent.setup();
+        localStorage.setItem(recentUploadsStorageKey("u1"), JSON.stringify([
+            { sessionId: "failed-a", label: "Failed scan", model: "epai", status: "Failed", timestamp: Date.now() },
+        ]));
+        mount();
+        await user.click(screen.getByRole("button", { name: /Failed scan/ }));
+        expect(screen.getByLabelText("Current route")).toHaveTextContent("/account/history?session=failed-a");
+    });
+
+    it("keeps active batches in the workspace", async () => {
+        const user = userEvent.setup();
+        localStorage.setItem(recentUploadsStorageKey("u1"), JSON.stringify([
+            { sessionId: "running-a", label: "Running scan", batchId: "batch-a", batchLabel: "Active batch", model: "epai", status: "Processing", timestamp: Date.now() },
+        ]));
+        mount();
+        await user.click(screen.getByRole("button", { name: /Active batch/ }));
+        expect(screen.getByLabelText("Current route")).toHaveTextContent("/upload");
     });
 
     it("mobile navigation closes on Escape and returns focus to its opener", async () => {

@@ -29,8 +29,8 @@ export default function SearchBar({
         <input
           type="text"
           inputMode="numeric"
-          aria-label="Search by case ID"
-          placeholder="Search by case ID, e.g. 17, 35, 121"
+          aria-label="Search by case number"
+          placeholder="Search by case number, e.g. 17, 121, 9902"
           className={styles.searchInput}
           value={searchId || ""}
           onChange={(e) => {

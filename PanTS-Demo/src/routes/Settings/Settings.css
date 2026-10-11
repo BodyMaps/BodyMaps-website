@@ -130,6 +130,8 @@
 	border-bottom: none;
 }
 .set-row-label {
+	min-width: 0;
+	overflow-wrap: anywhere;
 	font-size: 14px;
 	color: #111111;
 }
@@ -142,6 +144,8 @@
 	color: #8f8f8f;
 }
 .set-row-value {
+	min-width: 0;
+	overflow-wrap: anywhere;
 	font-size: 14px;
 	color: #6a6a6a;
 	font-family: "IBM Plex Mono", ui-monospace, monospace;
@@ -195,7 +199,8 @@
 	font-family: inherit;
 	font-size: 14px;
 	color: #111111;
-	min-width: 200px;
+	min-width: 0;
+	width: min(260px, 100%);
 }
 .set-input:focus {
 	outline: none;
@@ -204,6 +209,8 @@
 }
 
 .set-select {
+	min-width: 0;
+	max-width: 100%;
 	padding: 8px 11px;
 	border-radius: 8px;
 	border: 1px solid rgba(0, 0, 0, 0.14);
@@ -611,5 +618,14 @@
 .set-profile-save { display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap; padding:18px 24px; background:#fafbfc; border-top:1px solid rgba(15,23,42,.06); }
 .set-wrapper button:focus-visible,.set-wrapper a:focus-visible { outline:3px solid #68ace5; outline-offset:3px; }
 @media(max-width:1000px) { .set-layout { grid-template-columns:1fr; } .set-nav { position:static; flex-direction:row; flex-wrap:wrap; gap:4px; } .set-nav-item { flex:none; } }
-@media(max-width:600px) { .set-panel { padding:18px; border-radius:22px; } .set-profile-hero { padding:22px 18px; } .set-profile-fields { padding:0 18px; } .set-profile-fields .set-row { align-items:flex-start; flex-direction:column; gap:12px; } .set-profile-fields .set-input { width:100%; } .set-profile-save { padding:16px 18px; } }
+@media(max-width:600px) {
+  .set-panel { padding:18px; border-radius:22px; }
+  .set-profile-hero { padding:22px 18px; }
+  .set-profile-fields { padding:0 18px; }
+  .set-row { align-items:flex-start; flex-direction:column; gap:12px; }
+  .set-input,.set-select { width:100%; }
+  .set-row-value { max-width:100%; }
+  .set-row-edit { flex-wrap:wrap; max-width:100%; }
+  .set-profile-save { padding:16px 18px; }
+}
 @media(prefers-reduced-motion:reduce) { .set-wrapper * { transition:none!important; animation:none!important; } }

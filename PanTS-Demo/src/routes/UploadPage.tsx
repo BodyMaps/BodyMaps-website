@@ -121,32 +121,33 @@ import {
   friendlyScanName,
   markRecentUploadViewed,
   renameRecentUpload,
-  formatRelativeTime,
   groupUploads,
   isGroupInFlight,
   loadRecentUploads,
   RECENT_UPLOADS_CHANGED,
   RECENT_UPLOADS_MIGRATED,
   getRecentUploadsAccount,
-  recentStatusColor,
   removeRecentUpload,
   splitByAge,
   updateRecentUploadStatus,
+  updateRecentUploadStages,
   type RecentUpload,
   type RecentUploadsMigratedDetail,
 } from "../helpers/recentUploads";
 import WorkspaceIntro from "./LandingPage";
 import "./Workspace.css";
 import ProcessingSummaryBar from "../components/ProcessingSummaryBar";
+import WorkspaceRunCard from "../components/WorkspaceRunCard";
+import PipelineStepSelector from "../components/PipelineStepSelector";
 import BatchDetailsModal from "../components/BatchDetailsModal";
 import { track } from "../helpers/analytics";
 import UpgradeDialog, { type UpgradeBlock } from "../components/UpgradeDialog";
 import { useAuth } from "../contexts/authContext";
 import {
-  canPostprocess,
   gatingPlan,
   isModelLocked,
   maxConcurrentScans,
+  canPostprocess,
   type PlanId,
 } from "../helpers/accountProfile";
 import { looksLikeDicom, setLocalDicomFiles } from "../helpers/dicomLocal";
@@ -164,6 +165,7 @@ import { postWithRetry, resolveResumeStart } from "../helpers/chunkUpload";
 import { assertUploadAccount, createAccountUploadController, isUploadAccountCurrent } from "../helpers/uploadAccount";
 import { requestReconstructionInference } from "../helpers/reconstructionInference";
 import { createBatchArchive, startBlobDownload } from "../helpers/batchDownload";
+import { appendPipelineFields, EMPTY_PIPELINE, pipelineAcknowledged, readPipelineOptions, readPipelineStages, type InferenceSelection, type PipelineSelection, type PipelineOptions } from "../helpers/inferencePipeline";
 
 
 const parseApiResponse = async (res: Response): Promise<any> => {
@@ -358,6 +360,9 @@ const UploadPage: React.FC = () => {
   >(new Map());
 
   const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
+  const [sampleLoading, setSampleLoading] = useState(false);
+  const sampleAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => sampleAbortRef.current?.abort(), [user?.id]);
   const [viewOnlyUploadNotice, setViewOnlyUploadNotice] = useState(false);
   // Per-item background-upload progress while a file still sits in the
   // dropzone (pre-Run) - drives the file chip's own uploading/done/failed
@@ -423,6 +428,25 @@ const UploadPage: React.FC = () => {
     "pancreatic" | "liver" | "kidney" | "colon"
   >("pancreatic");
   const modelDropRef = useRef<HTMLDivElement>(null);
+  const [pipeline, setPipeline] = useState<PipelineSelection>(EMPTY_PIPELINE);
+  const [pipelineOptions, setPipelineOptions] = useState<PipelineOptions | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    setPipelineOptions(null);
+    if (user?.id) fetch(`${API_BASE}/api/pipeline/options`, { credentials: "include", signal: controller.signal })
+      .then(async (response) => response.ok ? readPipelineOptions(await response.json()) : null)
+      .then((options) => { if (!controller.signal.aborted) setPipelineOptions(options); })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [user?.id, plan]);
+  useEffect(() => { setPipeline(EMPTY_PIPELINE); }, [user?.id]);
+  useEffect(() => {
+    setPipeline((current) => {
+      const preprocessing = selectedModel !== "None" && pipelineOptions?.preprocessing.some((option) => option.id === current.preprocessing && option.available && option.supported_models.includes(selectedModel)) ? current.preprocessing : null;
+      const postprocessing = selectedModel !== "None" && pipelineOptions?.postprocessing.some((option) => option.id === current.postprocessing && option.available && option.supported_models.includes(selectedModel)) ? current.postprocessing : null;
+      return preprocessing === current.preprocessing && postprocessing === current.postprocessing ? current : { preprocessing, postprocessing };
+    });
+  }, [selectedModel, pipelineOptions]);
 
   const submitAdminCoupon = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -441,12 +465,6 @@ const UploadPage: React.FC = () => {
       setCouponBusy(false);
     }
   };
-  const [preDropOpen, setPreDropOpen] = useState(false);
-  const preDropRef = useRef<HTMLDivElement>(null);
-  const [preValue, setPreValue] = useState("");
-  const [postDropOpen, setPostDropOpen] = useState(false);
-  const postDropRef = useRef<HTMLDivElement>(null);
-  const [postValue, setPostValue] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
   const [recentUploads, setRecentUploads] = useState<RecentUpload[]>(() =>
     loadRecentUploads(),
@@ -558,6 +576,42 @@ const UploadPage: React.FC = () => {
     });
 
   const allowedExtensions = [".nii", ".nii.gz"];
+
+  const loadSample = async () => {
+    if (!ensureAccount() || sampleAbortRef.current) return;
+    const ownerId = user?.id ?? null;
+    const controller = createAccountUploadController(ownerId);
+    sampleAbortRef.current = controller;
+    setSampleLoading(true);
+    setMessage("");
+    let timedOut = false;
+    const timer = window.setTimeout(() => { timedOut = true; controller.abort(); }, 90_000);
+    try {
+      const response = await fetch(`${API_BASE}/api/get-main-nifti/35.nii.gz`, {
+        credentials: "include", signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(response.status === 503 ? "The sample dataset is temporarily unavailable. Try again when storage is available." : "The sample could not be loaded. Please try again.");
+      if (/json|text\//i.test(response.headers.get("content-type") || "")) throw new Error("The sample response was not a scan. Please try again.");
+      const blob = await response.blob();
+      assertUploadAccount(ownerId, controller.signal);
+      if (!blob.size) throw new Error("The sample scan was empty. Please try again.");
+      setSelectedItems((previous) => [...previous, {
+        id: crypto.randomUUID(), kind: "nifti", file: new File([blob], "PanTS_00000035.nii.gz", { type: "application/gzip" }),
+      }]);
+      setMessage("Sample case 35 is ready. Choose a model and select Run, or choose None to view it.");
+    } catch (error) {
+      if (isUploadAccountCurrent(ownerId) && (!controller.signal.aborted || timedOut)) {
+        setMessage(timedOut ? "Loading the sample timed out. Please try again." : error instanceof Error ? error.message : "The sample could not be loaded.");
+      }
+    } finally {
+      window.clearTimeout(timer);
+      if (sampleAbortRef.current === controller) {
+        sampleAbortRef.current = null;
+        if (isUploadAccountCurrent(ownerId)) setSampleLoading(false);
+      }
+      controller.abort();
+    }
+  };
 
   /* ── File handling ── */
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -782,6 +836,7 @@ const UploadPage: React.FC = () => {
           credentials: "include",
         });
         const data = await parseApiResponse(res);
+        if (pollGenerationRef.current.get(sid) !== generation) return;
         const status = (data.status || "").toLowerCase();
 
         // The server doesn't know this session: the upload never finished
@@ -805,6 +860,9 @@ const UploadPage: React.FC = () => {
 
         if (!res.ok)
           throw new Error(data.error || data.status || "Status check failed");
+
+        const stages = readPipelineStages(data.pipeline_stages);
+        if (stages) setRecentUploads(updateRecentUploadStages(sid, stages, user?.id ?? null));
 
         if (status === "completed") {
           setQueuePosition(sid);
@@ -911,7 +969,7 @@ const UploadPage: React.FC = () => {
           // file is already on the server - just replay the inference call. Not
           // queued behind the resuming uploads: it costs one POST and getting it
           // into the GPU queue now is the whole point.
-          dispatchInference(p.sessionId, p.model, p.uploadedFilename, false);
+          dispatchInference(p.sessionId, p.model, p.uploadedFilename, false, p.pipeline);
         } else if (p) {
           setPhase(u.sessionId, "waiting");
           uploadRemainingRef.current.set(p.sessionId, p.file.size);
@@ -1002,41 +1060,16 @@ const UploadPage: React.FC = () => {
     return () => document.removeEventListener("mousedown", handler);
   }, [modelDropOpen]);
 
-  useEffect(() => {
-    if (!preDropOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (preDropRef.current && !preDropRef.current.contains(e.target as Node))
-        setPreDropOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [preDropOpen]);
-
-  useEffect(() => {
-    if (!postDropOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        postDropRef.current &&
-        !postDropRef.current.contains(e.target as Node)
-      )
-        setPostDropOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [postDropOpen]);
-
   /* ── Upload (chunked) ── */
   useEffect(() => {
     const closeMenus = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (modelDropOpen) modelDropRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
-      if (preDropOpen) preDropRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
-      if (postDropOpen) postDropRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
-      setModelDropOpen(false); setPreDropOpen(false); setPostDropOpen(false);
+      setModelDropOpen(false);
     };
     document.addEventListener("keydown", closeMenus);
     return () => document.removeEventListener("keydown", closeMenus);
-  }, [modelDropOpen, preDropOpen, postDropOpen]);
+  }, [modelDropOpen]);
 
   useEffect(() => {
     const focusComposer = () => {
@@ -1079,8 +1112,12 @@ const UploadPage: React.FC = () => {
     model: string,
     uploadedName: string,
     foreground: boolean,
+    selection?: InferenceSelection,
   ) => {
     if (!isUploadAccountCurrent(user?.id ?? null)) return;
+    if (loadRecentUploads(user?.id ?? null).find((upload) => upload.sessionId === sid)?.status !== "Processing") {
+      await deletePendingUpload(sid); return;
+    }
     // Reuse the upload's controller when there is one, so a Cancel pressed
     // during the upload still aborts this call.
     let controller = uploadAbortRef.current.get(sid);
@@ -1095,9 +1132,7 @@ const UploadPage: React.FC = () => {
       inferFd.append("session_id", sid);
       inferFd.append("model_name", model);
       inferFd.append("uploaded_filename", uploadedName);
-      if (model === "LesionSegmenter") {
-        inferFd.append("lesion_target", lesionTarget);
-      }
+      appendPipelineFields(inferFd, selection);
       const res = await fetch(`${API_BASE}/api/run-epai-inference`, {
         method: "POST",
         body: inferFd,
@@ -1106,6 +1141,7 @@ const UploadPage: React.FC = () => {
         signal: controller.signal,
       });
       const data = await parseApiResponse(res);
+      assertUploadAccount(user?.id ?? null, controller.signal);
       // 402 is the plan refusing, not a failure — the server's reason drives
       // the upgrade dialog. The scan goes to Cancelled rather than Failed:
       // nothing broke, it just never ran.
@@ -1122,13 +1158,34 @@ const UploadPage: React.FC = () => {
         return;
       }
       if (!res.ok) throw new Error(data.error || "Failed to start inference");
+      assertUploadAccount(user?.id ?? null, controller.signal);
+      if (!pipelineAcknowledged(data.pipeline, model, selection)) {
+        // Guard a mixed-version deployment or resumed request against silently
+        // losing its optional steps. The old server may already have admitted it.
+        await fetch(`${API_BASE}/api/cancel-inference/${sid}`, { method: "POST", credentials: "include",
+          headers: { "X-Upload-Owner": user?.id ?? "" } }).catch(() => {});
+        assertUploadAccount(user?.id ?? null, controller.signal);
+        await deletePendingUpload(sid);
+        setPhase(sid);
+        setRecentUploads(updateRecentUploadStatus(sid, "Failed", user?.id ?? null));
+        setMessage("The server did not confirm the selected pipeline. Cancellation was requested; refresh before starting another run.");
+        return;
+      }
+      const stages = readPipelineStages(data.pipeline_stages);
+      if (stages) setRecentUploads(updateRecentUploadStages(sid, stages, user?.id ?? null));
 
       // Queued server-side now - nothing here is needed to finish the run, so
       // drop the resumable record.
       await deletePendingUpload(sid);
       refreshUsage(); // a scan was just spent; keep the settings counter honest
       setSessionId(sid);
-      setPhase(sid, "queued"); // server queues for the GPU; poll refines this
+      if (data.status === "completed") {
+        finishSession(sid);
+        if (foreground) setMessage("");
+        return;
+      }
+      // An idempotent replay may reconnect to an already-running job.
+      setPhase(sid, data.status === "running" ? "running" : "queued");
       // No status-line message here: the processing card below already shows
       // "Running..." for this session, so a raw-UUID line would just duplicate it.
       if (foreground) setMessage("");
@@ -1496,7 +1553,7 @@ const UploadPage: React.FC = () => {
         setIsUploading(false);
       }
 
-      await dispatchInference(sid, model, uploadedName, foreground);
+      await dispatchInference(sid, model, uploadedName, foreground, p.pipeline);
     } catch (err) {
       // A user cancel aborts our fetches - cancelRun already did the cleanup
       // and set the card to Cancelled, so don't overwrite that with Failed.
@@ -1532,7 +1589,7 @@ const UploadPage: React.FC = () => {
   // flow as a NIfTI run. Not IndexedDB-resumable (a folder is many files); a reload
   // mid-upload marks the run Failed, consistent with the Active/Recent cards. Wired
   // into uploadAbortRef so the Active card's Cancel button aborts it cleanly.
-  const runDicomUpload = async (sid: string, files: File[], model: string) => {
+  const runDicomUpload = async (sid: string, files: File[], model: string, selection: InferenceSelection) => {
     const controller = createAccountUploadController(user?.id ?? null);
     uploadAbortRef.current.set(sid, controller);
     foregroundUploadSidRef.current = sid;
@@ -1590,7 +1647,10 @@ const UploadPage: React.FC = () => {
       foregroundUploadSidRef.current = null;
       setIsUploading(false);
 
-      await dispatchInference(sid, model, uploadedName, true);
+      // Conversion is complete. Preserve Run's choices across a reload before admission.
+      await savePendingUpload({ sessionId: sid, file: new Blob(), filename: uploadedName,
+        model, pipeline: selection, bdmapId: "", totalChunks: 0, nextChunk: 0, uploadedFilename: uploadedName });
+      await dispatchInference(sid, model, uploadedName, true, selection);
     } catch (err) {
       // A user cancel aborts our fetches - cancelRun already set the card to
       // Cancelled, so don't overwrite that with Failed.
@@ -1619,6 +1679,7 @@ const UploadPage: React.FC = () => {
   const startScanRun = async (
     item: SelectedItem,
     model: string,
+    selection: InferenceSelection,
     batch?: { batchId: string; batchLabel: string },
   ) => {
     if (!isUploadAccountCurrent(user?.id ?? null)) return;
@@ -1645,6 +1706,7 @@ const UploadPage: React.FC = () => {
         label,
         sourceName,
         model,
+        pipeline: selection,
         status: "Processing",
         timestamp: ts,
         isReconstruction: model === "OpenVAE",
@@ -1675,7 +1737,9 @@ const UploadPage: React.FC = () => {
           setRecentUploads(updateRecentUploadStatus(sid, "Failed", user?.id ?? null));
           return;
         }
-        await dispatchInference(sid, model, uploadedName, false);
+        await savePendingUpload({ sessionId: sid, file: new Blob(), filename: uploadedName,
+          model, pipeline: selection, bdmapId: "", totalChunks: 0, nextChunk: 0, uploadedFilename: uploadedName });
+        await dispatchInference(sid, model, uploadedName, false, selection);
       })();
       return;
     }
@@ -1691,7 +1755,7 @@ const UploadPage: React.FC = () => {
     if (item.kind === "dicom") {
       const bytes = item.files.reduce((sum, f) => sum + f.size, 0);
       uploadRemainingRef.current.set(sid, bytes);
-      enqueueUpload(() => runDicomUpload(sid, item.files, model));
+      enqueueUpload(() => runDicomUpload(sid, item.files, model, selection));
       return;
     }
 
@@ -1701,6 +1765,7 @@ const UploadPage: React.FC = () => {
       file,
       filename: file.name,
       model,
+      pipeline: selection,
       bdmapId: "",
       totalChunks: Math.ceil(file.size / CHUNK_SIZE),
       nextChunk: 0,
@@ -1753,6 +1818,14 @@ const UploadPage: React.FC = () => {
     }
 
     const model = selectedModel;
+    if (pipeline.preprocessing && modelLocked(pipeline.preprocessing)) {
+      setUpgradeBlock({ reason: "model_locked", feature: pipeline.preprocessing, plan: plan as PlanId }); return;
+    }
+    if (pipeline.postprocessing && !canPostprocess(plan)) {
+      setUpgradeBlock({ reason: "postprocessing", feature: pipeline.postprocessing, plan: plan as PlanId }); return;
+    }
+    const selection: InferenceSelection = { ...pipeline,
+      ...(model === "LesionSegmenter" ? { lesionTarget } : {}) };
     setInferenceCompleted(false);
 
     // Multiple selected scans run together as one batch (shared id + label). A
@@ -1772,7 +1845,7 @@ const UploadPage: React.FC = () => {
     // as soon as its own upload finishes.
     setSelectedItems([]);
     for (const item of items) {
-      await startScanRun(item, model, batch);
+      await startScanRun(item, model, selection, batch);
     }
   };
 
@@ -1832,9 +1905,9 @@ const UploadPage: React.FC = () => {
       }
       const blob = await resultRes.blob();
       signal.throwIfAborted();
-      startBlobDownload(blob, `epai_output_${sid}.zip`);
+      startBlobDownload(blob, `bodymaps_results_${sid}.zip`);
       showDownloadMessage(
-        "Download started: zip includes combined_labels.nii.gz and output.csv",
+        "Download started: result archive includes the files produced by this run.",
       );
   });
 
@@ -1948,69 +2021,20 @@ const UploadPage: React.FC = () => {
   );
 
   // ── A single in-flight scan (not part of a batch) ──
-  const ProcessingCard = ({ u }: { u: RecentUpload }) => {
-    const phase = sessionPhases[u.sessionId];
-    const queuePos = queuePositions[u.sessionId];
-    const phaseLabel =
-      phase === "waiting" ? "Waiting to upload…" :
-      phase === "uploading" ? "Uploading…" :
-      phase === "queued" ? (queuePos ? `#${queuePos} in queue` : "Queued for GPU") :
-      "Running…";
-    return (
-      <div style={{
-        background: "#f5f5f5", border: "1px solid rgba(0, 45, 114, 0.14)", borderRadius: "12px",
-        padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-            <div style={{
-              width: "36px", height: "36px", borderRadius: "8px", flexShrink: 0,
-              background: "rgba(0, 45, 114, 0.04)", border: "1px solid rgba(0, 45, 114, 0.12)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>{/* A static pulsing dot per scan instead of a spinning wheel:
-                 multiple in-flight scans shouldn't each spin. The single
-                 spinner lives in the batch ProcessingSummaryBar. */}
-              <span className="animate-pulse" style={{ width: 8, height: 8, borderRadius: "50%", background: "#002d72", display: "block" }} />
-            </div>
-            <div>
-              <div style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "14px", fontWeight: 600, color: "#111111" }}>{u.label}</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: "11px", color: "#6a6a6a", marginTop: "2px" }}>
-                {u.model ? `${u.model} · ` : ""}{formatRelativeTime(u.timestamp)}
-                <span className={`proc-close-note${closeInfo.active ? "" : " proc-close-note--ready"}`}>
-                  {" "}· {closeNote}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "12px", fontWeight: 500, color: phase === "queued" ? "#6a6a6a" : "#002d72" }}>{phaseLabel}</span>
-            <button className="active-cancel-btn" onClick={() => cancelRun(u)}>Cancel</button>
-          </div>
-        </div>
-        {/* No real percent-complete exists for inference (nnU-Net doesn't
-            report progress mid-run), so instead of an indeterminate sweep
-            that told the user nothing, this shows how long the run has
-            left based on how this model's runs typically take. Only shown
-            once actually running: during "queued" there's no dispatch-time
-            signal to build an estimate from. */}
-        {phase === "running" && (
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: "11px", color: "#6a6a6a" }}>
-            {estimateRemaining(
-              u.model || "",
-              runningStartedAtRef.current.get(u.sessionId) ?? Date.now(),
-              sessionFileSizeRef.current.get(u.sessionId),
-              durationEstimates[u.sessionId],
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
+  const renderProcessingCard = (u: RecentUpload) => <WorkspaceRunCard
+    key={u.sessionId} upload={u} phase={sessionPhases[u.sessionId]} queuePosition={queuePositions[u.sessionId]}
+    closeNote={closeNote}
+    estimate={sessionPhases[u.sessionId] === "running" && !u.pipeline?.preprocessing && !u.pipeline?.postprocessing ? estimateRemaining(
+      u.model || "", runningStartedAtRef.current.get(u.sessionId) ?? Date.now(),
+      sessionFileSizeRef.current.get(u.sessionId), durationEstimates[u.sessionId],
+    ) : undefined}
+    actions={<button type="button" className="active-cancel-btn" onClick={() => cancelRun(u)}>Cancel</button>}
+  />;
 
   const inFlightCards = inFlight.length > 0 && (
     <div className="dropzone-inflight" onClick={(e) => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
       {inFlight.map(g => {
-        if (g.kind === "single") return <ProcessingCard key={g.upload.sessionId} u={g.upload} />;
+        if (g.kind === "single") return renderProcessingCard(g.upload);
         const running = g.uploads.filter(u => u.status === "Processing");
         const done = g.uploads.filter(u => u.status === "Completed").length;
         const phases = running.map(u => sessionPhases[u.sessionId]);
@@ -2020,6 +2044,8 @@ const UploadPage: React.FC = () => {
         return (
           <ProcessingSummaryBar key={g.batchId} title={g.label} running={running.length}
             done={done} statusLabel={statusLabel}
+            failed={g.uploads.filter((u) => u.status === "Failed").length}
+            cancelled={g.uploads.filter((u) => u.status === "Cancelled").length}
             closeNote={closeNote} closeReady={!closeInfo.active}
             onViewDetails={() => { track("upload_open_batch_details"); setDetailsBatchId(g.batchId); }}
             onCancelAll={() => running.forEach(u => cancelRun(u))} />
@@ -2031,57 +2057,18 @@ const UploadPage: React.FC = () => {
   // ── A single scan's finished state, shown in the SAME drop-zone slot that
   // showed its progress (and its file chip before that) - not a separate
   // panel appearing elsewhere on the page. ──
-  const singleCompletedCard = singleCompletedVisible && (
-    <div
-      className="result-section dropzone-completed"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="result-title" role="status">
-        <span className="result-title-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 6 9 17l-5-5" />
-          </svg>
-        </span>
-        <span>Inference Complete</span>
-      </div>
-      <div className="result-btns">
-        {selectedModel === "OpenVAE" ? (
-          <>
-            <button
-              className="result-btn"
-              onClick={() => {
-                setRecentUploads(markRecentUploadViewed(sessionId));
-                navigate(`/reconstruction/${sessionId}`);
-              }}
-            >
-              View Reconstruction
-            </button>
-            <button className="result-btn" onClick={handleRunEpaiOnReconstruction}>
-              Run ePAI on Result
-            </button>
-            <button className="result-btn" disabled={downloadBusy} onClick={() => downloadResult(sessionId)}>
-              Download
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              className="result-btn result-btn-primary"
-              onClick={() => {
-                setRecentUploads(markRecentUploadViewed(sessionId));
-                navigate(`/session/${sessionId}`);
-              }}
-            >
-              View Visualization
-            </button>
-            <button className="result-btn" disabled={downloadBusy} onClick={() => downloadResult(sessionId)}>
-              Download Results
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
+  const completedUpload = recentUploads.find((upload) => upload.sessionId === sessionId);
+  const singleCompletedCard = singleCompletedVisible && completedUpload && <WorkspaceRunCard
+    upload={completedUpload}
+    actions={<>
+      <button type="button" onClick={() => {
+        setRecentUploads(markRecentUploadViewed(sessionId));
+        navigate(`/${completedUpload.isReconstruction ? "reconstruction" : "session"}/${encodeURIComponent(sessionId)}`);
+      }}>{completedUpload.isReconstruction ? "View Reconstruction" : "View Visualization"}</button>
+      {completedUpload.isReconstruction && <button type="button" onClick={handleRunEpaiOnReconstruction}>Run ePAI on Result</button>}
+      <button type="button" disabled={downloadBusy} onClick={() => downloadResult(sessionId)}>Download Results</button>
+    </>}
+  />;
 
   // ── A batch's finished state, same idea: the ProcessingSummaryBar that
   // showed its progress just relabels itself instead of being replaced by
@@ -2093,10 +2080,12 @@ const UploadPage: React.FC = () => {
         title={activeBatchCompleted.label}
         running={0}
         done={activeBatchCompleted.uploads.filter((u) => u.status === "Completed").length}
+        failed={activeBatchCompleted.uploads.filter((u) => u.status === "Failed").length}
+        cancelled={activeBatchCompleted.uploads.filter((u) => u.status === "Cancelled").length}
         statusLabel={
           activeBatchCompleted.uploads.every((u) => u.status === "Completed")
             ? "Inference complete"
-            : `Completed - ${activeBatchCompleted.uploads.filter((u) => u.status === "Failed" || u.status === "Cancelled").length} failed`
+            : "Finished with issues"
         }
         onViewDetails={() => {
           track("upload_open_batch_details");
@@ -2112,21 +2101,15 @@ const UploadPage: React.FC = () => {
       <WorkspaceIntro />
 
       <div className="upload-main">
+        {(inFlight.length > 0 || singleCompletedVisible || activeBatchCompleted) &&
+          <section className="workspace-run-thread" aria-label="Current runs">
+            {inFlightCards}{singleCompletedCard}{batchCompletedCard}
+          </section>}
         <div className="upload-card" data-tour="composer" id="scan-composer">
           {/* ── Drop zone ── */}
           <div
             className={`dropzone${isDragOver ? " drag-over" : ""}${allUploadsDone ? " dropzone--all-done" : ""}`}
-            onClick={() => {
-              // While a run is in-flight, or just finished and still showing
-              // its result here, this box is showing status, not the picker -
-              // a stray click on the card's own padding shouldn't pop the
-              // file dialog.
-              if (
-                selectedItems.length === 0 &&
-                (inFlight.length > 0 || singleCompletedVisible || activeBatchCompleted)
-              ) return;
-              if (ensureAccount()) fileInputRef.current?.click();
-            }}
+            onClick={() => { if (ensureAccount()) fileInputRef.current?.click(); }}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -2169,19 +2152,7 @@ const UploadPage: React.FC = () => {
               style={{ display: "none" }}
               onChange={handleDicomInferenceSelect}
             />
-            {selectedItems.length === 0 && inFlight.length > 0 ? (
-              // A run is already going - this box stays the single place to
-              // watch it instead of reverting to the empty picker while a
-              // separate card appears elsewhere on the page.
-              inFlightCards
-            ) : selectedItems.length === 0 && singleCompletedVisible ? (
-              // The run that WAS showing progress in this box just finished -
-              // it keeps the same slot rather than the box going empty while a
-              // result panel pops up elsewhere.
-              singleCompletedCard
-            ) : selectedItems.length === 0 && activeBatchCompleted ? (
-              batchCompletedCard
-            ) : selectedItems.length === 0 ? (
+            {selectedItems.length === 0 ? (
               <>
                 <svg
                   className="dropzone-icon"
@@ -2311,7 +2282,8 @@ const UploadPage: React.FC = () => {
               >
                 Upload DICOM
               </button>
-              <button type="button" className="dropzone-btn workspace-sample" title="Open sample case 35 in the viewer" onClick={(event) => { event.stopPropagation(); navigate("/case/35"); }}>Sample case <span aria-hidden="true">↗</span></button>
+              <button type="button" className="dropzone-btn workspace-sample" title="Load sample case 35 into the workspace" disabled={sampleLoading} onClick={(event) => { event.stopPropagation(); void loadSample(); }}>{sampleLoading ? "Loading sample…" : "Sample case"}</button>
+              {sampleLoading && <button type="button" className="dropzone-btn" onClick={(event) => { event.stopPropagation(); sampleAbortRef.current?.abort(); }}>Cancel loading</button>}
             </div>
           </div>
 
@@ -2343,98 +2315,12 @@ const UploadPage: React.FC = () => {
           {/* ── Pipeline row ── */}
           <div className="pipeline-row" data-tour="pipeline">
             {/* Step 1: Preprocessing */}
-            <div className="pipeline-step">
-              <div className="pipeline-step-header">
-                <div className="pipeline-badge">1</div>
-                <span className="pipeline-label">Preprocessing</span>
-                <span className="pipeline-optional">optional</span>
-              </div>
-              <div className="model-dropdown" ref={preDropRef}>
-                <button
-                  className={`model-dropdown-btn${preValue ? " has-value" : ""}${preDropOpen ? " open" : ""}`}
-                  onClick={() => setPreDropOpen((o) => !o)}
-                  aria-label={`Preprocessing: ${preValue || "None (skip)"}`}
-                  aria-expanded={preDropOpen}
-                  aria-controls={preDropOpen ? "preprocessing-options" : undefined}
-                  type="button"
-                >
-                  <span>{preValue || "None (skip)"}</span>
-                  <svg
-                    className={`model-dropdown-chevron${preDropOpen ? " rotated" : ""}`}
-                    width="10"
-                    height="6"
-                    viewBox="0 0 10 6"
-                    fill="none"
-                  >
-                    <path
-                      d="M1 1l4 4 4-4"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-                {preDropOpen && (
-                  <div className="model-dropdown-menu" id="preprocessing-options">
-                    {[
-                      {
-                        id: "",
-                        label: "None (skip)",
-                        desc: "Upload and segment as-is",
-                      },
-                      {
-                        id: "OpenVAE",
-                        label: "OpenVAE",
-                        desc: "Enhance the scan quality before segmenting",
-                      },
-                    ].map((opt) => (
-                      <div
-                        key={opt.id}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={activateOption}
-                        className={`model-dropdown-item${preValue === opt.id ? " selected" : ""}`}
-                        onClick={() => {
-                          setPreValue(opt.id);
-                          setPreDropOpen(false);
-                        }}
-                      >
-                        <div className="model-dropdown-item-content">
-                          <span className="model-dropdown-item-name">
-                            {opt.label}
-                          </span>
-                          <span className="model-dropdown-item-desc">
-                            {opt.desc}
-                          </span>
-                        </div>
-                        <div className="model-dropdown-item-side">
-                          {preValue === opt.id && (
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 12 12"
-                              fill="none"
-                              className="model-dropdown-check"
-                            >
-                              <path
-                                d="M2 6l3 3 5-5"
-                                stroke="currentColor"
-                                strokeWidth="1.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
+            <PipelineStepSelector stage="preprocessing" value={pipeline.preprocessing}
+              option={pipelineOptions?.preprocessing[0]} model={selectedModel} locked={modelLocked("OpenVAE")}
+              onChange={(value) => setPipeline((current) => ({ ...current, preprocessing: value as PipelineSelection["preprocessing"] }))}
+              onLocked={() => setUpgradeBlock({ reason: "model_locked", feature: "OpenVAE", plan: plan as PlanId })} />
 
-            <div className="pipeline-arrow">→</div>
+            <div className="pipeline-arrow">?</div>
 
             {/* Step 2: Model */}
             <div className="pipeline-step">
@@ -2494,7 +2380,7 @@ const UploadPage: React.FC = () => {
                         className={`model-dropdown-item${selectedModel === m.id ? " selected" : ""}${locked ? " locked" : ""}${hasSubmenu ? " has-submenu" : ""}`}
                         onClick={() => {
                           if (locked) {
-                            setModelDropOpen(false);
+                            setModelDropOpen(false); modelDropRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
                             setUpgradeBlock({
                               reason: "model_locked", feature: m.label, plan: plan as PlanId,
                             });
@@ -2504,7 +2390,7 @@ const UploadPage: React.FC = () => {
                           track("upload_select_model");
                           modelTouchedRef.current = true;
                           setSelectedModel(m.id as typeof selectedModel);
-                          setModelDropOpen(false);
+                          setModelDropOpen(false); modelDropRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
                         }}
                       >
                         <div className="model-dropdown-item-content">
@@ -2579,7 +2465,7 @@ const UploadPage: React.FC = () => {
                                   modelTouchedRef.current = true;
                                   setSelectedModel("LesionSegmenter");
                                   setLesionTarget(l.id);
-                                  setModelDropOpen(false);
+                                  setModelDropOpen(false); modelDropRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
                                 }}
                               >
                                 <span className="model-submenu-check">
@@ -2654,109 +2540,10 @@ const UploadPage: React.FC = () => {
             <div className="pipeline-arrow">→</div>
 
             {/* Step 3: Postprocessing */}
-            <div className="pipeline-step">
-              <div className="pipeline-step-header">
-                <div className="pipeline-badge">3</div>
-                <span className="pipeline-label">Postprocessing</span>
-                <span className="pipeline-optional">optional</span>
-              </div>
-              <div className="model-dropdown" ref={postDropRef}>
-                <button
-                  className={`model-dropdown-btn${postValue ? " has-value" : ""}${postDropOpen ? " open" : ""}`}
-                  onClick={() => setPostDropOpen((o) => !o)}
-                  aria-label={`Postprocessing: ${postValue || "None (skip)"}`}
-                  aria-expanded={postDropOpen}
-                  aria-controls={postDropOpen ? "postprocessing-options" : undefined}
-                  type="button"
-                >
-                  <span>{postValue || "None (skip)"}</span>
-                  <svg
-                    className={`model-dropdown-chevron${postDropOpen ? " rotated" : ""}`}
-                    width="10"
-                    height="6"
-                    viewBox="0 0 10 6"
-                    fill="none"
-                  >
-                    <path
-                      d="M1 1l4 4 4-4"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-                {postDropOpen && (
-                  <div className="model-dropdown-menu" id="postprocessing-options">
-                    {[
-                      {
-                        id: "",
-                        label: "None (skip)",
-                        desc: "Use results as-is",
-                      },
-                      {
-                        id: "ShapeKit",
-                        label: "ShapeKit",
-                        desc: "Clean up and smooth organ outlines",
-                      },
-                    ].map((opt) => {
-                      const locked =
-                        opt.id !== "" && isAuthenticated && !canPostprocess(plan);
-                      return (
-                      <div
-                        key={opt.id}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={activateOption}
-                        className={`model-dropdown-item${postValue === opt.id ? " selected" : ""}${locked ? " locked" : ""}`}
-                        onClick={() => {
-                          if (locked) {
-                            setPostDropOpen(false);
-                            setUpgradeBlock({
-                              reason: "postprocessing", feature: opt.label, plan: plan as PlanId,
-                            });
-                            return;
-                          }
-                          track("upload_select_postprocessing");
-                          setPostValue(opt.id);
-                          setPostDropOpen(false);
-                        }}
-                      >
-                        <div className="model-dropdown-item-content">
-                          <span className="model-dropdown-item-name">
-                            {opt.label}
-                          </span>
-                          <span className="model-dropdown-item-desc">
-                            {opt.desc}
-                          </span>
-                        </div>
-                        <div className="model-dropdown-item-side">
-                          {locked && <span className="model-dropdown-lock">Donate</span>}
-                          {!locked && postValue === opt.id && (
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 12 12"
-                              fill="none"
-                              className="model-dropdown-check"
-                            >
-                              <path
-                                d="M2 6l3 3 5-5"
-                                stroke="currentColor"
-                                strokeWidth="1.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          )}
-                        </div>
-                      </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
+            <PipelineStepSelector stage="postprocessing" value={pipeline.postprocessing}
+              option={pipelineOptions?.postprocessing[0]} model={selectedModel} locked={!canPostprocess(plan)}
+              onChange={(value) => setPipeline((current) => ({ ...current, postprocessing: value as PipelineSelection["postprocessing"] }))}
+              onLocked={() => setUpgradeBlock({ reason: "postprocessing", feature: "ShapeKit", plan: plan as PlanId })} />
 
             <button
               className="run-btn"
@@ -2854,16 +2641,6 @@ const UploadPage: React.FC = () => {
             display: "flex", alignItems: "center", justifyContent: "center",
           } as const;
 
-          const FileIcon = () => (
-            <div style={iconBox}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#111111" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" />
-              </svg>
-            </div>
-          );
-
           // Batch: stacked-layers glyph in the identical container (no ✓ — misleading
           // when a batch has 0 completed).
           const BatchIcon = () => (
@@ -2892,52 +2669,15 @@ const UploadPage: React.FC = () => {
           // dropzone now needs it too.
 
           // ── A finished individual scan: status, View, Download, remove ──
-          const CompletedCard = ({ u }: { u: RecentUpload }) => (
-            <div onClick={() => openSession(u)} style={{ ...cardWrap, cursor: canView(u) ? "pointer" : "default" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "16px", minWidth: 0 }}>
-                <FileIcon />
-                <div style={{ minWidth: 0 }}>
-                  {renamingId === u.sessionId ? (
-                    <input
-                      autoFocus
-                      value={renameValue}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onBlur={commitRename}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") commitRename();
-                        else if (e.key === "Escape") setRenamingId(null);
-                      }}
-                      style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "14px", fontWeight: 600, color: "#111111", border: "1px solid rgba(0, 45, 114, 0.3)", borderRadius: "6px", padding: "2px 6px", width: "100%", maxWidth: "260px" }}
-                    />
-                  ) : (
-                    // Click the name itself to rename it - no separate pencil
-                    // icon needed (matches how Claude's own chat titles work).
-                    // Underline-on-hover is the only affordance that this text
-                    // is interactive; the tooltip keeps surfacing the original
-                    // filename once it's been renamed away from it.
-                    <span
-                      title={u.sourceName || "Click to rename"}
-                      onClick={(e) => { e.stopPropagation(); startRename(u); }}
-                      className="upload-rename-trigger"
-                      style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "14px", fontWeight: 600, color: "#111111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block", cursor: "text", maxWidth: "260px" }}
-                    >
-                      {u.label}
-                    </span>
-                  )}
-                  <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: "11px", color: "#6a6a6a", marginTop: "2px" }}>
-                    {u.model ? `${u.model} · ` : ""}{formatRelativeTime(u.timestamp)}
-                  </div>
-                </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px", flexShrink: 0 }}>
-                <span style={{ fontFamily: "'IBM Plex Sans', sans-serif", fontSize: "12px", fontWeight: 500, color: recentStatusColor(u.status) }}>{u.status}</span>
-                {canView(u) && <button style={smallBtn} onClick={(e) => { e.stopPropagation(); openSession(u); }}>View</button>}
-                {u.status === "Completed" && <button style={smallBtn} disabled={downloadBusy} onClick={(e) => { e.stopPropagation(); downloadResult(u.sessionId); }}>Download</button>}
-                <RemoveBtn onClick={(e) => { e.stopPropagation(); setRecentUploads(removeRecentUpload(u.sessionId)); }} />
-              </div>
-            </div>
-          );
+          const renderCompletedCard = (u: RecentUpload) => <WorkspaceRunCard key={u.sessionId} upload={u} actions={<>
+            {canView(u) && <button type="button" onClick={() => openSession(u)}>View</button>}
+            {u.status === "Completed" && <button type="button" disabled={downloadBusy} onClick={() => downloadResult(u.sessionId)}>Download</button>}
+            {renamingId === u.sessionId ? <input autoFocus aria-label="Run name" value={renameValue}
+              onChange={(event) => setRenameValue(event.target.value)} onBlur={commitRename}
+              onKeyDown={(event) => { if (event.key === "Enter") commitRename(); else if (event.key === "Escape") setRenamingId(null); }} />
+              : <button type="button" onClick={() => startRename(u)}>Rename</button>}
+            <button type="button" onClick={() => setRecentUploads(removeRecentUpload(u.sessionId))}>Remove</button>
+          </>} />;
 
           // ── A finished batch: same card shape as a single (uniform icon + height),
           //    a "N completed · M failed" line, View details + Download + remove ──
@@ -3134,7 +2874,7 @@ const UploadPage: React.FC = () => {
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     {finished.map(g =>
                       g.kind === "single"
-                        ? <CompletedCard key={g.upload.sessionId} u={g.upload} />
+                        ? renderCompletedCard(g.upload)
                         : <CompletedBatchBar key={g.batchId} batchId={g.batchId} label={g.label} uploads={g.uploads} />
                     )}
                   </div>

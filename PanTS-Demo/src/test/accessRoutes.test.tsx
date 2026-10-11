@@ -58,7 +58,7 @@ beforeEach(() => {
 });
 
 describe("site-wide account boundary", () => {
-    it.each(["/", "/upload", "/dashboard", "/case/8854", "/live/example#room-key", "/share/example", "/learn/quiz/example", "/compare", "/compare-viewer", "/team", "/account"])("blocks a guest at %s without mounting the feature", async (path) => {
+    it.each(["/", "/upload", "/dashboard", "/case/8854", "/case/9902?mode=3d#slice=4", "/live/example#room-key", "/share/example", "/learn/quiz/example", "/compare", "/compare-viewer", "/team", "/account"])("blocks a guest at %s without mounting the feature", async (path) => {
         mount(path);
         expect(await screen.findByRole("dialog", { name: "Sign in" })).toBeInTheDocument();
         expect(screen.queryByText(/feature$/)).not.toBeInTheDocument();
@@ -87,16 +87,19 @@ describe("site-wide account boundary", () => {
         expect(window.location.pathname + window.location.search + window.location.hash).toBe("/live/example?mode=review#room-key");
     });
 
-    it("email sign-in unlocks the requested viewer without changing the URL", async () => {
+    it.each([
+        ["/case/8854?review=1#slice-20", "/case/8854?review=1#slice-20"],
+        ["/case/9902?mode=3d#slice=4", "/case/CV_00000001?mode=3d#slice=4"],
+    ])("email sign-in unlocks the requested viewer at %s", async (requested, expected) => {
         const user = userEvent.setup();
-        mount("/case/8854?review=1#slice-20");
+        mount(requested);
         await user.click(await screen.findByRole("button", { name: "Continue with email" }));
         await user.type(screen.getByLabelText("Email"), "researcher@example.com");
         await user.type(screen.getByLabelText("Password"), "safe-password");
         await user.click(screen.getByRole("button", { name: "Sign in" }));
         expect(await screen.findByText("Viewer feature")).toBeInTheDocument();
         await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-        expect(window.location.pathname + window.location.search + window.location.hash).toBe("/case/8854?review=1#slice-20");
+        expect(window.location.pathname + window.location.search + window.location.hash).toBe(expected);
     });
 
     it.each([["/terms", "terms public page"], ["/privacy", "privacy public page"], ["/reset-password?token=test", "Password recovery page"], ["/verify-email?token=test", "Email verification page"]])("leaves %s reachable without a session", async (path, heading) => {

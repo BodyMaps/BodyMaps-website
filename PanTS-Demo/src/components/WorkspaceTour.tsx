@@ -6,7 +6,7 @@ const STEPS = [
   { target: "explore", title: "Your imaging workspace", text: "Explore the CT library, meet the team, or return to your workspace. Your account keeps protected features available after sign-in." },
   { target: "mobile-navigation", title: "Your imaging workspace", text: "Open the navigation menu to explore the dataset, return to your workspace, or find your account settings." },
   { target: "composer", title: "Start with a CT scan", text: "Choose NIfTI files or a DICOM series. Preview your scan before selecting a pipeline. View-only mode keeps the file in your browser." },
-  { target: "pipeline", title: "Build your pipeline", text: "Choose a model and optional preprocessing or postprocessing. Available models depend on your account access. Run starts real processing; progress appears here." },
+  { target: "pipeline", title: "Choose your pipeline", text: "Choose a model available to your account. Optional OpenVAE reconstruction and ShapeKit organ refinement appear when the server supports them. Run processes the selected steps on the server; progress shows their actual status." },
   { target: "recent", title: "Pick up where you left off", text: "Recent runs show their real status. Open a completed result or see all your runs in History. Starting a new run never deletes earlier results." },
   { target: "settings", title: "Make it yours", text: "Open Settings to edit your profile and picture, check your plan, or manage privacy. You can replay this walkthrough here anytime." },
 ];
@@ -55,7 +55,14 @@ export default function WorkspaceTour({ replay }: { replay: number }) {
     if (step === null) return;
     const target = document.querySelector(`[data-tour="${steps[step].target}"]`);
     target?.classList.add("design-tour-target");
-    card.current?.focus();
+    // A rendered target may still sit outside a short/mobile viewport. Bring
+    // each step into view without moving keyboard focus out of the dialog.
+    target?.scrollIntoView?.({
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+      block: "center",
+      inline: "nearest",
+    });
+    card.current?.focus({ preventScroll: true });
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); close(); }
       if (event.key !== "Tab") return;

@@ -33,7 +33,9 @@ it("resumes an owned legacy run when verification finishes after the workspace m
     return json({ items: [], total: 0, ids: [] });
   }));
   const view = render(<AuthProvider><MemoryRouter><UploadPage /></MemoryRouter></AuthProvider>);
-  await screen.findByRole("button", { name: /^ePAI$/ });
+  // Auth restoration and the plan-aware default both settle asynchronously.
+  // Keep the ownership assertions below strict without depending on host load.
+  await screen.findByRole("button", { name: /^ePAI$/ }, { timeout: 5000 });
   await waitFor(() => expect(requests.some((url) => url.endsWith("/api/me/jobs"))).toBe(true));
   expect(requests.some((url) => url.includes("/api/inference-status/"))).toBe(false);
 

@@ -8,6 +8,7 @@ import { AnnotationProvider } from "./contexts/annotationContexts";
 import { AuthProvider, useAuth } from "./contexts/authContext";
 import { FileProvider } from "./contexts/fileContexts";
 import DesignShell from "./components/DesignShell";
+import CaseRoute from "./routes/CaseRoute";
 import ComparePage from "./routes/ComparePage";
 import Homepage from "./routes/Homepage";
 import TeamPage from "./routes/TeamPage/index";
@@ -117,7 +118,7 @@ function App() {
                         <Route path="people" element={<PeopleSettings />} />
                       </Route>
                     </Route>
-                    <Route path="/case/:caseId" element={<VisualizationPage />} />
+                    <Route path="/case/:caseId" element={<CaseRoute><VisualizationPage /></CaseRoute>} />
                     <Route path="/session/:sessionId" element={<VisualizationPage />} />
                     <Route path="/dicom" element={<VisualizationPage />} />
                     <Route path="/local-nifti" element={<VisualizationPage />} />

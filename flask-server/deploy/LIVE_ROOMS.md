@@ -2,6 +2,11 @@
 
 Live Rooms use existing Flask service for creation, snapshots, and exports, plus separate async WebSocket process on `127.0.0.1:8001`. Room files live under `${SESSIONS_DIR_PATH}/live_rooms` and expire after 24 hours. Both REST and WebSocket access require a signed-in account as well as the room/attempt capability; only health endpoints remain public.
 
+For the authenticated redesign release, follow [the coordinated release
+procedure](REDESIGN_RELEASE.md). The main deployment script requires an explicit
+read-only restart preflight and restart hook for this service, then checks that
+anonymous WebSocket upgrades return 401. A Flask-only restart is insufficient.
+
 ## Install and verify
 
 ```bash

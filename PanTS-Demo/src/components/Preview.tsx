@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { caseIdToNumber } from "../helpers/caseNumbering";
 import { IconBookmark, IconCheck } from "@tabler/icons-react";
 import styles from "./Preview.module.css";
 import { API_BASE } from "../helpers/constants";
@@ -57,6 +58,7 @@ export default function Preview({
 		typeof id === "string" && id.toUpperCase().startsWith("CV")
 			? id
 			: `PanTS_${id.toString().padStart(8, "0")}`;
+	const libraryNumber = caseIdToNumber(id);
 	// HuggingFace fallback, routed through the backend's same-origin proxy. A *direct*
 	// cross-origin image is blocked by the viewer's COEP: require-corp header (which is
 	// why thumbnails went missing); the proxy keeps it same-origin, matching home.html.
@@ -102,6 +104,11 @@ export default function Preview({
 				</div>
 				<div className={styles.details}>
 					<span className={styles.caseId}>{caseIdStr}</span>
+                    {libraryNumber !== null && <span data-testid="case-number"
+                        title="Case number: 1-9,901 are PanTS, CancerVerse continues from 9,902"
+                        style={{ fontSize: "11px", color: "#6b7280", marginLeft: "6px" }}>
+                        #{libraryNumber.toLocaleString("en-US")}
+                    </span>}
 					<div className={`${styles.metadata} flex-wrap`}>
 						<span>Sex <strong>{previewMetadata.sex || "—"}</strong></span>
 						<span>Age <strong>{previewMetadata.age || "—"}y</strong></span>

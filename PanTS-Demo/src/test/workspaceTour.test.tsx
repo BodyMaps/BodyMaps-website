@@ -18,6 +18,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 const startTour = () => act(() => { vi.advanceTimersByTime(900); });
@@ -90,6 +91,36 @@ describe("workspace walkthrough", () => {
     expect(screen.getByRole("button", { name: "Skip tour" })).toHaveFocus();
     fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
     expect(screen.getByRole("button", { name: "Get started" })).toHaveFocus();
+  });
+
+  it.each([false, true])("reveals offscreen targets while retaining dialog focus (reduced motion: %s)", (reducedMotion) => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: reducedMotion })));
+    render(<>
+      <button type="button" data-tour="explore" data-test-visible="true">Navigation</button>
+      <section data-tour="composer" data-test-visible="true">Offscreen scan composer</section>
+      <WorkspaceTour replay={0} />
+    </>);
+    const navigation = screen.getByRole("button", { name: "Navigation" });
+    const composer = screen.getByText("Offscreen scan composer");
+    const revealNavigation = vi.fn();
+    const revealComposer = vi.fn();
+    navigation.scrollIntoView = revealNavigation;
+    composer.scrollIntoView = revealComposer;
+    vi.spyOn(composer, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 1800, 300, 200));
+    navigation.focus();
+    startTour();
+
+    expect(revealNavigation).toHaveBeenCalledOnce();
+    expect(revealComposer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(revealComposer).toHaveBeenCalledWith({
+      behavior: reducedMotion ? "instant" : "smooth", block: "center", inline: "nearest",
+    });
+    expect(screen.getByRole("dialog", { name: "Start with a CT scan" })).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(screen.getByRole("button", { name: "Get started" })).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(navigation).toHaveFocus();
   });
 
   it.each([

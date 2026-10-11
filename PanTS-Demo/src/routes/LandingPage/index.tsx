@@ -1,16 +1,15 @@
 import { useEffect, useState } from "react";
-import { segmentation_categories, API_BASE } from "../../helpers/constants";
+import { ORGAN_CLASS_COUNT, API_BASE } from "../../helpers/constants";
 import { useAuth } from "../../contexts/authContext";
-
 import { LANDING_OVERVIEW, LANDING_SUBTITLE } from "../../helpers/copy";
 import styles from "./LandingPage.module.css";
 
 const TARGETS = {
   // Fallback only (the live count is fetched from /api/search?dataset=all).
-  ctVolumes: 32_768,
+  ctVolumes: 34_323,
   medicalCenters: 145,
   annotatedStructures: 993_000,
-  organClasses: segmentation_categories.length,
+  organClasses: ORGAN_CLASS_COUNT,
 } as const;
 
 const ANIMATION_DURATION = 2_200;

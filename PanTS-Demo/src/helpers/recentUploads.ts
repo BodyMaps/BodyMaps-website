@@ -1,6 +1,8 @@
 // Recent uploads are scoped to the authenticated account on this browser.
 // The legacy, unscoped key is retained only for ownership-verified migration.
 
+import type { InferenceSelection, PipelineStage } from "./inferencePipeline";
+
 export type RecentUploadStatus = "Processing" | "Completed" | "Failed" | "Cancelled";
 
 export type RecentUpload = {
@@ -12,6 +14,9 @@ export type RecentUpload = {
 	// the label is renamed. Optional so older localStorage entries still parse.
 	sourceName?: string;
 	model: string;
+	// Choices captured when Run was pressed, never read from later composer state.
+	pipeline?: InferenceSelection;
+	pipelineStages?: PipelineStage[];
 	status: RecentUploadStatus;
 	timestamp: number;
 	isReconstruction?: boolean;
@@ -205,6 +210,13 @@ export const updateRecentUploadStatus = (
 	ownerId: string | null = activeAccountId
 ): RecentUpload[] => {
 	const list = loadRecentUploads(ownerId).map((u) => (u.sessionId === sessionId ? { ...u, status } : u));
+	persistRecentUploads(list, ownerId);
+	return list;
+};
+
+/** Stages are updated only from an authenticated server status response. */
+export const updateRecentUploadStages = (sessionId: string, pipelineStages: PipelineStage[], ownerId: string | null = activeAccountId): RecentUpload[] => {
+	const list = loadRecentUploads(ownerId).map((u) => u.sessionId === sessionId ? { ...u, pipelineStages } : u);
 	persistRecentUploads(list, ownerId);
 	return list;
 };

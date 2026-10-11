@@ -28,6 +28,9 @@ PUBLIC_ENDPOINT_METHODS = {
     "oauth.oauth_start": frozenset({"GET", "HEAD"}),
     "oauth.oauth_callback": frozenset({"GET", "HEAD"}),
     "api.ping": frozenset({"GET", "HEAD"}),
+    # Cached infrastructure health and job counts keep deploy/watchdog checks
+    # independent of browser sessions, including during a storage outage.
+    "api.health": frozenset({"GET", "HEAD"}),
     "live_rooms.live_rooms_health": frozenset({"GET", "HEAD"}),
 }
 

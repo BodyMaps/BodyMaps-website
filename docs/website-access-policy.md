@@ -25,7 +25,7 @@ Only these existing routes can execute without a website session:
 | Account recovery | `POST /api/auth/forgot-password`, `POST /api/auth/reset-password` |
 | Redeem email verification | `POST /api/auth/verify-email` |
 | OAuth discovery and login | `GET /api/auth/oauth/providers`, `GET /api/auth/oauth/<provider>`, `GET /api/auth/oauth/<provider>/callback` |
-| Health checks | `GET /api/ping`, `GET /api/live-rooms/health`, WebSocket service `GET /health` |
+| Health checks | `GET /api/ping`, `GET /api/health`, `GET /api/live-rooms/health`, WebSocket service `GET /health` |
 
 HEAD is allowed where GET is listed. API OPTIONS requests return an empty
 preflight response without executing a feature handler. No blanket `/auth/`,

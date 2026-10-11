@@ -2,7 +2,8 @@ from flask import Blueprint, send_file, make_response, request, jsonify, Respons
 from werkzeug.utils import secure_filename
 from services.session_manager import generate_uuid
 from services.auto_segmentor import run_auto_segmentation, cancel_session, cancel_all_inference, max_parallel_jobs, pop_run_info
-from services import job_run_log
+from services import job_run_log, job_store, inference_pipeline
+from functools import wraps
 from services.mesh_generation import (
     bake_case_meshes,
     generate_mesh_manifest,
@@ -11,6 +12,7 @@ from services.mesh_generation import (
     safe_filename,
 )
 from services.request_limits import trusted_client_ip
+from services.mount_health import get_monitor, mount_down_response, requires_dataset_mount
 from services.inference_job_queue import InferenceJobQueue, QueueFullError
 from services.intent_parser import parse_intent
 from services.ollama_client import (
@@ -391,6 +393,7 @@ def get_preview(clabel_ids):
 
 # if not preloaded
 @api_blueprint.route('/get_image_preview/<clabel_id>', methods=['GET'])
+@requires_dataset_mount
 def get_image_preview(clabel_id):
     if not _is_safe_id(clabel_id):
         return jsonify({"error": "Invalid id"}), 400
@@ -474,10 +477,50 @@ def _manifest_with_request_urls(manifest, pants_id):
     return manifest
 
 
+def _cancerverse_mask(case_id):
+    """(folder id, tumor mask path or None) of a CancerVerse case. Local disk, never the dataset mount."""
+    try:
+        folder = get_cancerverse_id(secure_filename(str(case_id)))
+    except ValueError:
+        return None, None
+    return folder, cv_catalog.resolve_mask_path(folder, Constants.CANCERVERSE_OVERLAY_PATH)
+
+
+def _cancerverse_mesh_manifest(case_id):
+    """3D meshes of a CancerVerse case's tumors, baked on first request from its tumor mask."""
+    folder, seg_path = _cancerverse_mask(case_id)
+    if not seg_path:
+        return jsonify({"error": "No tumor mask for this case"}), 404
+    case_dir = os.path.join(Constants.MESH_PATH, folder)
+    manifest_path = os.path.join(case_dir, "manifest.json")
+
+    def fresh():
+        # A mask rebuilt after the meshes were baked must not keep serving the old meshes.
+        manifest = _read_manifest_or_none(manifest_path)
+        if manifest is not None and os.path.getmtime(manifest_path) >= os.path.getmtime(seg_path):
+            return manifest
+        return None
+
+    manifest = fresh()
+    if manifest is None:
+        with _mesh_bake_lock(folder):
+            manifest = fresh()
+            if manifest is None:
+                try:
+                    manifest = bake_case_meshes(folder, seg_path, case_dir, route_base="cases")
+                except Exception as error:
+                    # Log the cause here; the browser only gets a fixed message.
+                    print(f"[cv-mesh] baking failed for {folder}: {type(error).__name__}: {error}", flush=True)
+                    return jsonify({"error": "Mesh generation failed"}), 500
+    return jsonify(_manifest_with_request_urls(manifest, folder))
+
+
 @api_blueprint.route("/cases/<case_id>/mesh-manifest")
 def get_mesh_manifest(case_id):
     if not _is_safe_id(case_id):
         return jsonify({"error": "Invalid id"}), 400
+    if get_dataset_from_case_id(case_id) == "CancerVerse":
+        return _cancerverse_mesh_manifest(case_id)
     try:
         pants_id = get_panTS_id(secure_filename(case_id))
     except ValueError:
@@ -494,6 +537,9 @@ def get_mesh_manifest(case_id):
     # the pre-bake scripts produce, then cache it all so the next load is
     # instant. The labelmap comes from the local dataset when present, else
     # the HuggingFace mirror (cached).
+    down = mount_down_response()          # baking reads the labelmap from the dataset mount
+    if down:
+        return down
     mask_digits = "".join(ch for ch in str(case_id) if ch.isdigit())
     seg_path = _ai_local_mask_path(mask_digits) if mask_digits else None
     if not seg_path:
@@ -518,7 +564,7 @@ def get_mesh_manifest(case_id):
 def get_mesh_file(display_id, filename):
     # Both segments come straight from the URL and are joined into a path;
     # apply the same id-guard + secure_filename barrier as the other routes.
-    if not _is_safe_id(display_id) or not re.fullmatch(r"PanTS_\d{8}", display_id):
+    if not _is_safe_id(display_id) or not re.fullmatch(r"(PanTS|CV)_\d{8}", display_id):
         return jsonify({"error": "Invalid id"}), 400
     stem = filename[:-4] if filename.endswith(".glb") else ""
     if (
@@ -537,13 +583,25 @@ def get_mesh_file(display_id, filename):
         # NOT (the bytes are in memory — serve them anyway).
         safe_name = secure_filename(filename)
         organ_key = safe_name[:-4] if safe_name.endswith(".glb") else safe_name
-        mask_digits = "".join(ch for ch in str(display_id) if ch.isdigit())
-        seg_path = _ai_local_mask_path(mask_digits) if mask_digits else None
+        if display_id.startswith("CV_"):
+            seg_path = _cancerverse_mask(display_id)[1]      # local disk: no mount involved
+        else:
+            down = mount_down_response()  # regenerating reads the labelmap from the dataset mount
+            if down:
+                return down
+            mask_digits = "".join(ch for ch in str(display_id) if ch.isdigit())
+            seg_path = _ai_local_mask_path(mask_digits) if mask_digits else None
         if seg_path is None:
             return jsonify({"error": f"No labelmap available for {display_id}"}), 404
         try:
             glb_bytes = generate_organ_glb_bytes(organ_key, seg_path)
         except Exception as e:
+            if display_id.startswith("CV_"):
+                # CancerVerse: never send exception text to the browser, log it here instead.
+                if isinstance(e, ValueError):
+                    return jsonify({"error": "This scan has no such tumor type"}), 404
+                print(f"[cv-mesh] GLB generation failed for {display_id}: {type(e).__name__}: {e}", flush=True)
+                return jsonify({"error": "Mesh generation failed"}), 500
             return jsonify({"error": f"Error generating GLB: {str(e)}"}), 500
         try:
             os.makedirs(os.path.dirname(mesh_path), exist_ok=True)
@@ -573,6 +631,7 @@ def get_mesh_file(display_id, filename):
     return response
 
 @api_blueprint.route('/get-label-colormap/<clabel_id>', methods=['GET'])
+@requires_dataset_mount
 def get_label_colormap(clabel_id):
     # int() below raises on non-numeric input; reject it with a 400 instead
     # of an unhandled 500 (also makes the id safe to join into the path).
@@ -672,6 +731,9 @@ def get_mask_data():
     # session-based lookup instead; only numeric catalog ids still go through
     # get_mask_data_internal.
     if str(session_key).strip().isdigit():
+        down = mount_down_response()      # catalog cases read their masks from the dataset mount
+        if down:
+            return down
         result = get_mask_data_internal(session_key)
 
         # For numeric PanTS cases, fall back to the robust label-based computation
@@ -698,6 +760,10 @@ def get_main_nifti(clabel_id):
 
     if get_dataset_from_case_id(safe_id) == "CancerVerse":
         # CancerVerse: CT-only, stored at CANCERVERSE_PATH/image_only/<CV id>/ct.nii.gz.
+        # Locating a scan looks on the dataset mount (and its overlay), so refuse first while it is down.
+        down = mount_down_response()
+        if down:
+            return down
         paths = get_case_nifti_paths(safe_id)
         main_nifti_path = paths["image"]
         if want_low and os.path.exists(paths["lowres_image"]):
@@ -713,6 +779,13 @@ def get_main_nifti(clabel_id):
             low_path = f"{LOWRES_ROOT}/image_only/{get_panTS_id(safe_id)}/{low_name}"
             if os.path.exists(low_path):
                 main_nifti_path = low_path
+
+        # The low-res copy lives on local disk and keeps working through a mount outage; the
+        # full-resolution file does not.
+        if not main_nifti_path.startswith(f"{LOWRES_ROOT}/"):
+            down = mount_down_response()
+            if down:
+                return down
 
     if os.path.exists(main_nifti_path):
         response = _serve_dataset_volume(main_nifti_path)
@@ -904,6 +977,7 @@ def _build_report_data(id):
 
 
 @api_blueprint.route('/get-report-data/<id>', methods=['GET'])
+@requires_dataset_mount
 def get_report_data(id):
     data = _build_report_data(id)
     if "error" in data:
@@ -915,6 +989,7 @@ def get_report_data(id):
 
 
 @api_blueprint.route('/report/<id>', methods=['GET'])
+@requires_dataset_mount
 def report_html(id):
     """Shareable source report with explicit coverage and neutral measurements."""
     resolved = _resolve_case_id_or_token(id)
@@ -1213,6 +1288,7 @@ def _create_organ_overview_image(ct_array, mask_array, label_id, output_path, co
 
 
 @api_blueprint.route('/generate-report-pdf/<id>', methods=['GET'])
+@requires_dataset_mount
 def generate_report_pdf(id):
     if not _is_safe_id(id):
         return jsonify({"error": "Invalid id"}), 400
@@ -1250,6 +1326,7 @@ def generate_report_pdf(id):
                 pass
 
 @api_blueprint.route('/get-specific-segmentations/<combined_labels_id>', methods=['POST'])
+@requires_dataset_mount
 async def get_specific_segmentations(combined_labels_id):
     if get_dataset_from_case_id(combined_labels_id) == "CancerVerse":
         return jsonify({"masks_available": False}), 200
@@ -1283,9 +1360,13 @@ async def get_specific_segmentations(combined_labels_id):
 async def get_segmentations(combined_labels_id):
     if not _is_safe_id(combined_labels_id):
         return jsonify({"error": "Invalid id"}), 400
-    # CancerVerse has no masks yet — respond gracefully instead of 404/crashing so
-    # the viewer can show the CT alone.
+    # CancerVerse has tumor masks only, for the scans with an annotated tumor (built into the
+    # overlay by scripts/build_cancerverse_masks.py), served from local disk. Any other case gets a
+    # graceful "no masks" answer instead of 404/crashing so the viewer can show the CT alone.
     if get_dataset_from_case_id(secure_filename(combined_labels_id)) == "CancerVerse":
+        _folder, tumor_mask = _cancerverse_mask(combined_labels_id)
+        if tumor_mask:
+            return _serve_dataset_volume(tumor_mask)
         return jsonify({"masks_available": False}), 200
     nifti_path = f"{Constants.PANTS_PATH}/mask_only/{get_panTS_id(secure_filename(combined_labels_id))}/{Constants.COMBINED_LABELS_NIFTI_FILENAME}"
     labels = list(Constants.PREDEFINED_LABELS.values())
@@ -1298,6 +1379,10 @@ async def get_segmentations(combined_labels_id):
         if os.path.exists(low_path):
             return _serve_dataset_volume(low_path)
 
+    # Past the local low-res copy, the full-resolution mask is read from the dataset mount.
+    down = mount_down_response()
+    if down:
+        return down
     img = nib.load(nifti_path)
 
     try:
@@ -1332,6 +1417,7 @@ async def get_segmentations(combined_labels_id):
 
 
 @api_blueprint.route('/download/<id>', methods=['GET'])
+@requires_dataset_mount
 @require_auth
 def download_segmentation_zip(id):
     # Segmentation archives contain dataset-derived data and are not part of
@@ -1479,10 +1565,21 @@ def _persist_inference_job(session_id, snapshot):
 
 def _set_inference_job(session_id, **kwargs):
     with _inference_jobs_lock:
-        current = inference_jobs.get(session_id, {})
+        current = dict(inference_jobs.get(session_id, {}))
+        if current.get("cancel_requested") and kwargs.get("status") in {"running", "completed"}:
+            return False  # cancellation wins atomically; publish nothing
         current.update(kwargs)
-        inference_jobs[session_id] = current
         snapshot = dict(current)
+        # New runs are durable SQL jobs as well as legacy job.json snapshots.
+        # update_job is deliberately a no-op for old, ownerless disk-only jobs.
+        job_store.update_job(session_id, **{
+            key: value for key, value in kwargs.items()
+            if key in {"user_id", "status", "model", "error", "ct_path", "session_path",
+                       "zip_path", "output_mask_dir", "reconstruction_path", "pipeline",
+                       "pipeline_stages", "cancel_requested"}
+        })
+        # Publish memory only after the durable write succeeds.
+        inference_jobs[session_id] = current
         # Track queue membership here, not per call site, so every path that
         # moves a job in or out of "queued" (initial dispatch, GPU-slot grant,
         # cancel, failure) keeps _queued_order correct automatically.
@@ -1501,6 +1598,7 @@ def _set_inference_job(session_id, **kwargs):
             plan_store.finish_inference(session_id)
         except Exception as e:
             print(f"[usage finish] {session_id}: {e}")
+    return True
 
 
 def _get_inference_job(session_id):
@@ -1515,6 +1613,9 @@ def _get_inference_job(session_id):
     job = inference_jobs.get(session_id)
     if job:
         return job
+    stored = job_store.get_job(session_id)
+    if stored and stored.get("pipeline") is not None:
+        return stored
     try:
         path = _job_meta_path(session_id)
         if os.path.exists(path):
@@ -1619,7 +1720,64 @@ def _write_owner_marker(session_id, user_id):
     return True
 
 
-def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_path=None):
+_dispatching_sessions = set()
+_dispatching_owners = {}
+_dispatching_sessions_lock = threading.Lock()
+
+
+def _single_session_dispatch(fn):
+    """Hold admission until the background worker exits, even after cancel.
+
+    A retry must never overwrite the workspace of a still-exiting worker.
+    The model's per-call lock alone cannot protect gaps between pipeline stages.
+    """
+    @wraps(fn)
+    def wrapped(session_id, *args, **kwargs):
+        user = current_user()
+        with _dispatching_sessions_lock:
+            job = _get_inference_job(session_id) or {}
+            if session_id in _dispatching_sessions or job.get("status") == "completed":
+                if not job and user and _dispatching_owners.get(session_id) == user["id"]:
+                    response = jsonify({"error": "Inference admission is still in progress; retry shortly.",
+                                        "code": "inference_admitting"})
+                    response.headers["Retry-After"] = "1"
+                    return response, 409
+                if not user or job.get("user_id") != user["id"]:
+                    return jsonify({"error": "You don't have access to this session."}), 403
+                expected = job.get("pipeline") or {}
+                requested_model = kwargs.get("model_name", args[0] if args else None)
+                target = kwargs.get("lesion_target") or None
+                target = "pancreatic" if target == "pancreas" else target
+                same_selection = (
+                    job.get("model") == requested_model
+                    and expected.get("preprocessing") == (kwargs.get("preprocessing") or None)
+                    and expected.get("postprocessing") == (kwargs.get("postprocessing") or None)
+                    and expected.get("lesion_target") == target
+                )
+                if same_selection and job.get("status") in {"queued", "running", "completed"}:
+                    return jsonify({"message": "Existing inference resumed", "session_id": session_id,
+                                    "status": job["status"], "pipeline": expected,
+                                    "pipeline_stages": job.get("pipeline_stages") or [], "reused": True}), 200
+                return jsonify({"error": "This session is still processing; wait for it to stop before retrying.",
+                                "code": "inference_already_running"}), 409
+            _dispatching_sessions.add(session_id)
+            _dispatching_owners[session_id] = user["id"] if user else None
+        accepted = False
+        try:
+            response = fn(session_id, *args, **kwargs)
+            accepted = isinstance(response, tuple) and response[1] == 200
+            return response
+        finally:
+            if not accepted:
+                with _dispatching_sessions_lock:
+                    _dispatching_sessions.discard(session_id)
+                    _dispatching_owners.pop(session_id, None)
+    return wrapped
+
+
+@_single_session_dispatch
+def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_path=None,
+                             preprocessing=None, postprocessing=None, lesion_target=None):
     safe_session_id = secure_filename(session_id or "")
     if not _is_safe_id(session_id) or safe_session_id != session_id:
         return jsonify({"error": "Invalid session ID"}), 400
@@ -1640,6 +1798,17 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
     )
     if ownership_conflict and not role_store.has_role(user["id"], role_store.ROLE_ADMIN):
         return jsonify({"error": "You don't have access to this session."}), 403
+    try:
+        selected_pipeline = inference_pipeline.selection(
+            model_name, preprocessing, postprocessing, lesion_target,
+        )
+    except inference_pipeline.PipelineError as error:
+        return jsonify({"error": str(error), "code": error.code}), error.status
+    for optional_model in (preprocessing, postprocessing):
+        if optional_model:
+            blocked = plan_store.check_inference(user["id"], optional_model)
+            if blocked is not None:
+                return jsonify({"error": blocked["message"], "code": "plan_limit", **blocked}), 402
     blocked = plan_store.check_inference(user["id"], model_name)
     if blocked is not None:
         # 402 Payment Required: the request is well-formed and the user is
@@ -1747,6 +1916,8 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
     # the segmentor's one-at-a-time lock; the on_start callback below flips the
     # job to "running" when it actually gets the GPU.
     try:
+        job_store.create_job(session_id, model_name, input_path, session_path,
+                             os.path.join(session_path, "auto_masks.zip"), user["id"])
         _set_inference_job(
             session_id,
             user_id=user["id"],
@@ -1756,13 +1927,18 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
             ct_path=input_path,
             session_path=session_path,
             zip_path=os.path.join(session_path, "auto_masks.zip"),
+            output_mask_dir=None,
+            reconstruction_path=None,
+            cancel_requested=False,
+            pipeline=selected_pipeline,
+            pipeline_stages=inference_pipeline.initial_stages(selected_pipeline),
         )
     except Exception:
         _INFERENCE_PENDING_SLOTS.release()
         raise
 
     def _job_status():
-        job = inference_jobs.get(session_id) or {}
+        job = _get_inference_job(session_id) or {}
         return (job.get("status") or "").lower()
 
     # File size is the only real signal an ETA formula has to scale on (see
@@ -1791,15 +1967,26 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
             # User may have cancelled while we sat in the queue.
             if _job_status() == "cancelled":
                 return False
-            run_started_at[0] = time.time()
-            _set_inference_job(session_id, status="running")
-            return True
+            if run_started_at[0] is None:
+                run_started_at[0] = time.time()
+            return _set_inference_job(session_id, status="running")
 
         try:
-            output_mask_dir = run_auto_segmentation(
-                input_path, session_dir=session_path, model=model_name,
-                session_id=session_id, on_start=_on_gpu_slot,
-            )
+            stages = None
+            reconstruction_path = None
+            if model_name in inference_pipeline.SUPPORTED_MODELS:
+                output_mask_dir, reconstruction_path, stages = inference_pipeline.run_pipeline(
+                    input_path=input_path, session_dir=session_path, session_id=session_id,
+                    pipeline=selected_pipeline, dispatch=run_auto_segmentation,
+                    publish=lambda **fields: _set_inference_job(session_id, **fields),
+                    cancelled=lambda: _job_status() == "cancelled" or job_store.is_cancel_requested(session_id),
+                    on_start=_on_gpu_slot,
+                )
+            else:
+                output_mask_dir = run_auto_segmentation(
+                    input_path, session_dir=session_path, model=model_name,
+                    session_id=session_id, on_start=_on_gpu_slot,
+                )
 
             if _job_status() == "cancelled":
                 print(f"🛑 Session {session_id} cancelled - skipping zip")
@@ -1817,18 +2004,35 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
             with zipfile.ZipFile(zip_path, 'w') as zipf:
                 for dirpath, _, filenames in os.walk(output_mask_dir):
                     for filename in filenames:
-                        if filename.endswith(".nii.gz") or (model_name == "ePAI" and filename.endswith(".csv")):
+                        if filename.endswith(".nii.gz") or filename == "pipeline.json" or (model_name == "ePAI" and filename.endswith(".csv")):
                             abs_path = os.path.join(dirpath, filename)
                             arcname = os.path.relpath(abs_path, output_mask_dir)
                             zipf.write(abs_path, arcname=arcname)
 
-            _set_inference_job(session_id, status="completed", error=None,
-                               zip_path=zip_path, output_mask_dir=output_mask_dir)
+            # Cancellation can arrive during compression, after the final stage.
+            if _job_status() == "cancelled" or job_store.is_cancel_requested(session_id):
+                os.remove(zip_path)
+                if stages:
+                    _set_inference_job(session_id, pipeline_stages=inference_pipeline.finish_packaging(
+                        stages, error="Cancelled by user", cancelled=True))
+                _log_run("cancelled")
+                return
+            published = _set_inference_job(session_id, status="completed", error=None,
+                               zip_path=zip_path, output_mask_dir=output_mask_dir,
+                               reconstruction_path=reconstruction_path,
+                               pipeline_stages=inference_pipeline.finish_packaging(stages) if stages else [])
+            if not published:
+                os.remove(zip_path)
+                if stages:
+                    _set_inference_job(session_id, pipeline_stages=inference_pipeline.finish_packaging(
+                        stages, error="Cancelled by user", cancelled=True))
+                _log_run("cancelled")
+                return
             # Measured from GPU-slot grant, not from "queued" - queue wait
             # time is a function of how many other users are running, not of
             # this model/file, so it would poison an ETA formula that's
             # trying to predict inference time specifically.
-            if run_started_at[0] is not None:
+            if run_started_at[0] is not None and not (preprocessing or postprocessing):
                 _record_job_duration(
                     model=model_name,
                     input_size_bytes=input_size_bytes,
@@ -1847,6 +2051,7 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
                     ct_path=input_path, output_mask_dir=output_mask_dir,
                     model=model_name, user_id=collector_user_id, ip=collector_ip,
                     session_id=session_id,
+                    pipeline=selected_pipeline,
                 )
             except Exception as _ude:
                 print(f"[user_dataset] hook error (non-fatal): {_ude}")
@@ -1858,11 +2063,17 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
                 _log_run("cancelled")
                 return
             print(f"❌ Exception while processing session {session_id}: {e}")
+            current_stages = (_get_inference_job(session_id) or {}).get("pipeline_stages")
+            if current_stages:
+                _set_inference_job(session_id, pipeline_stages=inference_pipeline.finish_packaging(current_stages, error=str(e)))
             _set_inference_job(session_id, status="failed", error=str(e))
             _log_run("failed", str(e))
         finally:
             pop_run_info(session_id)  # no-op if already taken; never leaks an entry
             _INFERENCE_PENDING_SLOTS.release()
+            with _dispatching_sessions_lock:
+                _dispatching_sessions.discard(session_id)
+                _dispatching_owners.pop(session_id, None)
 
     try:
         threading.Thread(target=do_segmentation_and_zip, daemon=True).start()
@@ -1871,7 +2082,15 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
         _set_inference_job(session_id, status="failed", error="Unable to start inference worker")
         raise
     print("[Server] auto_segment request is returning now")
-    return jsonify({"message": "Segmentation started", "session_id": session_id}), 200
+    return jsonify({"message": "Segmentation started", "session_id": session_id,
+                    "pipeline": selected_pipeline,
+                    "pipeline_stages": inference_pipeline.initial_stages(selected_pipeline)}), 200
+
+
+@api_blueprint.route('/pipeline/options', methods=['GET'])
+@require_auth
+def pipeline_options():
+    return jsonify(inference_pipeline.options()), 200
 
 @api_blueprint.route('/auto_segment/<session_id>', methods=['POST'])
 @require_auth
@@ -1891,6 +2110,9 @@ def auto_segment(session_id):
         model_name=model_name,
         ct_file=ct_file,
         server_input_path=None,
+        preprocessing=request.form.get("preprocessing"),
+        postprocessing=request.form.get("postprocessing"),
+        lesion_target=request.form.get("lesion_target"),
     )
 
 
@@ -1907,6 +2129,11 @@ def run_epai_inference():
       - uploaded_filename (used with chunked upload output in sessions/inference/<session_id>/)
     """
     payload = _json_payload()
+
+    def _pipeline_value(key):
+        # Preserve wrong JSON types so validation rejects them, not silently
+        # converts a selected stage into None.
+        return request.form[key] if key in request.form else payload.get(key)
 
     def _pick_text(*keys):
         for key in keys:
@@ -1952,6 +2179,8 @@ def run_epai_inference():
         source_job, access_error = _job_for_current_user(safe_source_id)
         if access_error:
             return access_error
+        if source_job.get("status") != "completed" or source_job.get("model") != "OpenVAE":
+            return jsonify({"error": "The source must be a completed OpenVAE reconstruction."}), 409
         source_output_dir = source_job.get("output_mask_dir")
         if source_output_dir:
             recon_path = os.path.join(source_output_dir, "reconstructed_ct.nii.gz")
@@ -2011,6 +2240,9 @@ def run_epai_inference():
         model_name=model_name,
         ct_file=ct_file,
         server_input_path=input_server_path,
+        preprocessing=_pipeline_value("preprocessing"),
+        postprocessing=_pipeline_value("postprocessing"),
+        lesion_target=_pipeline_value("lesion_target"),
     )
 
 
@@ -2025,7 +2257,7 @@ def get_inference_status(session_id):
     if job is None:
         return jsonify({"status": "not_found", "session_id": session_id}), 404
     # Never expose server paths or ownership metadata to the browser.
-    public_fields = ("status", "model", "error", "queue_position")
+    public_fields = ("status", "model", "error", "queue_position", "pipeline", "pipeline_stages")
     resp = {"session_id": session_id, **{key: job[key] for key in public_fields if key in job}}
     # 1-based: "queue_position": 1 means next in line for the GPU slot.
     if (job.get("status") or "").lower() == "queued":
@@ -2113,7 +2345,7 @@ def cancel_inference_session(session_id):
             return jsonify({"status": status, "message": "Job already finished"}), 200
         # Mark first so a queued job aborts at the GPU-slot check even if
         # there is no subprocess to kill yet.
-        _set_inference_job(session_id, status="cancelled", error="Cancelled by user")
+        _set_inference_job(session_id, status="cancelled", error="Cancelled by user", cancel_requested=True)
         try:
             killed = cancel_session(session_id)
             print(f"🛑 Cancel requested for {session_id} (process killed: {killed})")
@@ -2367,6 +2599,8 @@ def get_result(session_id):
     _job, access_error = _job_for_current_user(safe_session_id)
     if access_error:
         return access_error
+    if _job.get("status") != "completed":
+        return jsonify({"error": "Result not ready", "status": _job.get("status"), "session_id": session_id}), 202
     session_path = os.path.join(SESSIONS_DIR, safe_session_id)
     zip_path = os.path.join(session_path, "auto_masks.zip")
 
@@ -2499,11 +2733,13 @@ def get_session_reconstruction(session_id):
     job, access_error = _job_for_current_user(session_id)
     if access_error:
         return access_error
-    output_mask_dir = job.get("output_mask_dir")
-    if not output_mask_dir:
+    if job.get("status") != "completed":
         return jsonify({"error": "Reconstruction not ready for session"}), 404
-    recon_path = os.path.join(output_mask_dir, "reconstructed_ct.nii.gz")
-    if not os.path.exists(recon_path):
+    output_mask_dir = job.get("output_mask_dir")
+    recon_path = job.get("reconstruction_path") or (
+        os.path.join(output_mask_dir, "reconstructed_ct.nii.gz") if output_mask_dir else None
+    )
+    if not recon_path or not os.path.exists(recon_path):
         return jsonify({"error": f"reconstructed_ct.nii.gz not found"}), 404
     response = make_response(send_file(recon_path, mimetype='application/gzip'))
     response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
@@ -2952,6 +3188,30 @@ def cancel_inference():
 @api_blueprint.route('/ping', methods=['GET'])
 def ping():
     return jsonify({"message": "pong"}), 200
+
+
+@api_blueprint.route('/health', methods=['GET'])
+def health():
+    """Machine-readable health, for uptime monitors, deploy/site_watchdog.sh and deploy/deploy.sh.
+
+    200 when the site can serve everything, 503 when the dataset mount is down (search, sign-in and
+    the low-res viewer still work then, but scans and masks cannot be served). Reads only cached
+    state: it never touches the mount, the database or the disk, so it answers even when they hang.
+    ``inference.active`` is the work a restart would kill, which deploy.sh waits on.
+    """
+    mount = get_monitor().snapshot()
+    with _inference_jobs_lock:
+        statuses = [job.get("status") for job in inference_jobs.values()]
+    running, queued = statuses.count("running"), statuses.count("queued")
+    resp = jsonify({
+        "status": "ok" if mount["ok"] else "degraded",
+        "mount": mount,
+        "inference": {"running": running, "queued": queued, "active": running + queued},
+        "threads": threading.active_count(),
+    })
+    resp.status_code = 200 if mount["ok"] else 503
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 @api_blueprint.route("/search", methods=["GET"])
 def api_search():
@@ -6688,6 +6948,7 @@ def _edited_masks_dir(case_id):
 
 
 @api_blueprint.route('/save-edited-mask/<case_id>', methods=['POST'])
+@requires_dataset_mount
 def save_edited_mask(case_id):
     try:
         uploaded = request.files.get("mask")
@@ -6727,6 +6988,7 @@ def save_edited_mask(case_id):
 
 
 @api_blueprint.route('/list-edited-masks/<case_id>', methods=['GET'])
+@requires_dataset_mount
 def list_edited_masks(case_id):
     try:
         out_dir = _edited_masks_dir(case_id)
@@ -6827,6 +7089,7 @@ def _load_ct_cached(ct_path, cache_key):
 
 
 @api_blueprint.route('/interactive-segment/<case_id>', methods=['POST'])
+@requires_dataset_mount
 def interactive_segment(case_id):
     """Click-to-segment: seed prompt -> proposed mask (.nii.gz in CT geometry).
 
@@ -6871,6 +7134,7 @@ def interactive_segment(case_id):
 
 
 @api_blueprint.route('/vessel-cpr/<case_id>', methods=['POST'])
+@requires_dataset_mount
 def vessel_cpr(case_id):
     """Straightened vessel reformat + tumour-contact metrics for staging.
 
@@ -6964,6 +7228,7 @@ def create_share_token(case_id):
 
 
 @api_blueprint.route('/share/<token>', methods=['GET'])
+@requires_dataset_mount
 def get_shared_case(token):
     try:
         case_id = _share_serializer().loads(token)

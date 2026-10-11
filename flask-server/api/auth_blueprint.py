@@ -26,6 +26,8 @@ import hashlib
 import hmac
 import json
 import os
+import sys
+from contextlib import nullcontext
 
 from flask import Blueprint, jsonify, make_response, request, url_for
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
@@ -526,12 +528,16 @@ def my_usage():
 def my_jobs():
     user_id = current_user()["id"]
     jobs = job_store.list_jobs_for_user(user_id)
-    return jsonify({"user_id": user_id, "jobs": jobs}), 200
+    public_fields = {"session_id", "status", "model", "error", "created_at", "updated_at",
+                     "pipeline", "pipeline_stages", "cancel_requested"}
+    return jsonify({"user_id": user_id, "jobs": [
+        {key: value for key, value in job.items() if key in public_fields} for job in jobs
+    ]}), 200
 
 
 # The account fields a signed-in user can already see in Settings. Nothing
-# internal: no ids, no session or role rows, no job records (real runs never
-# write the job table, and its rows carry server paths).
+# internal: no ids, no session or role rows, no raw job records (those contain
+# server paths). The separate /me/jobs endpoint exposes a safe history shape.
 EXPORT_ACCOUNT_FIELDS = (
     "email", "name", "account_type", "plan", "created_at",
     "organization", "occupation", "role_description",
@@ -570,7 +576,23 @@ def export_me():
 @require_auth
 def delete_my_jobs():
     """Delete scan history but keep the account."""
-    result = job_store.delete_jobs_for_user(current_user()["id"])
+    user_id = current_user()["id"]
+    # Do not delete a workspace while its subprocess is still writing files.
+    # Avoid importing the heavy API just to serve account-only deployments.
+    api = sys.modules.get("api.api_blueprint")
+    lock = api._dispatching_sessions_lock if api else nullcontext()
+    with lock:
+        jobs = job_store.list_jobs_for_user(user_id)
+        if (api and user_id in api._dispatching_owners.values()) or any(
+                job.get("status") in {"queued", "running"} or
+                (api and job["session_id"] in api._dispatching_sessions) for job in jobs):
+            return jsonify({"error": "Cancel active scans and wait for processing to stop before deleting history.",
+                            "code": "inference_active"}), 409
+        result = job_store.delete_jobs_for_user(user_id)
+        if api:
+            with api._inference_jobs_lock:
+                for job in jobs:
+                    api.inference_jobs.pop(job["session_id"], None)
     return jsonify({"deleted": result}), 200
 
 

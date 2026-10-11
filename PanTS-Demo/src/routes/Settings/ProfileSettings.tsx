@@ -127,7 +127,7 @@ const ProfileSettings: React.FC = () => {
 				</div>
 				<div className="set-profile-save">
 					<button className="set-btn" type="button" disabled={!dirty || busy} onClick={() => { setDraft(committed); setPicture(undefined); fail(""); }}>Discard</button>
-					<button className="set-btn set-btn--primary" type="button" disabled={!dirty || busy} onClick={saveProfile}>{busy ? "Saving?" : "Save changes"}</button>
+					<button className="set-btn set-btn--primary" type="button" disabled={!dirty || busy} onClick={saveProfile}>{busy ? "Saving…" : "Save changes"}</button>
 				</div>
 			</div>
 			<div className="set-group">

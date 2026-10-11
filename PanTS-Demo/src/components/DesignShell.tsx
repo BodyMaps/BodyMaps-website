@@ -4,7 +4,7 @@ import { IconLayoutSidebar, IconLayoutGrid, IconFocusCentered, IconUsers, IconPl
 import AuthButton from "./AuthButton";
 import SiteFooter from "./SiteFooter";
 import WorkspaceTour from "./WorkspaceTour";
-import { groupUploads, loadRecentUploads, markRecentUploadViewed, RECENT_UPLOADS_CHANGED, isRecentUploadsStorageKey, type UploadGroup } from "../helpers/recentUploads";
+import { groupUploads, isGroupInFlight, loadRecentUploads, markRecentUploadViewed, RECENT_UPLOADS_CHANGED, isRecentUploadsStorageKey, type UploadGroup } from "../helpers/recentUploads";
 import "./DesignShell.css";
 
 const COLLAPSED_KEY = "bodymaps.sidebar.collapsed";
@@ -67,7 +67,16 @@ export default function DesignShell() {
     if (group.kind === "single" && group.upload.status === "Completed") {
       markRecentUploadViewed(group.upload.sessionId);
       navigate(`/${group.upload.isReconstruction ? "reconstruction" : "session"}/${encodeURIComponent(group.upload.sessionId)}`);
-    } else navigate("/upload");
+    } else if (isGroupInFlight(group)) {
+      navigate("/upload");
+    } else {
+      // Finished batches and failed runs may have moved out of the workspace.
+      // Preserve the selected run so History can open it directly at any age.
+      const query = group.kind === "batch"
+        ? new URLSearchParams({ batch: group.batchId })
+        : new URLSearchParams({ session: group.upload.sessionId });
+      navigate(`/account/history?${query}`);
+    }
     setMobileOpen(false);
   };
 
