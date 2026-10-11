@@ -12,7 +12,9 @@ from pathlib import Path
 import stat
 import sys
 import tempfile
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 REPOSITORY = "SMILE-project/OpenVAE"
@@ -26,6 +28,33 @@ CHUNK_BYTES = 1024 * 1024
 
 class CheckpointError(RuntimeError):
     """The destination or downloaded bytes do not match the pinned checkpoint."""
+
+
+def _huggingface_origin(url: str) -> bool:
+    parsed = urlsplit(url)
+    return (parsed.scheme == "https" and parsed.hostname == "huggingface.co"
+            and parsed.port in (None, 443) and parsed.username is None and parsed.password is None)
+
+
+class _CheckpointRedirectHandler(HTTPRedirectHandler):
+    """Never forward Hugging Face credentials to redirected CDN hosts."""
+
+    def redirect_request(self, request, response, code, message, headers, newurl):
+        if urlsplit(newurl).scheme != "https":
+            raise CheckpointError("Refusing an insecure checkpoint download redirect.")
+        redirected = super().redirect_request(request, response, code, message, headers, newurl)
+        if redirected is not None:
+            # Strip either regular or unredirected credentials first. Reattach
+            # only for a redirect within the same trusted Hugging Face origin.
+            redirected.remove_header("Authorization")
+            authorization = request.get_header("Authorization")
+            if authorization and _huggingface_origin(request.full_url) and _huggingface_origin(newurl):
+                redirected.add_unredirected_header("Authorization", authorization)
+        return redirected
+
+
+def _open_download(request, timeout):
+    return build_opener(_CheckpointRedirectHandler()).open(request, timeout=timeout)
 
 
 def _existing_checkpoint(destination: Path) -> bool:
@@ -73,7 +102,14 @@ def fetch_checkpoint(destination: Path) -> Path:
             digest = hashlib.sha256()
             size = 0
             request = Request(DOWNLOAD_URL, headers={"User-Agent": "BodyMaps-OpenVAE-checkpoint/1"})
-            with urlopen(request, timeout=60) as response:
+            token = os.getenv("HF_TOKEN", "").strip()
+            if token:
+                if any(character.isspace() or ord(character) < 32 or ord(character) > 126 for character in token):
+                    raise CheckpointError("HF_TOKEN must be a valid token without whitespace or control characters.")
+                if not _huggingface_origin(request.full_url):
+                    raise CheckpointError("Refusing to send HF_TOKEN outside the trusted Hugging Face origin.")
+                request.add_unredirected_header("Authorization", f"Bearer {token}")
+            with _open_download(request, timeout=60) as response:
                 while chunk := response.read(CHUNK_BYTES):
                     size += len(chunk)
                     if size > EXPECTED_SIZE:
@@ -95,6 +131,15 @@ def fetch_checkpoint(destination: Path) -> Path:
             if not _existing_checkpoint(destination):
                 raise CheckpointError("Destination changed during publication; retry the command.")
         return destination
+    except HTTPError as error:
+        if error.code in (401, 403):
+            raise CheckpointError(
+                f"Access denied (HTTP {error.code}). The OpenVAE repository is gated. "
+                "Sign in at https://huggingface.co/SMILE-project/OpenVAE and obtain approved access, "
+                "then provide that account's read token through HF_TOKEN and retry. "
+                "This helper does not accept repository terms or request access for you."
+            ) from None
+        raise CheckpointError(f"Checkpoint download failed (HTTP {error.code}); no checkpoint was published.") from None
     finally:
         # Only this invocation's uniquely created temporary file is removed.
         # Keep a preexisting destination or unrelated partial downloads intact.

@@ -21,6 +21,8 @@ Reconstruction and masks must match the original CT dimensions and affine and co
 
 OpenVAE requires its own source/runtime and the actual checkpoint. A missing checkpoint is an unavailable stage; the adapter does **not** substitute MAISI or another model.
 
+The official repository is **gated**: its public listing does not grant checkpoint download access. An unauthenticated JHU download returned HTTP 401. The account owner must sign in on the repository page, personally review/accept its terms or request access as required, and use a read token from an account with approved access. The helper does not accept terms, request access, create tokens, or inspect cached credentials.
+
 The download helper pins this official artifact:
 
 | Field | Pinned value |
@@ -37,6 +39,21 @@ From `flask-server`, run the helper explicitly under the account that will own t
 python scripts/fetch_openvae_checkpoint.py \
   --destination "$HOME/openvae/ckpt/OpenVAE-3D-4x-patch64-10K/autoencoder_best.pt"
 ```
+
+For gated access, supply the standard `HF_TOKEN` environment variable in the invoking shell. A Bash prompt keeps the token value out of shell history and process arguments:
+
+```bash
+read -r -s -p 'Approved Hugging Face read token: ' HF_TOKEN
+printf '\n'
+export HF_TOKEN
+python scripts/fetch_openvae_checkpoint.py \
+  --destination /absolute/path/to/approved-review/weights/autoencoder_best.pt
+unset HF_TOKEN
+```
+
+Use the account's narrowly scoped read access, and do not paste the token into project files, deployment `.env`, chat, or command arguments. See Hugging Face's [user access-token documentation](https://huggingface.co/docs/hub/security-tokens) and [gated-model access guidance](https://huggingface.co/docs/hub/models-gated). The helper intentionally reads only `HF_TOKEN`; a previous `hf auth login` alone does not make its cached token available to this helper. No Hugging Face client dependency is required.
+
+Authorization is sent only to the exact HTTPS `huggingface.co` origin (default port or 443). Redirects to signed CDN/other-host URLs remove the header; insecure HTTP redirects are refused. HTTP 401/403 errors show access instructions without printing response bodies or tokens. Authentication does not relax revision, size, SHA-256, or no-overwrite checks.
 
 The helper streams to its own temporary file beside the destination, checks the exact size and SHA-256, then publishes the complete file with an atomic hard link. A matching existing checkpoint is accepted without a network request. A mismatching existing file, a directory, or a symbolic link is never overwritten. If another process creates a different destination during download, that file is preserved and the command fails. A filesystem without hard-link support fails safely; there is no overwrite fallback. Failed or interrupted downloads remove only the helper's own temporary file.
 
@@ -76,6 +93,17 @@ The final output directory is published only after the selected pipeline and arc
 ## Verification before release
 
 Local mocked tests cover the orchestration and download helper, including corrupt/truncated downloads, no-clobber publication races, and cleanup. They do not download weights or validate the GPU models.
+
+`flask-server/scripts/verify_processing_pipeline.py` supports a standalone review without importing Flask, loading deployment `.env`, changing a database, or restarting services. Supply an existing approved NIfTI, a **new** output directory beneath an existing isolated parent, explicit model source/checkpoint/runtime environment variables, and a supported model. Without `--execute`, it only reports dependency availability and creates no output directory:
+
+```bash
+python scripts/verify_processing_pipeline.py \
+  --input /absolute/path/to/approved-review-ct.nii.gz \
+  --output /absolute/path/to/isolated-runs/new-review-001 \
+  --model ePAI --preprocessing OpenVAE --postprocessing ShapeKit
+```
+
+Add `--execute` only for an explicitly approved compute run. The verifier forces local inference, redirects temporary/cache/nnU-Net scratch files to its run directory, copies the input before inference, records actual stage timings, checks original hashes and geometry, verifies protected labels after ShapeKit, and packages real provenance before marking completion. Its `review.json` records failure or signal cancellation as terminal states. Existing output directories are refused, and cancellation targets its own session only. This filesystem isolation does not reserve GPU resources against production work: use an agreed quiet window and monitor the deployed health endpoint and active jobs. No inference or accuracy claim follows from a successful preflight.
 
 Before enabling these stages in a release, run an **isolated GPU integration test** using an approved CT and separate test sessions/storage. Exercise each advertised model and enabled stage combination. Confirm the original CT bytes remain unchanged, reconstruction and masks retain the original geometry, protected labels survive refinement, the viewer and archive use the same final mask, and raw measurements remain labelled as provenance. Also verify cancel/failure, retry, unavailable dependencies, ownership denial, restart/history recovery, and the stage display in the approved Chrome profile.
 
