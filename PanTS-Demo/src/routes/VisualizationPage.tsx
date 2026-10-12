@@ -871,7 +871,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	const toggleHd = () => {
 		// Edits and measurements live only in this page's memory, so the reload
 		// would erase them: ask first.
-		const askedFirst = maskHistory.canUndo || classDeletedRef.current || getMeasurementSummaries().length > 0;
+		const askedFirst = maskHistory.dirty || classDeletedRef.current || getMeasurementSummaries().length > 0;
 		if (askedFirst) {
 			if (!window.confirm("Switching resolution reloads the scan and discards your edits and measurements. Continue?")) return;
 		}
@@ -1687,7 +1687,9 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	// the end of every pointer press re-reads it too. Shortcut presses are covered by
 	// the keydown listener (macOS sends no keyup for Z while Cmd is held), since the
 	// shortcut hook calls undo and redo itself.
-	const [maskHistory, setMaskHistory] = useState({ canUndo: false, canRedo: false });
+	// `dirty` stays true for an edit that fell off the end of the history: it cannot be
+	// undone, but it is still in the scan, so the leave guard and the HD question still ask.
+	const [maskHistory, setMaskHistory] = useState({ canUndo: false, canRedo: false, dirty: false });
 	// Deleting a class empties the undo history, but the deletion itself is still an
 	// unsaved edit that a resolution switch would lose.
 	const classDeletedRef = useRef(false);
@@ -1702,13 +1704,15 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 		if (maskHistoryTimerRef.current) clearTimeout(maskHistoryTimerRef.current);
 		maskHistoryTimerRef.current = setTimeout(() => {
 			maskHistoryTimerRef.current = null;
-			let next = { canUndo: false, canRedo: false };
+			let next = { canUndo: false, canRedo: false, dirty: false };
 			try {
 				next = getMaskEditHistoryState();
 			} catch {
 				/* history not initialised yet */
 			}
-			setMaskHistory((prev) => (prev.canUndo === next.canUndo && prev.canRedo === next.canRedo ? prev : next));
+			setMaskHistory((prev) =>
+				prev.canUndo === next.canUndo && prev.canRedo === next.canRedo && prev.dirty === next.dirty ? prev : next,
+			);
 		}, 0);
 	}, []);
 	useEffect(() => {
@@ -2419,7 +2423,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	// A solo attempt in progress keeps its measurement in the session store and restores it.
 	const editsKeptElsewhere = isLiveRoom || isQuizPractice || Boolean(soloChallenge?.result);
 	const hasUnsavedEdits =
-		!editsKeptElsewhere && (maskHistory.canUndo || classDeleted || (hasMeasurements && !isSoloChallenge));
+		!editsKeptElsewhere && (maskHistory.dirty || classDeleted || (hasMeasurements && !isSoloChallenge));
 	useEffect(() => {
 		// A reload the reader agreed to leaves the guard's spare entry under this load.
 		dropStaleGuardEntry();

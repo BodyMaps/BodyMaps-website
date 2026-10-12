@@ -1232,12 +1232,16 @@ export function redoMaskEdit() {
   currentRenderingEngine?.render();
 }
 
-export function getMaskEditHistoryState(): { canUndo: boolean; canRedo: boolean } {
+// `dirty`: an edit is still in the labelmap, either one Undo can take back or one
+// that fell off the end of either history, which nothing can take back.
+export function getMaskEditHistoryState(): { canUndo: boolean; canRedo: boolean; dirty: boolean } {
   const h = csCoreUtils.HistoryMemo.DefaultHistoryMemo;
   const next = _redoOrder[_redoOrder.length - 1];
+  const canUndo = canUndoSmartFill() || h.canUndo;
   return {
-    canUndo: canUndoSmartFill() || h.canUndo,
+    canUndo,
     canRedo: next === "fill" ? canRedoSmartFill() : next === "brush" ? h.canRedo : false,
+    dirty: canUndo || _evictedEdits > 0,
   };
 }
 
@@ -4668,12 +4672,16 @@ let _editSeq = 0;
 // the ring slot object, so a slot the ring later reuses carries a new number.
 const _memoSeq = new WeakMap<object, number>();
 
+// Edits pushed off the end of either stack by a newer one. They can no longer be
+// undone, but their voxels are still in the labelmap, so they still count as unsaved.
+let _evictedEdits = 0;
+
 // Which stack each Undo came off, newest last, so Redo replays them in reverse.
 // A new edit on either stack empties it: HistoryMemo keeps an undone stroke
 // on its redo ring after a fill, and that stroke must not come back.
 let _redoOrder: ("fill" | "brush")[] = [];
 
-type MemoRing = { ring: unknown[]; position: number; isRecordingGrouped: boolean };
+type MemoRing = { ring: unknown[]; position: number; isRecordingGrouped: boolean; undoAvailable: number };
 function _memoTop(memo: typeof csCoreUtils.HistoryMemo.DefaultHistoryMemo): unknown {
   const inner = memo as unknown as MemoRing;
   return inner.ring[inner.position];
@@ -4689,15 +4697,22 @@ function _memoTop(memo: typeof csCoreUtils.HistoryMemo.DefaultHistoryMemo): unkn
     if (top && typeof top === "object") _memoSeq.set(top, ++_editSeq);
     _redoOrder = [];
   };
+  // A full ring overwrites its oldest entry with the next one.
+  const full = () => inner.undoAvailable >= memo.size;
   const push = memo.push.bind(memo);
   memo.push = ((item: Parameters<typeof push>[0]) => {
     const grouped = inner.isRecordingGrouped;
+    const evicts = !grouped && full();
     const pushed = push(item);
-    if (pushed && !grouped) stamp();
+    if (pushed && !grouped) {
+      if (evicts) _evictedEdits++;
+      stamp();
+    }
     return pushed;
   }) as typeof memo.push;
   const startGroup = memo.startGroupRecording.bind(memo);
   memo.startGroupRecording = () => {
+    if (full()) _evictedEdits++;
     startGroup();
     stamp();
   };
@@ -4732,7 +4747,10 @@ function _pushFillHistory(entry: FillHistoryEntry): FillHistoryEntry {
   const stored = { ...entry, seq: ++_editSeq };
   _fillHistory = _fillHistory.slice(0, _fillHistoryIndex + 1);
   _fillHistory.push(stored);
-  if (_fillHistory.length > FILL_HISTORY_LIMIT) _fillHistory.shift();
+  if (_fillHistory.length > FILL_HISTORY_LIMIT) {
+    _fillHistory.shift();
+    _evictedEdits++;
+  }
   _fillHistoryIndex = _fillHistory.length - 1;
   _redoOrder = [];
   _announceMaskHistory();
@@ -4748,6 +4766,7 @@ export function resetMaskEditHistory() {
   _fillHistory = [];
   _fillHistoryIndex = -1;
   _redoOrder = [];
+  _evictedEdits = 0;
   try {
     // HistoryMemo has no clear(); its size setter empties the ring and
     // resets the undo/redo counts.
