@@ -121,7 +121,7 @@ export default function Preview({
 					type="button"
 					aria-label={saved ? `Remove case ${id} from saved` : `Save case ${id}`}
 					aria-pressed={saved}
-					title={saved ? "Saved — click to remove" : "Save case"}
+					title={saved ? "Saved. Click to remove" : "Save case"}
 					onClick={onToggleSave}
 					className={`${styles.bookmark} ${saved ? styles.selected : ""}`}
 				>
@@ -133,7 +133,7 @@ export default function Preview({
 					type="button"
 					aria-label={compareSelected ? `Remove case ${id} from comparison` : `Add case ${id} to comparison`}
 					aria-pressed={compareSelected}
-					title={compareSelected ? "Selected to compare — click to remove" : "Select to compare"}
+					title={compareSelected ? "Selected to compare. Click to remove" : "Select to compare"}
 					onClick={onToggleCompare}
 					className={`${styles.compare} ${compareSelected ? styles.selected : ""}`}
 				>

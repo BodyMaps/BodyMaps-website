@@ -61,7 +61,7 @@ export default function CaseGrid({
   if (showSaved && savedCases.length === 0) {
     return (
       <div className={styles.emptyState}>
-        No saved cases yet — click the bookmark on any case to save it here.
+        No saved cases yet. Click the bookmark on any case to save it here.
       </div>
     );
   }

@@ -1,11 +1,11 @@
 // Recent uploads are scoped to the authenticated account on this browser.
 // The legacy, unscoped key is retained only for ownership-verified migration.
 
-import type { InferenceSelection, PipelineStage } from "./inferencePipeline";
+import type { InferenceSelection, PipelinePreviewSelection, PipelineStage } from "./inferencePipeline";
 
 export type RecentUploadStatus = "Processing" | "Completed" | "Failed" | "Cancelled";
 
-export type RecentUpload = {
+export type RecentUpload = PipelinePreviewSelection & {
 	sessionId: string;
 	// User-facing name. Defaults to a friendly "<model> · <date>" (see
 	// friendlyScanName) rather than the raw upload filename, and is renameable.
@@ -17,8 +17,6 @@ export type RecentUpload = {
 	// Choices captured when Run was pressed, never read from later composer state.
 	pipeline?: InferenceSelection;
 	pipelineStages?: PipelineStage[];
-	// Local UI review marker only; excluded from the actual server pipeline.
-	preprocessingPreview?: "OpenVAE";
 	status: RecentUploadStatus;
 	timestamp: number;
 	isReconstruction?: boolean;

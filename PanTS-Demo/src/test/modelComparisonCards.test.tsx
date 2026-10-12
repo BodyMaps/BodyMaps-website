@@ -53,7 +53,7 @@ describe("Additional info model details", () => {
     await user.click(screen.getByRole("button", { name: /Additional info/ }));
     const dialog = screen.getByRole("dialog", { name: "Atlas-Net" });
     expect(within(dialog).getByText("Matches segmentations to a known anatomical atlas")).toBeInTheDocument();
-    expect(within(dialog).getByText("25 structures in one pass, same nnU-Net-based coverage as ePAI")).toBeInTheDocument();
+    expect(within(dialog).getByText("25 structures in one pass, with the same coverage based on nnU-Net as ePAI")).toBeInTheDocument();
     expect(within(dialog).queryByText("25 structures in one pass", { exact: true })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Close additional info" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

@@ -217,6 +217,64 @@ def test_admin_coupon_persists_and_unblocks_both_media_models_without_admin_role
     assert plan_store.check_inference(user_id, "cads552") is None
 
 
+def test_brand_new_unpaid_account_coupon_unlocks_entitlements_without_admin_or_charge(
+    client, monkeypatch
+):
+    from api.admin_blueprint import admin_blueprint
+    from models.engine import session_scope
+    from models.usage_event import UsageEvent
+    from services import plan_store
+    from sqlalchemy import func, select
+
+    client.application.register_blueprint(admin_blueprint, url_prefix="/api")
+    coupon = "disposable-new-user-coupon"
+    monkeypatch.setenv("BODYMAPS_ADMIN_COUPON_SHA256", hashlib.sha256(coupon.encode()).hexdigest())
+    credentials = {"email": "new-unpaid-coupon@example.test", "password": "password1"}
+    created = client.post("/api/auth/register", json=credentials)
+    assert created.status_code == 201
+    user = created.get_json()["user"]
+    assert user["plan"] == "free" and user["roles"] == []
+    assert user["email_verified"] is False
+    assert user["organization"] is None and user["occupation"] is None
+    assert client.post("/api/me/plan", json={"plan": "enterprise"}).status_code == 403
+    assert plan_store.check_inference(user["id"], "ePAI")["reason"] == "model_locked"
+    assert plan_store.check_inference(user["id"], "ShapeKit")["reason"] == "postprocessing"
+
+    redeemed = client.post("/api/auth/redeem-admin-coupon", json={"coupon": coupon})
+    assert redeemed.status_code == 200
+    assert redeemed.get_json()["user"]["plan"] == "enterprise"
+    assert redeemed.get_json()["user"]["roles"] == []
+    for model in ("ePAI", "Atlas-Net", "LesionSegmenter", "cads551", "cads552", "OpenVAE", "ShapeKit"):
+        assert plan_store.check_inference(user["id"], model) is None
+    usage = client.get("/api/me/usage").get_json()
+    assert usage["limits"] == plan_store.PLAN_LIMITS["enterprise"]
+    assert usage["scans"]["used"] == 0 and usage["ai_messages"]["used"] == 0
+    assert client.get("/api/admin/people").status_code == 403
+    assert client.post(f"/api/admin/people/{user['id']}/roles", json={"role": "admin"}).status_code == 403
+    with session_scope() as session:
+        assert session.scalar(select(func.count()).select_from(UsageEvent)) == 0
+
+    # The grant survives a new authenticated session and a repeated valid code
+    # is idempotent; it does not manufacture usage or an administrative role.
+    assert client.post("/api/auth/logout").status_code == 200
+    assert client.post("/api/auth/login", json=credentials).status_code == 200
+    replay = client.post("/api/auth/redeem-admin-coupon", json={"coupon": f" {coupon} "})
+    assert replay.status_code == 200
+    assert replay.get_json()["user"]["plan"] == "enterprise"
+    assert replay.get_json()["user"]["roles"] == []
+    assert client.get("/api/admin/people").status_code == 403
+    assert client.get("/api/me/usage").get_json()["scans"]["used"] == 0
+
+
+@pytest.mark.parametrize("configured_digest", ["", "not-a-digest", "g" * 64, "a" * 63])
+def test_admin_coupon_malformed_configuration_does_not_grant_access(client, monkeypatch, configured_digest):
+    monkeypatch.setenv("BODYMAPS_ADMIN_COUPON_SHA256", configured_digest)
+    client.post("/api/auth/register", json={"email": "bad-config@example.test", "password": "password1"})
+    assert client.post("/api/auth/redeem-admin-coupon", json={"coupon": "anything"}).status_code == 503
+    user = client.get("/api/auth/me").get_json()["user"]
+    assert user["plan"] == "free" and user["roles"] == []
+
+
 def test_admin_coupon_requires_server_configuration(client, monkeypatch):
     monkeypatch.delenv("BODYMAPS_ADMIN_COUPON_SHA256", raising=False)
     client.post("/api/auth/register", json={

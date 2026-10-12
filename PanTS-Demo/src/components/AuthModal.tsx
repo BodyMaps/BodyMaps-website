@@ -222,7 +222,7 @@ const AuthModal: React.FC<{ standalone?: boolean }> = ({ standalone = false }) =
 							<p className="authm-sub">
 								Enter your email and we'll send you a link to choose a new
 								password. If you normally sign in with Google or GitHub, use
-								that button instead — those accounts have no password here.
+								that button instead. Those accounts have no password here.
 							</p>
 						)}
 						<label className="authm-field">

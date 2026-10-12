@@ -42,6 +42,7 @@ import {
 } from "../helpers/accountProfile";
 import { track } from "../helpers/analytics";
 import { API_BASE } from "../helpers/constants";
+import { avatarMaxBytes, avatarSizeLabel } from "../helpers/deploymentCapabilities";
 import { clearLocalNiftiFile } from "../helpers/localNifti";
 import { clearLocalDicomFiles } from "../helpers/dicomLocal";
 import {
@@ -533,6 +534,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	const updateAvatar = useCallback(async (file: File | null, name?: string) => {
 		let request: RequestInit;
 		if (file) {
+			if (file.size > avatarMaxBytes()) throw new Error(`Choose an image up to ${avatarSizeLabel()}.`);
 			const body = new FormData();
 			body.append("avatar", file);
 			if (name !== undefined) body.append("name", name);
@@ -544,7 +546,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		}
 		const res = await fetch(`${API_BASE}/api/auth/avatar`, { credentials: "include", ...request });
 		const data = await res.json().catch(() => ({}));
-		if (!res.ok) throw new Error(data.error || "Couldn't save your profile picture. Try again.");
+		if (!res.ok) throw new Error(data.error || (res.status === 413
+			? "The server rejected this picture's size. Choose a smaller image and try again."
+			: "Couldn't save your profile picture. Try again."));
 		updateCurrentUser(data.user);
 		pingOtherTabs();
 	}, [updateCurrentUser]);

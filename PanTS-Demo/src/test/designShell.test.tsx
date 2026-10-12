@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { useState, type ReactElement } from "react";
+import { MemoryRouter, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DesignShell from "../components/DesignShell";
 import { recentUploadsStorageKey, setRecentUploadsAccount } from "../helpers/recentUploads";
@@ -8,16 +9,81 @@ import { recentUploadsStorageKey, setRecentUploadsAccount } from "../helpers/rec
 const auth = vi.hoisted(() => ({ isAuthenticated: true }));
 vi.mock("../contexts/authContext", () => ({ useAuth: () => auth }));
 
-vi.mock("../components/AuthButton", () => ({ default: () => <button type="button">Account controls</button> }));
-vi.mock("../components/WorkspaceTour", () => ({ default: () => null }));
+vi.mock("../components/AuthButton", () => ({ default: ({ onWalkthrough }: { onWalkthrough?: () => void }) => <>
+    <button type="button">Account controls</button>
+    <button type="button" onClick={onWalkthrough}>Replay walkthrough</button>
+</> }));
+vi.mock("../components/WorkspaceTour", () => ({ default: ({ replay }: { replay: number }) => <output aria-label="Walkthrough replay request">{replay}</output> }));
 vi.mock("../components/SiteFooter", () => ({ default: () => <footer>Site footer</footer> }));
 const Location = () => { const { pathname, search } = useLocation(); return <output aria-label="Current route">{pathname + search}</output>; };
-const mount = (path = "/dashboard") => render(<MemoryRouter initialEntries={[path]}>
-    <Routes><Route element={<DesignShell />}><Route path="*" element={<Location />} /></Route></Routes>
+const mount = (path = "/dashboard", element: ReactElement = <Location />) => render(<MemoryRouter initialEntries={[path]}>
+    <Routes><Route element={<DesignShell />}><Route path="*" element={element} /></Route></Routes>
 </MemoryRouter>);
 beforeEach(() => { localStorage.clear(); setRecentUploadsAccount("u1"); auth.isAuthenticated = true; });
 
 describe("workspace sidebar", () => {
+    it("carries an explicit replay from a protected account shell into a separate workspace shell once", async () => {
+        const user = userEvent.setup();
+        localStorage.setItem("bodymaps.workspace-tour.v6", "true");
+        function RouteObservation() {
+            const location = useLocation();
+            return <><Location /><output aria-label="Pending route replay">{String(Boolean(location.state?.replayWorkspaceTour))}</output></>;
+        }
+        render(<MemoryRouter initialEntries={["/account"]}>
+            <Routes>
+                <Route element={<DesignShell />}><Route path="/" element={<RouteObservation />} /></Route>
+                {/* Match App's protected wrapper: this shell really unmounts
+                    when navigation switches into the public workspace tree. */}
+                <Route element={<Outlet />}>
+                    <Route element={<DesignShell />}><Route path="/account" element={<RouteObservation />} /></Route>
+                </Route>
+            </Routes>
+        </MemoryRouter>);
+        expect(screen.queryByLabelText("Walkthrough replay request")).not.toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Replay walkthrough" }));
+        expect(screen.getByLabelText("Current route")).toHaveTextContent(/^\/$/);
+        expect(screen.getByLabelText("Walkthrough replay request")).toHaveTextContent(/^1$/);
+        expect(screen.getByLabelText("Pending route replay")).toHaveTextContent("false");
+    });
+
+    it("replays from Team in the workspace and closes mobile navigation", async () => {
+        const user = userEvent.setup();
+        mount("/team");
+        expect(screen.queryByLabelText("Walkthrough replay request")).not.toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Open navigation" }));
+        expect(screen.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "true");
+        await user.click(screen.getByRole("button", { name: "Replay walkthrough" }));
+        expect(screen.getByLabelText("Current route")).toHaveTextContent(/^\/$/);
+        expect(screen.getByLabelText("Walkthrough replay request")).toHaveTextContent("1");
+        expect(screen.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
+    });
+
+    it("replays on /upload without navigating or resetting the existing outlet state", async () => {
+        function StatefulWorkspace() {
+            const [selection, setSelection] = useState("");
+            return <><Location /><input aria-label="Selected scan" value={selection} onChange={(event) => setSelection(event.target.value)} /></>;
+        }
+        const user = userEvent.setup();
+        mount("/upload", <StatefulWorkspace />);
+        const selectedScan = screen.getByRole("textbox", { name: "Selected scan" });
+        await user.type(selectedScan, "unchanged-scan.nii.gz");
+        expect(screen.getByLabelText("Walkthrough replay request")).toHaveTextContent("0");
+        await user.click(screen.getByRole("button", { name: "Replay walkthrough" }));
+        expect(screen.getByLabelText("Current route")).toHaveTextContent(/^\/upload$/);
+        expect(screen.getByRole("textbox", { name: "Selected scan" })).toBe(selectedScan);
+        expect(selectedScan).toHaveValue("unchanged-scan.nii.gz");
+        expect(screen.getByLabelText("Walkthrough replay request")).toHaveTextContent("1");
+        await user.click(screen.getByRole("button", { name: "Replay walkthrough" }));
+        expect(screen.getByLabelText("Walkthrough replay request")).toHaveTextContent("2");
+        expect(selectedScan).toHaveValue("unchanged-scan.nii.gz");
+    });
+
+    it.each(["/", "/upload"])("does not mount an automatic walkthrough for guests on %s", (path) => {
+        auth.isAuthenticated = false;
+        mount(path);
+        expect(screen.queryByLabelText("Walkthrough replay request")).not.toBeInTheDocument();
+    });
+
     it.each(["Workspace", "New run"])("guest %s keeps the public workspace mounted", async (action) => {
         auth.isAuthenticated = false;
         const user = userEvent.setup(); mount("/");

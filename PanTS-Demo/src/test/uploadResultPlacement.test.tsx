@@ -64,7 +64,7 @@ describe("completed inference actions", () => {
 
     const input = container.querySelector<HTMLInputElement>('input[accept=".nii,.gz"]')!;
     await user.upload(input, new File([new Uint8Array([1, 2, 3])], "scan.nii.gz"));
-    await screen.findByText(/ready/);
+    await waitFor(() => expect(within(dropzone).getByRole("status")).toHaveTextContent(/^Uploaded$/));
     await user.click(screen.getByRole("button", { name: "Run" }));
 
     const completedHeading = await screen.findByRole("heading", { name: "Your results are ready" });
@@ -96,7 +96,11 @@ describe("completed inference actions", () => {
     const dropzone = container.querySelector(".dropzone")!;
     const input = container.querySelector<HTMLInputElement>('input[accept=".nii,.gz"]')!;
     await user.upload(input, [makeFile("a.nii.gz"), makeFile("b.nii.gz")]);
-    await waitFor(() => expect(screen.getAllByText(/ready/).length).toBe(2));
+    await waitFor(() => {
+      const statuses = within(dropzone).getAllByRole("status");
+      expect(statuses).toHaveLength(2);
+      for (const status of statuses) expect(status).toHaveTextContent(/^Uploaded$/);
+    });
     await user.click(screen.getByRole("button", { name: "Run" }));
 
     const doneBar = await screen.findByText("Inference complete", {}, { timeout: 5000 });

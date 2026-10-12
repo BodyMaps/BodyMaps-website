@@ -11,7 +11,7 @@ import "./DesignShell.css";
 const COLLAPSED_KEY = "bodymaps.sidebar.collapsed";
 
 export default function DesignShell() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(() => {
@@ -26,6 +26,15 @@ export default function DesignShell() {
   const previousPath = useRef(location.pathname);
   const isWorkspace = location.pathname === "/" || location.pathname === "/upload";
   const navIndex = location.pathname === "/team" ? 2 : location.pathname === "/dashboard" ? 1 : isWorkspace ? 0 : -1;
+
+  useEffect(() => {
+    if (!isWorkspace || !location.state?.replayWorkspaceTour) return;
+    setTourRequest((n) => n + 1);
+    // Public workspace and protected account routes use separate shell
+    // instances. Carry a one-time replay request across that boundary.
+    const { replayWorkspaceTour: _request, ...state } = location.state;
+    navigate(location.pathname + location.search + location.hash, { replace: true, state });
+  }, [isWorkspace, location, navigate]);
 
   useEffect(() => {
     const element = content.current;
@@ -81,6 +90,13 @@ export default function DesignShell() {
     window.dispatchEvent(new Event("bodymaps:focus-composer"));
     setMobileOpen(false);
   };
+  const replayWalkthrough = () => {
+    // The V6 walkthrough explains the workspace. Replaying from an account or
+    // Team page should show those controls too; replaying here keeps uploads.
+    setMobileOpen(false);
+    if (!isWorkspace) navigate("/", { state: { replayWorkspaceTour: true } });
+    else setTourRequest((n) => n + 1);
+  };
   const openRecent = (group: UploadGroup) => {
     if (group.kind === "single" && group.upload.status === "Completed") {
       markRecentUploadViewed(group.upload.sessionId);
@@ -132,13 +148,13 @@ export default function DesignShell() {
           })}
           {recent.length > 0 && <Link className="design-history" to="/account/history">All history →</Link>}
         </section>
-        <div className="design-sidebar-account" data-tour="settings"><AuthButton variant="sidebar" collapsed={collapsed && !mobileOpen} onWalkthrough={() => { setMobileOpen(false); setTourRequest((n) => n + 1); }} /></div>
+        <div className="design-sidebar-account" data-tour="settings"><AuthButton variant="sidebar" collapsed={collapsed && !mobileOpen} onWalkthrough={replayWalkthrough} /></div>
       </aside>
       <div className="design-main-column">
         <main ref={content} id="workspace-content" className="design-content" tabIndex={-1}><Outlet /></main>
         <div className="design-footer"><SiteFooter /></div>
       </div>
     </div>
-    {isAuthenticated && <WorkspaceTour replay={tourRequest} />}
+    {isAuthenticated && isWorkspace && <WorkspaceTour replay={tourRequest} name={user?.name} />}
   </div>;
 }

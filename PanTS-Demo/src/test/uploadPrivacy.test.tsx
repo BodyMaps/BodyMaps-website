@@ -105,6 +105,73 @@ describe("view-only upload boundary", () => {
   });
 });
 
+describe("upload session initialization", () => {
+  it("waits for the first chunk to bind ownership before parallel background chunks", async () => {
+    const user = userEvent.setup();
+    let releaseFirst!: () => void;
+    let initialized = false;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const indices: number[] = [];
+    global.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).includes("upload-inference-chunk")) {
+        const index = Number((init!.body as FormData).get("chunk_index"));
+        indices.push(index);
+        if (index === 0) { await firstGate; initialized = true; }
+        if (!initialized) return { ...json({ error: "Upload ownership is unknown; restart the upload." }), ok: false, status: 409 };
+        return json({ ok: true });
+      }
+      return standardFetch(url);
+    });
+    mount();
+    await selectFiles(user, file("owned.nii.gz", 3));
+    await waitFor(() => expect(indices).toHaveLength(1));
+    expect(indices).toEqual([0]);
+    expect(screen.getByRole("progressbar", { name: "Uploading owned.nii.gz" })).toHaveAttribute("aria-valuenow", "0");
+    await act(async () => releaseFirst());
+    await waitFor(() => expect(screen.getByText("Uploaded", { selector: ".file-chip-status" })).toBeInTheDocument());
+    expect(indices).toEqual([0, 1, 2]);
+    expect(transfers().filter(([url]) => String(url).includes("finalize-upload"))).toHaveLength(1);
+  });
+
+  it("Run retries a failed background upload with a new session and serializes its first chunk", async () => {
+    const user = userEvent.setup();
+    let failedSession: string | undefined;
+    let releaseRetry!: () => void;
+    let initialized = false;
+    const retryGate = new Promise<void>((resolve) => { releaseRetry = resolve; });
+    const chunks: { sid: string; index: number }[] = [];
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    global.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).includes("upload-inference-chunk")) {
+        const data = init!.body as FormData;
+        const sid = String(data.get("session_id"));
+        const index = Number(data.get("chunk_index"));
+        chunks.push({ sid, index });
+        if (!failedSession) failedSession = sid;
+        if (sid === failedSession) return { ...json({ error: "Upload ownership is unknown; restart the upload." }), ok: false, status: 409 };
+        if (index === 0) { await retryGate; initialized = true; }
+        if (!initialized) return { ...json({ error: "Owner marker is not ready" }), ok: false, status: 409 };
+        return json({ ok: true });
+      }
+      return standardFetch(url);
+    });
+    mount();
+    await selectFiles(user, file("retry.nii.gz", 3));
+    expect(await screen.findByText("Upload failed", { selector: ".file-chip-status" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Preview retry.nii.gz" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Run", exact: true }));
+    await waitFor(() => expect(chunks).toHaveLength(2));
+    expect(chunks[1].sid).not.toBe(failedSession);
+    expect(chunks[1].index).toBe(0);
+    await act(async () => releaseRetry());
+    await waitFor(() => expect(transfers().filter(([url]) => String(url).includes("run-epai-inference"))).toHaveLength(1));
+    expect(chunks.filter(({ sid }) => sid !== failedSession).map(({ index }) => index)).toEqual([0, 1, 2]);
+    const inference = transfers().find(([url]) => String(url).includes("run-epai-inference"))!;
+    expect((inference[1]!.body as FormData).get("session_id")).toBe(chunks[1].sid);
+    expect(errorLog).toHaveBeenCalledWith("Background upload failed:", expect.any(Error));
+  });
+});
+
 describe("uploads outliving the page", () => {
   it("continues an authorized upload through same-account route navigation", async () => {
     const user = userEvent.setup();

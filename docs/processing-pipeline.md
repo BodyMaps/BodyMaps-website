@@ -4,6 +4,23 @@ The workspace can request a real server pipeline: optional OpenVAE reconstructio
 
 The supported segmentation models for optional stages are **ePAI, Atlas-Net, and LesionSegmenter**. Other existing model endpoints do not imply that their native labels are compatible with ShapeKit. In particular, the current MedIA vertebral label scheme is outside this pipeline's allowlist.
 
+## Explicit preview-only presentation
+
+The frontend supports two independent build-time flags, both **off by default**:
+
+```dotenv
+VITE_OPENVAE_UI_PREVIEW=true
+VITE_SHAPEKIT_UI_PREVIEW=true
+```
+
+Set these only for an approved preview release, then rebuild the frontend. They work in development and production; changing a backend environment file alone does not change a built frontend. A flag set to `true` makes that optional choice a visible **Preview only** selection, even when its server runtime is unavailable. The stage is omitted from the actual inference request. It never reconstructs CT, refines masks, or consumes an additional stage entitlement. The chosen segmentation model still requires its normal authentication, plan access and real inference service.
+
+Progress cards show previewed stages as **Not run**, including after the real segmentation completes, fails or is cancelled. Each preview has a two-second frontend animation explicitly labelled **Preview animation. No processing applied.** Its percentage describes the visual animation only, never model execution. The preprocessing animation starts while the real run is active; the postprocessing animation starts after the card observes a real successful result. The real model request, server status, history and result access are never delayed by an animation. Completed history opened after a reload uses a still frame without replay; cancellation, failure and unmount stop timers, and reduced-motion preferences skip animation.
+
+The account's browser history keeps `preprocessingPreview` and/or `postprocessingPreview` alongside a pipeline whose corresponding real stage is null; these presentation markers are not sent to the server. A resumed job retains its original real pipeline regardless of later flag changes. Downloaded masks and archives contain only the actual server output and provenance, with no preview transformation. With both previews selected, segmentation uses the original CT and no ShapeKit refinement is applied.
+
+Leave each flag unset or `false` to use the ordinary capability-checked stage. Enabling a **real** stage still requires its verified runtime, dependencies, compatible labels and isolated GPU validation described below. Preview flags do not validate those adapters or enable missing model installations.
+
 ## What the stages mean
 
 | Stage | Input and result | Scope |

@@ -7,6 +7,15 @@ procedure](REDESIGN_RELEASE.md). The main deployment script requires an explicit
 read-only restart preflight and restart hook for this service, then checks that
 anonymous WebSocket upgrades return 401. A Flask-only restart is insufficient.
 
+For an explicitly approved release on a host whose nginx configuration cannot
+yet proxy WebSockets, build with `VITE_LIVE_ROOMS_ENABLED=false` and follow the
+constrained-release section of `REDESIGN_RELEASE.md`. Creation and direct room
+entry show an unavailable message; they must not create room records or retry
+an unreachable socket. Solo viewing and solo learning remain available. A
+healthy loopback WebSocket process does not prove public connectivity. Enable
+the feature only after the matched service, nginx route, and public HTTPS
+authentication checks pass.
+
 ## Install and verify
 
 ```bash

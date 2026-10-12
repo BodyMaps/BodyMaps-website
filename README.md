@@ -29,6 +29,9 @@ the Live Rooms restart hook, account database backup, and authenticated checks.
 The workspace's optional OpenVAE and ShapeKit stages use the
 [server processing pipeline](docs/processing-pipeline.md), including verified
 weights, preserved original CTs, and explicit result provenance.
+Approved preview releases can instead enable the documented frontend flags;
+those choices are labelled **Preview only / Not run** and never execute an
+optional stage. Segmentation and its account permissions remain real.
 
 Deployment and local service instructions: [`flask-server/deploy/LIVE_ROOMS.md`](flask-server/deploy/LIVE_ROOMS.md).
 

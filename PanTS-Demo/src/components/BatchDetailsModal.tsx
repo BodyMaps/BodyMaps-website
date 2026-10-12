@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import { formatRelativeTime, recentStatusColor, type RecentUpload } from "../helpers/recentUploads";
+import WorkspaceRunCard from "./WorkspaceRunCard";
 import "./BatchDetailsModal.css";
 
 // Popup listing every scan in a batch, each with its own status / View / Download
@@ -8,6 +9,7 @@ import "./BatchDetailsModal.css";
 type Props = {
 	label: string;
 	uploads: RecentUpload[];
+	phases?: Record<string, string | undefined>;
 	onClose: () => void;
 	onView: (upload: RecentUpload) => void;
 	onDownloadScan: (upload: RecentUpload) => void;
@@ -23,6 +25,7 @@ const isDone = (s: RecentUpload["status"]) => s === "Completed";
 const BatchDetailsModal: React.FC<Props> = ({
 	label,
 	uploads,
+	phases,
 	onClose,
 	onView,
 	onDownloadScan,
@@ -69,6 +72,15 @@ const BatchDetailsModal: React.FC<Props> = ({
 				<div className="bdm-list">
 					{uploads.map((u) => {
 						const done = isDone(u.status);
+						// Keep each preview's provenance and animation visible per scan.
+						// Stable keys preserve the observed active-to-completed transition.
+						if (u.preprocessingPreview || u.postprocessingPreview) return <WorkspaceRunCard
+							key={u.sessionId} upload={u} phase={phases?.[u.sessionId]}
+							actions={done ? <>
+								<button type="button" onClick={() => onView(u)}>View</button>
+								<button type="button" disabled={downloadBusy} onClick={() => onDownloadScan(u)}>Download</button>
+							</> : undefined}
+						/>;
 						return (
 							<div key={u.sessionId} className="bdm-row">
 								<div className="bdm-row-main">

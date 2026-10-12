@@ -12,6 +12,17 @@ allows a 5 MiB picture plus multipart framing; the generic API stays at 2M and
 the backend still enforces the smaller file limit. Without this location, nginx
 rejects otherwise valid pictures larger than 2M before Flask receives them.
 
+For an approved release that cannot change the existing nginx configuration,
+build the frontend with `VITE_AVATAR_MAX_BYTES=921600`. The picture picker then
+advertises and enforces a 900 KB limit, leaving multipart overhead below the
+existing 2M proxy limit. The default remains 5 MiB, and configured values cannot
+raise the backend's 5 MiB maximum. An HTML proxy 413 response produces a clear
+request to choose a smaller image without discarding the staged picture.
+This is a build-time setting; rebuild when changing it. Once an administrator
+has applied and verified the 6M location, omit this override and rebuild to
+restore the full 5 MB picker limit. Database migration and authorization remain
+required in either mode.
+
 The table contains at most one normalized PNG thumbnail per account, up to
 256 pixels per side. Pictures follow the account database across workers,
 releases, devices and backups. Account deletion immediately revokes image

@@ -49,13 +49,13 @@ const MODEL_OPTIONS: {
   {
     id: "None",
     label: "None",
-    desc: "View only — files never leave your browser",
+    desc: "View only. Files never leave your browser.",
     quickFacts: [
-      { value: "Browser-only", label: "Where it runs" },
+      { value: "In your browser", label: "Where it runs" },
       { value: "None", label: "Inference" },
     ],
     details: [
-      "Nothing is uploaded - the scan opens straight in the local viewer from your browser's memory.",
+      "Nothing is uploaded. The scan opens straight in the local viewer from your browser's memory.",
       "No inference runs, so there's nothing to download or share afterward.",
     ],
   },
@@ -72,7 +72,7 @@ const MODEL_OPTIONS: {
       "25 structures in one pass",
       "Major organs, vasculature, pancreas region",
       "Pancreas gland, duct, and 3 tumor subtypes (PDAC, cyst, PNET)",
-      "Built for abdominal CT, not whole-body scans",
+      "Built for abdominal CT, not scans of the entire body",
     ],
   },
   {
@@ -85,7 +85,7 @@ const MODEL_OPTIONS: {
       { value: "Plausibility", label: "Optimized for" },
     ],
     details: [
-      "25 structures in one pass, same nnU-Net-based coverage as ePAI",
+      "25 structures in one pass, with the same coverage based on nnU-Net as ePAI",
       "Major organs, vasculature, pancreas region",
       "Pancreas gland, duct, and 3 tumor subtypes (PDAC, cyst, PNET)",
       "Matches segmentations to a known anatomical atlas",
@@ -167,7 +167,7 @@ import { assertUploadAccount, createAccountUploadController, isUploadAccountCurr
 import { requestReconstructionInference } from "../helpers/reconstructionInference";
 import { requestInferenceAdmission } from "../helpers/inferenceAdmission";
 import { createBatchArchive, startBlobDownload } from "../helpers/batchDownload";
-import { appendPipelineFields, EMPTY_PIPELINE, pipelineAcknowledged, readPipelineOptions, readPipelineStages, type InferenceSelection, type PipelineSelection, type PipelineOptions } from "../helpers/inferencePipeline";
+import { appendPipelineFields, EMPTY_PIPELINE, pipelineAcknowledged, readPipelineOptions, readPipelineStages, type InferenceSelection, type PipelineSelection, type PipelineOptions, type PipelinePreviewSelection } from "../helpers/inferencePipeline";
 
 
 const parseApiResponse = async (res: Response): Promise<any> => {
@@ -251,7 +251,7 @@ const estimateRemaining = (
 // A selection is either a single NIfTI file or a picked DICOM folder (the series'
 // raw .dcm slices). Both are previewable individually and runnable through inference.
 type SelectedItem =
-  | { id: string; kind: "nifti"; file: File }
+  | { id: string; kind: "nifti"; file: File; sampleCaseId?: 35 }
   | { id: string; kind: "dicom"; files: File[]; label: string };
 
 // The File System Access API is available in desktop Chrome and Edge, but it
@@ -367,7 +367,16 @@ const UploadPage: React.FC = () => {
   const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
   const [sampleLoading, setSampleLoading] = useState(false);
   const sampleAbortRef = useRef<AbortController | null>(null);
-  useEffect(() => () => sampleAbortRef.current?.abort(), [user?.id]);
+  useEffect(() => {
+    setSampleLoading(false);
+    return () => {
+      const controller = sampleAbortRef.current;
+      // Release the old owner's slot immediately. Its late finally must not
+      // clear a sample request started by the next signed-in account.
+      sampleAbortRef.current = null;
+      controller?.abort();
+    };
+  }, [user?.id]);
   const [viewOnlyUploadNotice, setViewOnlyUploadNotice] = useState(false);
   // Per-item background-upload progress while a file still sits in the
   // dropzone (pre-Run) - drives the file chip's own uploading/done/failed
@@ -396,6 +405,18 @@ const UploadPage: React.FC = () => {
   // Which selected item's inline preview is open (null = none). One at a time.
   const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const [message, setMessage] = useState<string>("");
+  // Selection feedback belongs to the last picker/sample attempt. Clear it
+  // after a successful new selection without dismissing a server/run error.
+  const selectionMessageRef = useRef<string | null>(null);
+  const setSelectionMessage = (text: string) => {
+    selectionMessageRef.current = text;
+    setMessage(text);
+  };
+  const clearSelectionMessage = useCallback(() => {
+    const previous = selectionMessageRef.current;
+    selectionMessageRef.current = null;
+    if (previous !== null) setMessage((current) => current === previous ? "" : current);
+  }, []);
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [downloadMessage, setDownloadMessage] = useState("");
   const downloadAbortRef = useRef<AbortController | null>(null);
@@ -435,12 +456,16 @@ const UploadPage: React.FC = () => {
   const modelDropRef = useRef<HTMLDivElement>(null);
   const [pipeline, setPipeline] = useState<PipelineSelection>(EMPTY_PIPELINE);
   const [pipelineOptions, setPipelineOptions] = useState<PipelineOptions | null>(null);
-  // Development review only. This switch never enables server execution or
-  // appears in a production build, even if the local env flag is left enabled.
-  const openVaeUiPreview = import.meta.env.DEV && import.meta.env.MODE === "development" && import.meta.env.VITE_OPENVAE_UI_PREVIEW === "true";
+  // Explicit build-time UI previews, default off. Previewed stages are omitted
+  // from server requests in development and production alike.
+  const openVaeUiPreview = import.meta.env.VITE_OPENVAE_UI_PREVIEW === "true";
+  const shapeKitUiPreview = import.meta.env.VITE_SHAPEKIT_UI_PREVIEW === "true";
   const preprocessingOption = openVaeUiPreview
     ? { id: "OpenVAE", label: "OpenVAE", available: true, reason: null, supported_models: MODEL_OPTIONS.filter((option) => option.id !== "None").map((option) => option.id) }
     : pipelineOptions?.preprocessing[0];
+  const postprocessingOption = shapeKitUiPreview
+    ? { id: "ShapeKit", label: "ShapeKit", available: true, reason: null, supported_models: MODEL_OPTIONS.filter((option) => option.id !== "None").map((option) => option.id) }
+    : pipelineOptions?.postprocessing[0];
   useEffect(() => {
     const controller = new AbortController();
     setPipelineOptions(null);
@@ -454,10 +479,10 @@ const UploadPage: React.FC = () => {
   useEffect(() => {
     setPipeline((current) => {
       const preprocessing = selectedModel !== "None" && (openVaeUiPreview || pipelineOptions?.preprocessing.some((option) => option.id === current.preprocessing && option.available && option.supported_models.includes(selectedModel))) ? current.preprocessing : null;
-      const postprocessing = selectedModel !== "None" && pipelineOptions?.postprocessing.some((option) => option.id === current.postprocessing && option.available && option.supported_models.includes(selectedModel)) ? current.postprocessing : null;
+      const postprocessing = selectedModel !== "None" && (shapeKitUiPreview || pipelineOptions?.postprocessing.some((option) => option.id === current.postprocessing && option.available && option.supported_models.includes(selectedModel))) ? current.postprocessing : null;
       return preprocessing === current.preprocessing && postprocessing === current.postprocessing ? current : { preprocessing, postprocessing };
     });
-  }, [selectedModel, pipelineOptions, openVaeUiPreview]);
+  }, [selectedModel, pipelineOptions, openVaeUiPreview, shapeKitUiPreview]);
 
   const submitAdminCoupon = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -613,7 +638,7 @@ const UploadPage: React.FC = () => {
     const controller = createAccountUploadController(ownerId);
     sampleAbortRef.current = controller;
     setSampleLoading(true);
-    setMessage("");
+    setSelectionMessage("");
     let timedOut = false;
     const timer = window.setTimeout(() => { timedOut = true; controller.abort(); }, 90_000);
     try {
@@ -622,16 +647,19 @@ const UploadPage: React.FC = () => {
       });
       if (!response.ok) throw new Error(response.status === 503 ? "The sample dataset is temporarily unavailable. Try again when storage is available." : "The sample could not be loaded. Please try again.");
       if (/json|text\//i.test(response.headers.get("content-type") || "")) throw new Error("The sample response was not a scan. Please try again.");
-      const blob = await response.blob();
+      // Read this fixed sample as bytes before constructing the File. Some
+      // Chrome profiles fail Response.blob() while the same binary transfer
+      // and an in-memory File work correctly.
+      const bytes = await response.arrayBuffer();
       assertUploadAccount(ownerId, controller.signal);
-      if (!blob.size) throw new Error("The sample scan was empty. Please try again.");
+      if (!bytes.byteLength) throw new Error("The sample scan was empty. Please try again.");
       setSelectedItems((previous) => [...previous, {
-        id: crypto.randomUUID(), kind: "nifti", file: new File([blob], "PanTS_00000035.nii.gz", { type: "application/gzip" }),
+        id: crypto.randomUUID(), kind: "nifti", sampleCaseId: 35, file: new File([bytes], "PanTS_00000035.nii.gz", { type: "application/gzip" }),
       }]);
-      setMessage("Sample case 35 is ready. Choose a model and select Run, or choose None to view it.");
+      setSelectionMessage("Sample case 35 is loaded into the workspace. Choose a model and select Run, or choose None to view it.");
     } catch (error) {
       if (isUploadAccountCurrent(ownerId) && (!controller.signal.aborted || timedOut)) {
-        setMessage(timedOut ? "Loading the sample timed out. Please try again." : error instanceof Error ? error.message : "The sample could not be loaded.");
+        setSelectionMessage(timedOut ? "Loading the sample timed out. Please try again." : error instanceof Error ? error.message : "The sample could not be loaded.");
       }
     } finally {
       window.clearTimeout(timer);
@@ -660,6 +688,7 @@ const UploadPage: React.FC = () => {
       return;
     }
     track("upload_files_selected");
+    clearSelectionMessage();
     setSelectedItems((prev) => [
       ...prev,
       ...filteredFiles.map((f) => ({
@@ -682,6 +711,7 @@ const UploadPage: React.FC = () => {
       return;
     }
     track("upload_files_selected");
+    clearSelectionMessage();
     setSelectedItems((prev) => [
       ...prev,
       ...filteredFiles.map((f) => ({
@@ -690,7 +720,7 @@ const UploadPage: React.FC = () => {
         file: f,
       })),
     ]);
-  }, []);
+  }, [clearSelectionMessage]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -728,10 +758,11 @@ const UploadPage: React.FC = () => {
     const candidates = files.filter(looksLikeDicom);
     if (!candidates.length) {
       alert(
-        "No DICOM files found. Pick the folder holding the .dcm slices — or, on a phone or tablet (where folders can't be picked), select the slice files themselves.",
+        "No DICOM files found. Choose the folder containing the .dcm slices. If your device cannot select folders, select the slice files instead.",
       );
       return;
     }
+    clearSelectionMessage();
     setSelectedItems((prev) => [
       ...prev,
       {
@@ -759,7 +790,7 @@ const UploadPage: React.FC = () => {
         // Cancelling the native chooser is a normal no-op, not an upload error.
         if (err instanceof DOMException && err.name === "AbortError") return;
         console.error("DICOM directory selection failed", err);
-        setMessage(
+        setSelectionMessage(
           "Couldn't read that DICOM folder. Select DICOM again, then choose all slices in the folder.",
         );
       }
@@ -872,7 +903,7 @@ const UploadPage: React.FC = () => {
             clearEtaTracking(sid);
             setRecentUploads(updateRecentUploadStatus(sid, "Failed", user?.id ?? null));
             setMessage(
-              "Session no longer exists on the server - marked as Failed.",
+              "This session no longer exists on the server. The run was marked as failed.",
             );
           }
           return;
@@ -1317,8 +1348,14 @@ const UploadPage: React.FC = () => {
           await uploadOneChunk(i);
         }
       };
+      // The first response confirms ownership and chunk-count markers are fully
+      // written. Sending the first six requests together can race their creation.
+      if (totalChunks > 0) {
+        await uploadOneChunk(0);
+        nextIndexToStart = 1;
+      }
       await Promise.all(
-        Array.from({ length: Math.min(CONCURRENCY, totalChunks) }, worker),
+        Array.from({ length: Math.min(CONCURRENCY, totalChunks - nextIndexToStart) }, worker),
       );
 
       assertUploadAccount(user?.id ?? null, controller.signal);
@@ -1561,9 +1598,15 @@ const UploadPage: React.FC = () => {
           await uploadOneChunk(i);
         }
       };
+      // A fresh or swept session must establish its owner and chunk count before
+      // parallel workers arrive. Resumed sessions with confirmed chunks have them.
+      if (startChunk === 0 && totalChunks > 0) {
+        await uploadOneChunk(0);
+        nextIndexToStart = 1;
+      }
       await Promise.all(
         Array.from(
-          { length: Math.min(CONCURRENCY, totalChunks - startChunk) },
+          { length: Math.min(CONCURRENCY, totalChunks - nextIndexToStart) },
           worker,
         ),
       );
@@ -1731,13 +1774,20 @@ const UploadPage: React.FC = () => {
     model: string,
     selection: InferenceSelection,
     batch?: { batchId: string; batchLabel: string },
-    preprocessingPreview?: "OpenVAE",
+    previews?: PipelinePreviewSelection,
   ) => {
     if (!isUploadAccountCurrent(user?.id ?? null)) return;
     // A NIfTI file already has a background upload in flight (or finished) if
     // one was started at selection time - reuse its session id and skip
     // straight to waiting on it instead of re-uploading from scratch.
-    const pre = item.kind === "nifti" ? itemUploadRef.current.get(item.id) : undefined;
+    let pre = item.kind === "nifti" ? itemUploadRef.current.get(item.id) : undefined;
+    if (pre && itemUploadStatus[item.id] === "failed") {
+      // A failed background transfer cannot be reused. Run retries from the
+      // still-local file with a new session instead of consuming its null result.
+      pre.cancel();
+      itemUploadRef.current.delete(item.id);
+      pre = undefined;
+    }
     const sid = pre?.sid ?? crypto.randomUUID();
     const ts = Date.now();
     setFocusedRunId(batch?.batchId ?? sid);
@@ -1759,7 +1809,7 @@ const UploadPage: React.FC = () => {
         sourceName,
         model,
         pipeline: selection,
-        preprocessingPreview,
+        ...previews,
         status: "Processing",
         timestamp: ts,
         isReconstruction: model === "OpenVAE",
@@ -1874,11 +1924,15 @@ const UploadPage: React.FC = () => {
     if (!openVaeUiPreview && pipeline.preprocessing && modelLocked(pipeline.preprocessing)) {
       setUpgradeBlock({ reason: "model_locked", feature: pipeline.preprocessing, plan: plan as PlanId }); return;
     }
-    if (pipeline.postprocessing && !canPostprocess(plan)) {
+    if (!shapeKitUiPreview && pipeline.postprocessing && !canPostprocess(plan)) {
       setUpgradeBlock({ reason: "postprocessing", feature: pipeline.postprocessing, plan: plan as PlanId }); return;
     }
-    const preprocessingPreview = openVaeUiPreview && pipeline.preprocessing === "OpenVAE" ? "OpenVAE" : undefined;
+    const previews: PipelinePreviewSelection = {
+      ...(openVaeUiPreview && pipeline.preprocessing === "OpenVAE" ? { preprocessingPreview: "OpenVAE" } : {}),
+      ...(shapeKitUiPreview && pipeline.postprocessing === "ShapeKit" ? { postprocessingPreview: "ShapeKit" } : {}),
+    };
     const selection: InferenceSelection = { ...pipeline, preprocessing: openVaeUiPreview ? null : pipeline.preprocessing,
+      postprocessing: shapeKitUiPreview ? null : pipeline.postprocessing,
       ...(model === "LesionSegmenter" ? { lesionTarget } : {}) };
     setInferenceCompleted(false);
 
@@ -1899,7 +1953,7 @@ const UploadPage: React.FC = () => {
     // as soon as its own upload finishes.
     setSelectedItems([]);
     for (const item of items) {
-      await startScanRun(item, model, selection, batch, preprocessingPreview);
+      await startScanRun(item, model, selection, batch, previews);
     }
   };
 
@@ -2088,7 +2142,7 @@ const UploadPage: React.FC = () => {
 
   const completedUpload = recentUploads.find((upload) => upload.sessionId === sessionId);
   const singleCompletedCard = singleCompletedVisible && completedUpload && <WorkspaceRunCard
-    upload={completedUpload}
+    key={completedUpload.sessionId} upload={completedUpload}
     actions={<>
       <button type="button" onClick={() => {
         setRecentUploads(markRecentUploadViewed(sessionId));
@@ -2120,7 +2174,7 @@ const UploadPage: React.FC = () => {
       const upload = group.upload;
       if (upload.status === "Processing") return renderProcessingCard(upload);
       if (singleCompletedVisible && upload.sessionId === sessionId) return singleCompletedCard;
-      return <WorkspaceRunCard upload={upload} actions={<>
+      return <WorkspaceRunCard key={upload.sessionId} upload={upload} actions={<>
         {upload.status === "Completed" && <><button type="button" onClick={() => openSession(upload)}>View</button>
           <button type="button" disabled={downloadBusy} onClick={() => downloadResult(upload.sessionId)}>Download</button></>}
         {renamingId === upload.sessionId ? <input autoFocus aria-label="Run name" value={renameValue}
@@ -2155,6 +2209,27 @@ const UploadPage: React.FC = () => {
     </div>;
   };
 
+  const filePickerActions = <div className="workspace-file-actions">
+    <button type="button" className="dropzone-btn workspace-picker-action" aria-label="Select NIfTI file" data-composer-focus
+      onClick={(event) => { event.stopPropagation(); fileInputRef.current?.click(); }}>
+      <span className="workspace-picker-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg></span>
+      Upload NIfTI
+    </button>
+    <button type="button" className="dropzone-btn workspace-picker-action" aria-label="Select DICOM"
+      title="Choose a DICOM folder when supported, otherwise choose the DICOM slice files."
+      onClick={(event) => { event.stopPropagation(); void chooseDicomFiles(); }}>
+      <span className="workspace-picker-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3 3 7.5l9 4.5 9-4.5z" /><path d="M3 12l9 4.5 9-4.5" /><path d="M3 16.5 12 21l9-4.5" /></svg></span>
+      Upload DICOM
+    </button>
+    <button type="button" className="dropzone-btn workspace-picker-action workspace-sample" title="Load sample case 35 into the workspace"
+      disabled={sampleLoading} onClick={(event) => { event.stopPropagation(); void loadSample(); }}>
+      <span className="workspace-picker-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3h6M10 3v6l-5.2 9.1A2 2 0 0 0 6.5 21h11a2 2 0 0 0 1.7-2.9L14 9V3" /><path d="M7.5 15h9" /></svg></span>
+      {sampleLoading ? "Loading sample…" : "Sample case"}
+    </button>
+    {sampleLoading && <button type="button" className="dropzone-btn"
+      onClick={(event) => { event.stopPropagation(); sampleAbortRef.current?.abort(); }}>Cancel loading</button>}
+  </div>;
+
   return (
     <div className={`upload-page-wrapper workspace-page${focusedGroup ? " has-runs" : ""}${previewItem ? " has-scan-preview" : ""}`}>
       <WorkspaceIntro collapsed={!!focusedGroup} />
@@ -2176,7 +2251,8 @@ const UploadPage: React.FC = () => {
         <div className="upload-card" data-tour="composer" id="scan-composer">
           {/* ── Drop zone ── */}
           <div
-            className={`dropzone${isDragOver ? " drag-over" : ""}${allUploadsDone ? " dropzone--all-done" : ""}`}
+            className={`dropzone${selectedItems.length ? " has-selected-files" : ""}${isDragOver ? " drag-over" : ""}${allUploadsDone ? " dropzone--all-done" : ""}`}
+            data-tour="scan-input"
             onClick={() => fileInputRef.current?.click()}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
@@ -2255,7 +2331,7 @@ const UploadPage: React.FC = () => {
                   const subtext =
                     item.kind === "dicom"
                       ? `DICOM series · ${item.files.length} slice${item.files.length === 1 ? "" : "s"}`
-                      : `NIfTI · ${formatBytes(item.file.size)}`;
+                      : item.sampleCaseId === 35 ? "NIfTI · Sample case" : `NIfTI · ${formatBytes(item.file.size)}`;
                   const isOpen = previewItemId === item.id;
                   const uploadStatus =
                     item.kind === "nifti" ? itemUploadStatus[item.id] : undefined;
@@ -2266,49 +2342,43 @@ const UploadPage: React.FC = () => {
                       className={`file-chip${isOpen ? " file-chip--active" : ""}${uploadStatus ? ` file-chip--${uploadStatus}` : ""}`}
                     >
                       <div className="file-chip-row">
-                        <span className="file-chip-icon" aria-hidden="true">
-                          {uploadStatus === "uploading" ? (
-                            <span className="file-chip-spinner" />
-                          ) : uploadStatus === "done" ? (
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M20 6L9 17l-5-5" />
-                            </svg>
-                          ) : (
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <button type="button" className="file-chip-preview"
+                          aria-label={`${isOpen ? "Hide preview for" : "Preview"} ${name}`}
+                          aria-pressed={isOpen} title={isOpen ? "Hide scan preview" : "Preview scan"}
+                          onClick={() => setPreviewItemId((previous) => previous === item.id ? null : item.id)}>
+                          {item.kind === "nifti" && item.sampleCaseId === 35 ? (
+                            <img className="file-chip-thumbnail" src="/case_35_slice.png" alt="" />
+                          ) : <span className="file-chip-icon" aria-hidden="true">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                               <polyline points="14 2 14 8 20 8" />
                             </svg>
-                          )}
-                        </span>
-                        <span className="file-chip-text">
-                          <span className="file-chip-name">{name}</span>
-                          <span className="file-chip-sub">
-                            {subtext}
-                            {uploadStatus === "uploading" && ` · uploading ${uploadPct}%`}
-                            {uploadStatus === "done" && " · ready"}
-                            {uploadStatus === "failed" && " · upload failed"}
-                          </span>
-                        </span>
-                        <button
-                          className="file-chip-preview"
-                          onClick={() =>
-                            setPreviewItemId((prev) =>
-                              prev === item.id ? null : item.id,
-                            )
-                          }
-                        >
-                          {isOpen ? "Hide" : "Preview"}
+                          </span>}
+                          <span className="file-chip-preview-caption" aria-hidden="true">{isOpen ? "Hide" : "Preview"}</span>
                         </button>
-                        <button
+                        <span className="file-chip-text">
+                          <span className="file-chip-name" title={name}>{name}</span>
+                          <span className="file-chip-sub" title={subtext}>{subtext}</span>
+                        </span>
+                        <span className={`file-chip-status${uploadStatus === "uploading" ? " is-uploading" : uploadStatus === "failed" ? " is-failed" : ""}`} role="status"
+                          title={uploadStatus === "failed" ? "Upload failed. Select Run to retry. Local preview is still available."
+                            : uploadStatus === "done" ? "Uploaded to the server. Inference starts when you select Run."
+                            : uploadStatus === "uploading" ? "Transferring the selected scan to the server. Inference has not started."
+                            : "Selected in this browser. Inference has not started."}>
+                          <span className={uploadStatus === "uploading" ? "file-chip-spinner" : "file-chip-status-dot"} aria-hidden="true" />
+                          {uploadStatus === "uploading" ? `Uploading ${uploadPct}%` : uploadStatus === "failed" ? "Upload failed" : uploadStatus === "done" ? "Uploaded" : "Ready"}
+                        </span>
+                        <button type="button"
                           className="file-chip-remove"
                           onClick={() => removeItem(item.id)}
                           aria-label={`Remove ${name}`}
                         >
-                          ×
+                          Remove
                         </button>
                       </div>
                       {uploadStatus === "uploading" && (
-                        <div className="file-chip-progress-track">
+                        <div className="file-chip-progress-track" role="progressbar" aria-label={`Uploading ${name}`}
+                          aria-valuemin={0} aria-valuemax={100} aria-valuenow={uploadPct}>
                           <div
                             className="file-chip-progress-fill"
                             style={{ width: `${uploadPct}%` }}
@@ -2325,34 +2395,10 @@ const UploadPage: React.FC = () => {
                 View only has stopped pending uploads. Uploading had already started while an AI model was selected, so some scan data may already be on the server. Switching modes cannot undo that transfer.
               </p>
             )}
-            <div className="workspace-file-actions">
-              <button
-                type="button"
-                className="dropzone-btn"
-                aria-label="Select NIfTI file"
-                data-composer-focus
-                onClick={(e) => {
-                  e.stopPropagation();
-                  fileInputRef.current?.click();
-                }}
-              >
-                Upload NIfTI
-              </button>
-              <button
-                type="button"
-                className="dropzone-btn"
-                aria-label="Select DICOM"
-                title="Choose a DICOM folder when supported, otherwise choose the DICOM slice files."
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void chooseDicomFiles();
-                }}
-              >
-                Upload DICOM
-              </button>
-              <button type="button" className="dropzone-btn workspace-sample" title="Load sample case 35 into the workspace" disabled={sampleLoading} onClick={(event) => { event.stopPropagation(); void loadSample(); }}>{sampleLoading ? "Loading sample…" : "Sample case"}</button>
-              {sampleLoading && <button type="button" className="dropzone-btn" onClick={(event) => { event.stopPropagation(); sampleAbortRef.current?.abort(); }}>Cancel loading</button>}
-            </div>
+            {selectedItems.length ? <details className="workspace-add-scans" onClick={(event) => event.stopPropagation()}>
+              <summary data-composer-focus>Add scans</summary>
+              {filePickerActions}
+            </details> : filePickerActions}
           </div>
 
           {/* ── Pre-inference preview: inspect the selected scan before running a model ── */}
@@ -2391,7 +2437,7 @@ const UploadPage: React.FC = () => {
             <div className="pipeline-arrow">→</div>
 
             {/* Step 2: Model */}
-            <div className="pipeline-step">
+            <div className="pipeline-step" data-tour="model">
               <div className="pipeline-step-header">
                 <div className="pipeline-badge">2</div>
                 <span className="pipeline-label">Model</span>
@@ -2408,7 +2454,7 @@ const UploadPage: React.FC = () => {
                     {selectedModel === "None"
                       ? "None (view scan)"
                       : selectedModel === "LesionSegmenter"
-                        ? `LesionSegmenter — ${
+                        ? `LesionSegmenter: ${
                             LESION_OPTIONS.find((l) => l.id === lesionTarget)
                               ?.label ?? "Pancreatic lesion"
                           }`
@@ -2609,12 +2655,13 @@ const UploadPage: React.FC = () => {
 
             {/* Step 3: Postprocessing */}
             <PipelineStepSelector stage="postprocessing" value={pipeline.postprocessing} signedOut={!isAuthenticated}
-              option={pipelineOptions?.postprocessing[0]} model={selectedModel} locked={!canPostprocess(plan)}
+              option={postprocessingOption} model={selectedModel} locked={!shapeKitUiPreview && !canPostprocess(plan)} previewOnly={shapeKitUiPreview}
               onChange={(value) => setPipeline((current) => ({ ...current, postprocessing: value as PipelineSelection["postprocessing"] }))}
               onLocked={() => setUpgradeBlock({ reason: "postprocessing", feature: "ShapeKit", plan: plan as PlanId })} />
 
             <button
               className="run-btn"
+              data-tour="run"
               onClick={handleRunEpaiInference}
               // Not gated on isUploading: that flag now also covers background
               // pre-uploads (started the moment a file is selected, before Run
@@ -2684,6 +2731,7 @@ const UploadPage: React.FC = () => {
             <BatchDetailsModal
               label={label}
               uploads={uploads}
+              phases={sessionPhases}
               onClose={() => setDetailsBatchId(null)}
               onView={(u) => {
                 if (!u.viewed) setRecentUploads(markRecentUploadViewed(u.sessionId));

@@ -4,15 +4,17 @@ import type { PipelineOption } from "../helpers/inferencePipeline";
 type Props = { stage: "preprocessing" | "postprocessing"; value: string | null; option?: PipelineOption;
   model: string; locked: boolean; previewOnly?: boolean; signedOut?: boolean; onChange: (value: string | null) => void; onLocked: () => void };
 
-/** Optional stages come from server capability checks, never from prototype data. */
+/** Real stages require server capability checks; explicit UI previews do not run. */
 export default function PipelineStepSelector({ stage, value, option, model, locked, previewOnly = false, signedOut = false, onChange, onLocked }: Props) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const title = stage === "preprocessing" ? "Preprocessing" : "Postprocessing";
   const supported = !!option?.supported_models.includes(model);
   const unavailable = (signedOut && !previewOnly) || !option?.available || !supported;
-  const reason = model === "None" ? "Skipped in view-only mode"
-    : previewOnly ? value ? "Preview only — not run. Segmentation uses the original CT." : ""
+  const reason = model === "None" ? "Skipped when viewing only"
+    : previewOnly ? value ? stage === "preprocessing"
+      ? "Preview only. This step does not run. Segmentation uses the original CT."
+      : "Preview only. This step does not run. No ShapeKit refinement is applied." : ""
     : signedOut ? "Sign in to check availability"
     : !option ? "Server availability could not be checked"
     : !option.available ? option.reason || "Not available on this server"
@@ -32,7 +34,7 @@ export default function PipelineStepSelector({ stage, value, option, model, lock
     if (next && locked) onLocked(); else onChange(next);
     root.current?.querySelector<HTMLButtonElement>("button")?.focus();
   };
-  return <div className="pipeline-step">
+  return <div className="pipeline-step" data-tour={stage}>
     <div className="pipeline-step-header"><div className="pipeline-badge">{stage === "preprocessing" ? 1 : 3}</div>
       <span className="pipeline-label">{title}</span><span className="pipeline-optional">optional</span></div>
     <div className="model-dropdown" ref={root}>
@@ -51,7 +53,7 @@ export default function PipelineStepSelector({ stage, value, option, model, lock
           className={`model-dropdown-item${value === option.id ? " selected" : ""}${locked ? " locked" : ""}`}
           onClick={() => choose(option.id)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(option.id); } }}>
           <div className="model-dropdown-item-content"><span className="model-dropdown-item-name">{option.label}</span>
-            <span className="model-dropdown-item-desc">{previewOnly ? "Preview only — not run" : stage === "preprocessing" ? "Reconstruct CT with OpenVAE before segmentation" : "Refine supported whole-organ masks; lesions are preserved"}</span></div>
+            <span className="model-dropdown-item-desc">{previewOnly ? "Preview only. This step does not run." : stage === "preprocessing" ? "Reconstruct CT with OpenVAE before segmentation" : "Refine supported masks of whole organs. Lesions are preserved."}</span></div>
           {locked && <span className="model-dropdown-lock">Donate</span>}
         </div>}
       </div>}

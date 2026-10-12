@@ -125,7 +125,7 @@ beforeEach(() => {
 	}) as unknown as typeof fetch;
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 /** Renders the settings shell at one of its sections. */
 const renderAt = (path = "/account", signedOutElement: ReactElement = <div>Landing</div>) =>
@@ -526,6 +526,37 @@ describe("success notices", () => {
 
 
 describe("account-synced profile pictures", () => {
+    it("advertises and enforces the deployment upload cap before staging a picture", async () => {
+        vi.stubEnv("VITE_AVATAR_MAX_BYTES", "921600");
+        const user = userEvent.setup();
+        renderAt();
+        await screen.findByLabelText("Name");
+        expect(screen.getByText(/PNG, JPG or WebP, up to 900 KB/)).toBeInTheDocument();
+        await user.upload(screen.getByLabelText("Choose profile picture"), new File([new Uint8Array(921601)], "large.png", { type: "image/png" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("Choose an image up to 900 KB.");
+        expect(screen.queryByAltText("Profile picture preview")).not.toBeInTheDocument();
+        expect(lastCall("PUT", "/api/auth/avatar")).toBeUndefined();
+        await user.upload(screen.getByLabelText("Choose profile picture"), new File([new Uint8Array(921600)], "fits.png", { type: "image/png" }));
+        await user.click(screen.getByRole("button", { name: "Save changes" }));
+        await screen.findByText("Your profile has been updated.");
+        expect(lastCall("PUT", "/api/auth/avatar")).toBeDefined();
+    });
+
+    it("explains an HTML proxy size refusal without losing the staged picture", async () => {
+        const user = userEvent.setup();
+        const originalFetch = global.fetch;
+        global.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+            if (String(url).includes("/api/auth/avatar")) return new Response("<html>413 Request Entity Too Large</html>", { status: 413 });
+            return originalFetch(url, init);
+        }) as typeof fetch;
+        renderAt();
+        await screen.findByLabelText("Name");
+        await user.upload(screen.getByLabelText("Choose profile picture"), new File(["image"], "portrait.png", { type: "image/png" }));
+        await user.click(screen.getByRole("button", { name: "Save changes" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("Choose a smaller image and try again.");
+        expect(screen.getByAltText("Profile picture preview")).toHaveAttribute("src", "blob:stub");
+    });
+
     it("stages the picture and name, then saves both in one authenticated multipart request", async () => {
         const user = userEvent.setup();
         renderAt();

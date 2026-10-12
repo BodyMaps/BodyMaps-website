@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/authContext";
 import { ACCOUNT_TYPES, accountTypeLabel, type AccountType } from "../../helpers/accountProfile";
 import { track } from "../../helpers/analytics";
+import { avatarMaxBytes, avatarSizeLabel } from "../../helpers/deploymentCapabilities";
 import { useSettings } from "./context";
 
 // Name and picture save together; researcher fields retain their existing server-backed controls.
@@ -94,7 +95,7 @@ const ProfileSettings: React.FC = () => {
 		if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
 			fail("Choose a PNG, JPG or WebP image."); return;
 		}
-		if (file.size > 5 * 1024 * 1024) { fail("Choose an image smaller than 5 MB."); return; }
+		if (file.size > avatarMaxBytes()) { fail(`Choose an image up to ${avatarSizeLabel()}.`); return; }
 		setPicture(file);
 		fail("");
 	};
@@ -112,7 +113,7 @@ const ProfileSettings: React.FC = () => {
 				</div>
 				<div className="set-profile-fields">
 					<div className="set-row">
-						<span className="set-row-label">Profile picture<span className="set-row-note">PNG, JPG or WebP, up to 5 MB. Saved to your account.</span></span>
+						<span className="set-row-label">Profile picture<span className="set-row-note">PNG, JPG or WebP, up to {avatarSizeLabel()}. Saved to your account.</span></span>
 						<div className="set-picture-actions">
 							<button className="set-btn" type="button" disabled={busy} onClick={() => pickerRef.current?.click()}><IconUpload size={16} aria-hidden="true" />Upload picture</button>
 							{avatar && <button className="set-btn set-btn--quiet" type="button" disabled={busy} onClick={() => setPicture(user.avatarUrl ? null : undefined)}>Remove</button>}
@@ -138,7 +139,7 @@ const ProfileSettings: React.FC = () => {
 						<span className="set-row-note">
 							{user.emailVerified
 								? "Verified."
-								: "Not verified — check your inbox, or resend the link."}
+								: "Not verified. Check your inbox, or resend the link."}
 						</span>
 					</span>
 					<span className="set-row-value">{user.email}</span>

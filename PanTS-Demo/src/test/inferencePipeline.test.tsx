@@ -34,6 +34,7 @@ let replayStatus: "running" | "completed" | undefined;
 let admissionRemaining: number;
 beforeEach(() => {
   vi.stubEnv("VITE_OPENVAE_UI_PREVIEW", "false");
+  vi.stubEnv("VITE_SHAPEKIT_UI_PREVIEW", "false");
   localStorage.clear(); setRecentUploadsAccount(null); store.pending = []; requests = []; transferGate = null; releaseUpload = undefined;
   availableOptions = capability; accountPlan = "pro"; acknowledgePipeline = true; replayStatus = undefined;
   admissionRemaining = 0;
@@ -75,9 +76,9 @@ describe("server-backed pipeline", () => {
     availableOptions = { ...capability, preprocessing: [{ ...capability.preprocessing[0], available: false, reason: "Weights missing" }] };
     const user = userEvent.setup(); const { container } = show();
     await waitForAccountModel(/LesionSegmenter/);
-    expect(screen.queryByText("Preview only — not run. Segmentation uses the original CT.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Preview only. This step does not run. Segmentation uses the original CT.")).not.toBeInTheDocument();
     await chooseOptional(user, "Preprocessing", "OpenVAE");
-    expect(screen.getByText("Preview only — not run. Segmentation uses the original CT.")).toBeInTheDocument();
+    expect(screen.getByText("Preview only. This step does not run. Segmentation uses the original CT.")).toBeInTheDocument();
     expect(screen.queryByText("OpenVAE needs Pro")).not.toBeInTheDocument();
     await user.upload(container.querySelector<HTMLInputElement>('input[accept=".nii,.gz"]')!, new File(["scan"], "preview.nii.gz"));
     await user.click(screen.getByRole("button", { name: "Run", exact: true }));
@@ -91,12 +92,138 @@ describe("server-backed pipeline", () => {
     expect(saved[0]).toMatchObject({ preprocessingPreview: "OpenVAE", pipeline: { preprocessing: null } });
   });
 
-  it("cannot turn on the OpenVAE visual preview in a production build", async () => {
-    vi.stubEnv("MODE", "production"); vi.stubEnv("DEV", false); vi.stubEnv("VITE_OPENVAE_UI_PREVIEW", "true");
-    availableOptions = { ...capability, preprocessing: [{ ...capability.preprocessing[0], available: false, reason: "Weights missing" }] };
+  it("keeps unavailable stages disabled in production unless explicitly configured as previews", async () => {
+    vi.stubEnv("MODE", "production"); vi.stubEnv("DEV", false);
+    availableOptions = { ...capability, preprocessing: [{ ...capability.preprocessing[0], available: false, reason: "Weights missing" }],
+      postprocessing: [{ ...capability.postprocessing[0], available: false, reason: "Refinement unavailable" }] };
     show(); await waitForAccountModel();
     expect(await screen.findByText("Weights missing")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preprocessing: None (skip)" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Postprocessing: None (skip)" })).toBeDisabled();
+  });
+
+  it.each(["development", "production"])("previews ShapeKit in an opted-in %s build without requesting refinement or bypassing real permissions", async (mode) => {
+    vi.stubEnv("MODE", mode); vi.stubEnv("DEV", mode === "development"); vi.stubEnv("VITE_SHAPEKIT_UI_PREVIEW", "true"); accountPlan = "free";
+    availableOptions = { ...capability, postprocessing: [{ ...capability.postprocessing[0], available: false, reason: "Runtime missing" }] };
+    const user = userEvent.setup(); const { container } = show();
+    await waitForAccountModel(/LesionSegmenter/);
+    await chooseOptional(user, "Postprocessing", "ShapeKit");
+    expect(screen.getByText("Preview only. This step does not run. No ShapeKit refinement is applied.")).toBeInTheDocument();
+    expect(screen.queryByText("ShapeKit needs Pro")).not.toBeInTheDocument();
+    await user.upload(container.querySelector<HTMLInputElement>('input[accept=".nii,.gz"]')!, new File(["scan"], "preview.nii.gz"));
+    await user.click(screen.getByRole("button", { name: "Run", exact: true }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].get("model_name")).toBe("LesionSegmenter");
+    expect(requests[0].has("postprocessing")).toBe(false);
+    expect(requests[0].has("postprocessingPreview")).toBe(false);
+    const row = screen.getByText("Postprocessing preview · ShapeKit").closest("li")!;
+    expect(within(row).getByText("Not run")).toBeInTheDocument();
+    expect(within(row).queryByText("Complete")).not.toBeInTheDocument();
+    expect(screen.queryByText("Refine organ masks · ShapeKit")).not.toBeInTheDocument();
+    const saved = JSON.parse(localStorage.getItem(recentUploadsStorageKey(ACCOUNT.id))!);
+    expect(saved[0]).toMatchObject({ postprocessingPreview: "ShapeKit", pipeline: { postprocessing: null } });
+  });
+
+  it("freezes both production preview markers for a batch while sending only real segmentation requests", async () => {
+    vi.stubEnv("MODE", "production"); vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_OPENVAE_UI_PREVIEW", "true"); vi.stubEnv("VITE_SHAPEKIT_UI_PREVIEW", "true");
+    transferGate = new Promise((resolve) => { releaseUpload = resolve; });
+    const user = userEvent.setup(); const { container } = show();
+    await waitForAccountModel();
+    await chooseOptional(user, "Preprocessing", "OpenVAE"); await chooseOptional(user, "Postprocessing", "ShapeKit");
+    await user.upload(container.querySelector<HTMLInputElement>('input[accept=".nii,.gz"]')!, [new File(["a"], "a.nii.gz"), new File(["b"], "b.nii.gz")]);
+    await user.click(screen.getByRole("button", { name: "Run", exact: true }));
+    await chooseOptional(user, "Preprocessing", "None (skip)"); await chooseOptional(user, "Postprocessing", "None (skip)");
+    releaseUpload?.();
+    await waitFor(() => expect(requests).toHaveLength(2));
+    for (const request of requests) {
+      expect(request.get("model_name")).toBe("ePAI");
+      for (const key of ["preprocessing", "postprocessing", "preprocessingPreview", "postprocessingPreview"]) expect(request.has(key)).toBe(false);
+    }
+    const saved = JSON.parse(localStorage.getItem(recentUploadsStorageKey(ACCOUNT.id))!);
+    expect(saved).toHaveLength(2);
+    for (const upload of saved) expect(upload).toMatchObject({ preprocessingPreview: "OpenVAE", postprocessingPreview: "ShapeKit", pipeline: { preprocessing: null, postprocessing: null } });
+  });
+
+  it("resumes a previewed run with the saved real pipeline after preview mode is disabled", async () => {
+    const pipeline = { preprocessing: null, postprocessing: null };
+    localStorage.setItem(recentUploadsStorageKey(ACCOUNT.id), JSON.stringify([{ ...run, pipeline, preprocessingPreview: "OpenVAE", postprocessingPreview: "ShapeKit" }]));
+    store.pending = [{ sessionId: run.sessionId, model: run.model, filename: "ct.nii.gz", file: new Blob(), bdmapId: "", totalChunks: 0, nextChunk: 0, uploadedFilename: "ct.nii.gz", pipeline }];
+    show(); await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0].has("preprocessing")).toBe(false); expect(requests[0].has("postprocessing")).toBe(false);
+    for (const label of ["Preprocessing preview · OpenVAE", "Postprocessing preview · ShapeKit"]) {
+      expect(screen.getByText(label).closest("li")).toHaveTextContent("Not run");
+    }
+  });
+
+  it.each([false, true])("animates post previews across an actual polling completion (batch: %s)", async (batch) => {
+    vi.stubEnv("VITE_OPENVAE_UI_PREVIEW", "true"); vi.stubEnv("VITE_SHAPEKIT_UI_PREVIEW", "true");
+    const originalFetch = vi.mocked(global.fetch).getMockImplementation()!;
+    let completePoll!: () => void;
+    let pollsStarted = 0;
+    const completion = new Promise<void>((resolve) => { completePoll = resolve; });
+    vi.spyOn(global, "fetch").mockImplementation(async (url, init) => {
+      if (String(url).includes("/api/inference-status/")) {
+        pollsStarted += 1;
+        await completion;
+        return json({ status: "completed", pipeline_stages: [
+          { id: "segmentation", model: "ePAI", status: "completed", started_at: null, completed_at: null, error: null },
+          { id: "packaging", model: null, status: "completed", started_at: null, completed_at: null, error: null },
+        ] }) as unknown as Response;
+      }
+      return originalFetch(url, init);
+    });
+    const user = userEvent.setup(); const { container } = show();
+    await waitForAccountModel();
+    await chooseOptional(user, "Preprocessing", "OpenVAE"); await chooseOptional(user, "Postprocessing", "ShapeKit");
+    const files = [new File(["scan"], "first.nii.gz"), ...(batch ? [new File(["scan"], "second.nii.gz")] : [])];
+    await user.upload(container.querySelector<HTMLInputElement>('input[accept=".nii,.gz"]')!, files);
+    await user.click(screen.getByRole("button", { name: "Run", exact: true }));
+    await waitFor(() => expect(pollsStarted).toBe(files.length));
+    if (batch) await user.click(screen.getByRole("button", { name: "View details" }));
+    const cards = screen.getAllByRole("article", { name: /^Run:/ });
+    expect(cards).toHaveLength(files.length);
+    for (const card of cards) {
+      expect(within(card).getByRole("progressbar", { name: "ShapeKit preview animation" })).toHaveAttribute("aria-valuenow", "0");
+      expect(within(card).getByText("Preprocessing preview · OpenVAE")).toBeInTheDocument();
+    }
+    await act(async () => { completePoll(); await completion; });
+    await waitFor(() => expect(screen.getAllByRole("heading", { name: "Your results are ready" })).toHaveLength(files.length));
+    // UploadPage must keep the same keyed card through Processing -> Completed;
+    // remounting treats it as old history and incorrectly skips the post animation.
+    screen.getAllByRole("article", { name: /^Run:/ }).forEach((card, index) => expect(card).toBe(cards[index]));
+    for (const card of cards) {
+      expect(within(card).getByRole("button", { name: batch ? "View" : "View Visualization", exact: true })).toBeEnabled();
+      await waitFor(() => {
+        const percent = Number(within(card).getByRole("progressbar", { name: "ShapeKit preview animation" }).getAttribute("aria-valuenow"));
+        expect(percent).toBeGreaterThan(0); expect(percent).toBeLessThan(100);
+      });
+      expect(within(card).getAllByText("Not run")).toHaveLength(2);
+    }
+    for (const request of requests) {
+      expect(request.has("preprocessing")).toBe(false); expect(request.has("postprocessing")).toBe(false);
+    }
+  });
+
+  it.each(["Completed", "Failed", "Cancelled"] as const)("never marks preview stages executed in a %s result", (status) => {
+    render(<WorkspaceRunCard upload={{ ...run, status, pipeline: { preprocessing: null, postprocessing: null }, preprocessingPreview: "OpenVAE", postprocessingPreview: "ShapeKit" }} />);
+    for (const label of ["Preprocessing preview · OpenVAE", "Postprocessing preview · ShapeKit"]) {
+      const row = screen.getByText(label).closest("li")!;
+      expect(within(row).getByText("Not run")).toBeInTheDocument();
+      expect(within(row).queryByText("Complete")).not.toBeInTheDocument();
+      expect(row).not.toHaveAttribute("aria-current");
+    }
+    expect(screen.getByText("ShapeKit was previewed only and did not run. No ShapeKit refinement was applied.")).toBeInTheDocument();
+  });
+
+  it("gives observed server stages precedence over stale preview markers", () => {
+    render(<WorkspaceRunCard upload={{ ...run, status: "Completed", preprocessingPreview: "OpenVAE", postprocessingPreview: "ShapeKit", pipelineStages: [
+      { id: "preprocessing", model: "OpenVAE", status: "completed", started_at: null, completed_at: null, error: null },
+      { id: "postprocessing", model: "ShapeKit", status: "completed", started_at: null, completed_at: null, error: null },
+    ] }} />);
+    expect(screen.queryByText(/previewed only and did not run/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Not run")).not.toBeInTheDocument();
+    expect(screen.getByText("Refine organ masks · ShapeKit").closest("li")).toHaveTextContent("Complete");
   });
 
   it("shows the server's unavailability reason and prevents selecting missing installations", async () => {

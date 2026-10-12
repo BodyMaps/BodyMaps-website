@@ -48,8 +48,12 @@ const MEMBERS: Member[] = [
     photo: "/headshots/lucy-wu.webp",
   },
   { name: "Aditya Sanjeev", role: "Core Contributor" },
-  { name: "Ahmad Durre Rehman", role: "Core Contributor" },
   { name: "Alexander Poon", role: "Core Contributor" },
+  {
+    name: "Ahmad Durre Rehman",
+    role: "Core Contributor",
+    links: { linkedin: "https://linkedin.com/in/ahmad-durre-rehman-121577382" },
+  },
   { name: "Yusuf Abdulkadir", role: "Core Contributor" },
   { name: "Ishita Ahelleya", role: "Core Contributor" },
   { name: "Harleen Sachdev", role: "Core Contributor" },

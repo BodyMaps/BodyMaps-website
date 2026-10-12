@@ -7,6 +7,12 @@ export type InferenceSelection = PipelineSelection & {
   lesionTarget?: "pancreatic" | "liver" | "kidney" | "colon";
 };
 
+/** Presentation metadata only; never submitted as an executed server stage. */
+export type PipelinePreviewSelection = {
+  preprocessingPreview?: "OpenVAE";
+  postprocessingPreview?: "ShapeKit";
+};
+
 export const EMPTY_PIPELINE: PipelineSelection = { preprocessing: null, postprocessing: null };
 
 export type PipelineOption = { id: string; label: string; available: boolean; reason: string | null; supported_models: string[] };

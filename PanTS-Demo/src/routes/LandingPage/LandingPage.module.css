@@ -21,4 +21,15 @@
 @media(max-width:550px) { .hero { padding:54px 16px 20px; }.brandMark { width:48px; height:48px; border-radius:16px; }.brandMark img { width:38px; height:38px; }.heroTitle { font-size:44px; }.heroSubtitle { font-size:16px; }.heroStats { width:100%; padding:12px 0; row-gap:16px; }.statGroup { width:50%; justify-content:center; }.heroStatDivider { display:none; }.heroStatItem { padding:0 8px; }.heroOverview { font-size:12px; } }
 @keyframes hero-breathe { 0%,100% { transform:scale(.92); opacity:.7; } 50% { transform:scale(1.12); opacity:1; } }
 @container workspace (max-height:850px) { .hero { padding-bottom:8px; }.heroTitle { font-size:54px; }.heroSubtitle { margin-top:10px; }.heroStats { margin-top:16px; padding:12px 0; }.heroOverview { margin-top:14px; } }
+@media(min-width:851px) and (min-height:541px) {
+  :global(.workspace-page.has-scan-preview) .hero { padding:6px 24px 4px; }
+  :global(.workspace-page.has-scan-preview) .brandMark { width:40px; height:40px; margin-bottom:4px; border-radius:14px; }
+  :global(.workspace-page.has-scan-preview) .brandMark img { width:32px; height:32px; }
+  :global(.workspace-page.has-scan-preview) .welcome { margin-bottom:4px; }
+  :global(.workspace-page.has-scan-preview) .heroTitle { font-size:42px; }
+  :global(.workspace-page.has-scan-preview) .heroSubtitle { margin-top:6px; font-size:16px; }
+  :global(.workspace-page.has-scan-preview) .heroStats { margin-top:6px; padding:8px 0; }
+  :global(.workspace-page.has-scan-preview) .heroStatValue { font-size:20px; }
+  :global(.workspace-page.has-scan-preview) .heroOverview { margin-top:4px; }
+}
 @media(prefers-reduced-motion:reduce) { .root { transition:none; }.brandMark::before { animation:none; transform:none; opacity:.85; } }
