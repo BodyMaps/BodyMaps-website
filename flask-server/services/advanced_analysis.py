@@ -115,6 +115,33 @@ def _plane_to_axis(affine: np.ndarray, plane) -> int | None:
     return int(np.argmax(np.abs(np.asarray(affine)[row, :3])))
 
 
+def inflate_seed_labelmap(seg_b64, voxels: int, grid: str, hint: str) -> bytes:
+    """Decode `initial_seg_gz_b64` (base64 of a gzipped uint8 labelmap) into
+    exactly `voxels` bytes.
+
+    The payload comes from the browser, so the inflate stops one byte past
+    `voxels`: deflate packs a run of zeros about a thousand to one, and an
+    unbounded inflate let a request of a few megabytes grow to gigabytes in
+    the web process before any length check ran. Raises ValueError for data
+    that is not one complete base64 gzip stream, and for a labelmap of another
+    size, naming `grid` (what the seed should match) and `hint` in the message.
+    """
+    import base64
+    import zlib
+    try:
+        inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        raw = inflater.decompress(base64.b64decode(seg_b64), voxels + 1)
+    except Exception:
+        raise ValueError("initial_seg_gz_b64 is not valid base64 gzip data.")
+    if len(raw) > voxels:
+        raise ValueError(f"initial_seg has more than {voxels} voxels but {grid} has {voxels}: {hint}")
+    if not inflater.eof or inflater.unused_data:
+        raise ValueError("initial_seg_gz_b64 is not valid base64 gzip data.")
+    if len(raw) != voxels:
+        raise ValueError(f"initial_seg has {len(raw)} voxels but {grid} has {voxels}: {hint}")
+    return raw
+
+
 def segment_from_prompt(
     ct: np.ndarray, affine: np.ndarray, prompt: dict, case_key: str | None = None
 ) -> tuple[np.ndarray, list | None]:
@@ -213,17 +240,9 @@ def segment_from_prompt(
     initial_seg = None
     seg_b64 = prompt.get("initial_seg_gz_b64")
     if seg_b64:
-        import base64
-        import gzip
-        try:
-            raw = gzip.decompress(base64.b64decode(seg_b64))
-        except Exception:
-            raise ValueError("initial_seg_gz_b64 is not valid base64 gzip data.")
-        if len(raw) != ct.size:
-            raise ValueError(
-                f"initial_seg has {len(raw)} voxels but the CT has {ct.size}: a "
-                "resolution mismatch between the viewer and this request."
-            )
+        raw = inflate_seed_labelmap(
+            seg_b64, ct.size, "the CT",
+            "a resolution mismatch between the viewer and this request.")
         # The client ships the labelmap as raw linear bytes in NIfTI file
         # order (i fastest), so a Fortran reshape recovers [i, j, k] indexing.
         initial_seg = np.frombuffer(raw, dtype=np.uint8).reshape(ct.shape, order="F")

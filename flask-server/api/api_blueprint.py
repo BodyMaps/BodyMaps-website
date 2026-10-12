@@ -8259,14 +8259,10 @@ def _upsample_seed_b64(seg_b64, low_shape, full_shape):
     import gzip as _gzip
     import numpy as np
     from scipy.ndimage import zoom
-    try:
-        raw = _gzip.decompress(base64.b64decode(seg_b64))
-    except Exception:
-        raise ValueError("initial_seg_gz_b64 is not valid base64 gzip data.")
-    if len(raw) != int(np.prod(low_shape)):
-        raise ValueError(
-            f"initial_seg has {len(raw)} voxels but the displayed volume has "
-            f"{int(np.prod(low_shape))}: the seed must be on the viewer's grid.")
+    from services.advanced_analysis import inflate_seed_labelmap
+    raw = inflate_seed_labelmap(
+        seg_b64, int(np.prod(low_shape)), "the displayed volume",
+        "the seed must be on the viewer's grid.")
     seed = np.frombuffer(raw, dtype=np.uint8).reshape(low_shape, order="F")
     up = zoom(seed, [f / l for f, l in zip(full_shape, low_shape)], order=0)
     if tuple(up.shape) != tuple(full_shape):
