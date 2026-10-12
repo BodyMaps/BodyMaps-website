@@ -367,50 +367,6 @@
   white-space: normal;
 }
 
-/* ---- Labels + numeric readouts inside panels ---- */
-.vp-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.vp-label {
-  font-family: var(--vp-font);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--vp-text);
-}
-
-.vp-readout {
-  font-family: var(--vp-mono);
-  font-size: 12px;
-  color: var(--vp-text-dim);
-  background: var(--vp-panel-strong);
-  border: 1px solid var(--vp-border);
-  border-radius: 6px;
-  padding: 2px 8px;
-  min-width: 46px;
-  text-align: center;
-}
-
-/* ---- Number input ---- */
-.vp-input {
-  width: 64px;
-  font-family: var(--vp-mono);
-  font-size: 12px;
-  color: var(--vp-text);
-  background: var(--vp-panel-strong);
-  border: 1px solid var(--vp-border);
-  border-radius: 6px;
-  padding: 4px 6px;
-  text-align: right;
-  outline: none;
-}
-
-.vp-input:focus {
-  border-color: var(--vp-accent);
-}
-
 /* ---- Range slider ---- */
 .vp-range {
   -webkit-appearance: none;

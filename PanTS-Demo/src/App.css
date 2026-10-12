@@ -80,13 +80,6 @@
 
 /* ── BodyMaps design system ───────────────────────────── */
 
-.bm-glass {
-  background: rgba(0, 0, 0, 0.022);
-  border: 1px solid rgba(0, 0, 0, 0.07);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-}
-
 .bm-card {
   background: rgba(0, 0, 0, 0.022);
   border: 1px solid rgba(0, 0, 0, 0.07);

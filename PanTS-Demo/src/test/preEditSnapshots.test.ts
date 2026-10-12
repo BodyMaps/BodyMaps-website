@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cache } from "@cornerstonejs/core";
 import {
 	clearEditedSegments,
-	consumePreEditSegmentSnapshot,
 	markSegmentEdited,
 	setActiveEditSegment,
 } from "../helpers/CornerstoneNifti2";
@@ -40,8 +39,6 @@ describe("pre-edit snapshots", () => {
 		setActiveEditSegment(2);
 
 		expect(read).not.toHaveBeenCalled(); // no full-volume copy per pick either
-		expect(consumePreEditSegmentSnapshot(1)).toBeNull();
-		expect(consumePreEditSegmentSnapshot(2)).toBeNull();
 	});
 
 	it("are not taken for a custom class, edited or not", () => {
@@ -50,7 +47,5 @@ describe("pre-edit snapshots", () => {
 		setActiveEditSegment(CUSTOM_B);
 
 		expect(read).not.toHaveBeenCalled();
-		expect(consumePreEditSegmentSnapshot(CUSTOM_A)).toBeNull();
-		expect(consumePreEditSegmentSnapshot(CUSTOM_B)).toBeNull();
 	});
 });

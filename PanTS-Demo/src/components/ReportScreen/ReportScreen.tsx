@@ -585,8 +585,8 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
 
   // Escape closes the topmost layer first: the Patient/Doctor coachmark if
   // open, else the share popover, else it exits the report. Registered on the
-  // capture phase (same pattern as ToolWalkthrough) so it wins over the
-  // viewer's global shortcut listeners while the report overlay is up.
+  // capture phase so it wins over the viewer's global shortcut listeners while
+  // the report overlay is up.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;

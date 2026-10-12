@@ -252,28 +252,6 @@
     flex-shrink: 0;
 }
 
-.atb-flyout__grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(110px, 1fr));
-    gap: 14px;
-    min-width: 380px;
-}
-
-.atb-flyout__col {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.atb-flyout__radio {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12.5px;
-    color: rgba(255, 255, 255, 0.85);
-    cursor: pointer;
-}
-
 .atb-flyout__checkbox {
     display: flex;
     align-items: center;
@@ -800,8 +778,8 @@ body:has(.vp-topbar .vp-tool[aria-label="Annotate"]:focus-visible) .atb--horizon
 
 /* Body flows left-to-right in wrapped groups (like Word's ribbon groups)
    rather than a vertical stack, since the panel is a wide, short strip.
-   Individual field blocks (.seg-effect, .atb-flyout__grid, MaskingSelect,
-   etc.) keep their own internal layout; this arranges them side-by-side
+   Individual field blocks (.seg-effect, MaskingSelect, etc.) keep their
+   own internal layout; this arranges them side-by-side
    with a divider. */
 .atb-corner-panel__body {
     /* Both axes are `visible`, never `auto`/`scroll`: per spec, browsers
@@ -846,15 +824,6 @@ body:has(.vp-topbar .vp-tool[aria-label="Annotate"]:focus-visible) .atb--horizon
     width: 100%;
 }
 
-
-.atb-flyout__grid--scissors {
-    min-width: 200px;
-    grid-template-columns: 1fr;
-}
-
-.atb-flyout__radio svg.atb-scissors-icon {
-    flex-shrink: 0;
-}
 
 .atb-flyout__hint {
     font-size: 11px;

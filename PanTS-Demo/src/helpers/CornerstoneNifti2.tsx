@@ -4175,17 +4175,6 @@ export type LiveMeshResult = {
   indices: Uint32Array;
 };
 
-// The 3D pane used to build a custom class's first mesh from a full-volume copy of its
-// mask taken when the class was targeted, so the stroke that switched it to a live mesh
-// was left out. Catalog organs never switch now (MeshViewer always draws their baked
-// GLB), and for a custom class that old copy only drew a stale mesh, so no copy is kept
-// and the live mesh always reads the labelmap. Kept so callers and test mocks still link.
-export function consumePreEditSegmentSnapshot(
-  _segmentIndex: number
-): { mask: Uint8Array; dims: [number, number, number] } | null {
-  return null;
-}
-
 // Crops the voxels equal to `value` to their bounding box and pads that box by one empty
 // voxel on every side, so marching cubes closes the surface at its edges. Outside the box
 // the full volume holds no such voxel, so marching cubes finds no triangles there and the
@@ -6872,32 +6861,21 @@ export function releasePrimaryMouseTools() {
 
 export function extractSegmentSurface(
   segmentIndex: number,
-  manifestCenter: [number, number, number],
-  // A frozen 0/1 mask to build from instead of the live labelmap. The 3D pane no longer
-  // passes one (see consumePreEditSegmentSnapshot); kept for callers that do.
-  precomputedMask?: { mask: Uint8Array; dims: [number, number, number] } | null
+  manifestCenter: [number, number, number]
 ): LiveMeshResult | null {
   const volume = cache.getVolume(segmentationId);
   if (!volume) return null;
 
+  const vm = volume.voxelManager;
+  if (!vm) return null;
   let data: ArrayLike<number> | null | undefined;
-  let dims: [number, number, number];
-  let value: number;
-  if (precomputedMask) {
-    data = precomputedMask.mask;
-    dims = precomputedMask.dims;
-    value = 1;
-  } else {
-    const vm = volume.voxelManager;
-    if (!vm) return null;
-    try {
-      data = vm.getCompleteScalarDataArray?.() as ArrayLike<number> | undefined;
-    } catch {
-      return null;
-    }
-    dims = vm.dimensions as [number, number, number];
-    value = segmentIndex;
+  try {
+    data = vm.getCompleteScalarDataArray?.() as ArrayLike<number> | undefined;
+  } catch {
+    return null;
   }
+  const dims = vm.dimensions as [number, number, number];
+  const value = segmentIndex;
   if (!data || !data.length) return null;
 
   // Marching cubes runs over the class's own box, so a rebuild after an edit costs about

@@ -19,9 +19,7 @@
     width: 100%;
     /* Fixed to comfortably fit the longest option label ("Outside visible
        classes") so switching between short and long labels never resizes
-       the box — the one abrupt-resize case a min-width can't fully absorb
-       (an even longer future label) still transitions smoothly via the
-       width rule below rather than snapping. */
+       the box. */
     min-width: 190px;
     background: rgba(255, 255, 255, 0.07);
     border: 1px solid rgba(255, 255, 255, 0.09);

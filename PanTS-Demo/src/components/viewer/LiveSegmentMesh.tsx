@@ -52,7 +52,7 @@ export function LiveSegmentMesh({
     const cache = cacheRef.current;
     if (cache.has(segmentIndex)) return cache.get(segmentIndex) ?? null;
     // Always the live labelmap, never a copy taken before the first edit: that copy
-    // drew a stale mesh, so none is kept now (see consumePreEditSegmentSnapshot).
+    // drew a stale mesh, so none is kept now.
     const result = extractSegmentSurface(segmentIndex, manifestCenter);
     // An empty mask (a class created but not painted yet, emptied by an undo, or a
     // volume that is not in the cache yet) gives null and is not kept, so the next

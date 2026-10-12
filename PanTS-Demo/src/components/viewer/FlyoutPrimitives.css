@@ -714,7 +714,7 @@
 }
 
 /* Success beat — Hopkins blue, same brand blue used everywhere else
-   (.seg-effect__icon-btn--primary, the spirit-blue swatch, etc). Held on
+   (the spirit-blue swatch, etc). Held on
    screen for a moment by the caller before the flyout starts its own
    fade/shrink-out, so the confirmation actually gets seen instead of
    disappearing in the same frame it appears. */
