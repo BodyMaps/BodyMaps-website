@@ -28,6 +28,8 @@ import html as _html_mod
 import json
 import os
 import sys
+import threading
+from collections import OrderedDict
 from contextlib import nullcontext
 
 from flask import Blueprint, jsonify, make_response, request, url_for
@@ -64,8 +66,13 @@ _verify_limiter = Limiter(RESET_WINDOW_S)
 # password; and a much higher one per account, so a guesser spread over many
 # addresses is still slowed. The tight one is keyed on the address too because a
 # per-account count alone let anyone who knew an address lock its owner out with
-# ten wrong passwords: a stranger's failures now count against the stranger's
-# own network, and locking the owner out takes failures from many addresses.
+# ten wrong passwords: failures from one stranger's address count against that
+# address only. Failures spread over ten or more addresses can still fill the
+# account-wide ceiling, so an address that has signed in to the account with the
+# right password before is not held to that one ceiling (the other two still
+# apply to it): the owner on a network they have used signs in, while a new
+# address waits. Those addresses are kept in memory only, so after a restart the
+# account-wide ceiling applies to every address until the owner signs in again.
 # Register creates an account and sends mail to any address it is given, so it
 # gets a per-IP ceiling like the reset endpoints. The per-IP numbers are set
 # with a campus NAT in mind, where a whole lab can share one address.
@@ -83,6 +90,32 @@ REGISTER_MAX_PER_IP = 30
 
 _login_limiter = Limiter(LOGIN_WINDOW_S)
 _register_limiter = Limiter(REGISTER_WINDOW_S)
+
+# The addresses each account has signed in from, most recent last, for the
+# account-wide ceiling above. Bounded: a few addresses per account and a fixed
+# number of accounts, the least recently signed in going first, so one account
+# signing in from many addresses only pushes out its own.
+_KNOWN_ADDRESSES_PER_ACCOUNT = 10
+_KNOWN_ACCOUNTS = 10_000
+_known_addresses: OrderedDict = OrderedDict()  # account -> OrderedDict(address -> None)
+_known_lock = threading.Lock()
+
+
+def _signed_in_from(account: str, ip: str) -> bool:
+    with _known_lock:
+        return ip in _known_addresses.get(account, ())
+
+
+def _remember_sign_in(account: str, ip: str) -> None:
+    with _known_lock:
+        addresses = _known_addresses.pop(account, None) or OrderedDict()
+        addresses.pop(ip, None)
+        addresses[ip] = None
+        while len(addresses) > _KNOWN_ADDRESSES_PER_ACCOUNT:
+            addresses.popitem(last=False)
+        _known_addresses[account] = addresses
+        while len(_known_addresses) > _KNOWN_ACCOUNTS:
+            _known_addresses.popitem(last=False)
 
 # The access coupon is intentionally checked here, on the server, rather than
 # in the model picker.  Keep only a SHA-256 digest in the environment so a
@@ -175,7 +208,8 @@ def login():
     account_key = "account:" + account
     if (_login_limiter.at_limit(ip_key, LOGIN_MAX_PER_IP)
             or _login_limiter.at_limit(account_ip_key, LOGIN_MAX_PER_ACCOUNT_AND_IP)
-            or _login_limiter.at_limit(account_key, LOGIN_MAX_PER_ACCOUNT)):
+            or (_login_limiter.at_limit(account_key, LOGIN_MAX_PER_ACCOUNT)
+                and not _signed_in_from(account, ip))):
         return jsonify({"error": "Too many sign-in attempts. Try again in a few minutes."}), 429
     user = auth_store.authenticate(email, data.get("password") or "")
     if user is None:
@@ -184,6 +218,7 @@ def login():
         _login_limiter.hit(account_key)
         return jsonify({"error": "Invalid email or password"}), 401
     _login_limiter.clear(account_ip_key)
+    _remember_sign_in(account, ip)
     return _logged_in_response(user, remember_me=remember_me)
 
 
