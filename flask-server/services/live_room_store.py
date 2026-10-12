@@ -296,7 +296,35 @@ class LiveRoomStore:
         metadata = self._recover_from_event_log(room_dir, metadata)
         if not allow_expired and parse_time(metadata["expires_at"]) <= self._now():
             raise RoomExpired("Room expired and was deleted")
+        if "source_mask_path" not in metadata and parse_time(metadata["expires_at"]) > self._now():
+            self._adopt_viewer_base_mask_locked(room_dir, metadata)
         return metadata
+
+    def _adopt_viewer_base_mask_locked(self, room_dir: Path, metadata: dict[str, Any]) -> None:
+        """Give a room made before rooms kept a viewer-id copy that copy, once.
+
+        Such a room's base_mask_path is the raw dataset mask, and its cached snapshot and
+        value map were built from it, while the client numbers organs with viewer ids.
+        The steps run in an order that is safe to repeat: until the metadata is written,
+        the next load does the same work again.
+        """
+        raw_path = Path(metadata["base_mask_path"])
+        try:
+            viewer_mask = viewer_labelmap_path(raw_path)
+        except (OSError, ValueError) as exc:
+            logger.warning("Live Room kept its raw base mask room=%s error=%s", room_dir.name, exc)
+            return
+        base_mask = room_dir / "base_mask_viewer.nii.gz"
+        temporary = room_dir / ".base_mask_viewer.tmp.nii.gz"
+        shutil.copyfile(viewer_mask, temporary)
+        os.replace(temporary, base_mask)
+        base_mask.chmod(0o600)
+        (room_dir / "mask_snapshot.nii.gz").unlink(missing_ok=True)
+        metadata["source_mask_path"] = str(raw_path)
+        metadata["base_mask_path"] = str(base_mask)
+        metadata["mask_snapshot_seq"] = 0
+        metadata["mask_values_seq"] = -1
+        _atomic_json(room_dir / "metadata.json", metadata)
 
     def _recover_from_event_log(self, room_dir: Path, metadata: dict[str, Any]) -> dict[str, Any]:
         """Replay committed events if a process stopped between event fsync and JSON replace."""
