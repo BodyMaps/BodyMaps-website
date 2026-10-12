@@ -124,12 +124,20 @@ export default function ContactPage() {
   const formRef = useRef<HTMLFormElement>(null);
   const thanksRef = useRef<HTMLHeadingElement>(null);
   const sendErrorRef = useRef<HTMLDivElement>(null);
+  // Set by "Send another inquiry", so only that swap moves focus to the form,
+  // never the page's first render.
+  const startingAgain = useRef(false);
 
   // The confirmation replaces the form, so focus moves to its heading;
   // otherwise it would fall back to the page and a screen reader would hear
-  // nothing about the send.
+  // nothing about the send. "Send another inquiry" unmounts its own button in
+  // the same way, so the form that comes back takes focus at its first field.
   useEffect(() => {
     if (sentTo) thanksRef.current?.focus();
+    else if (startingAgain.current) {
+      startingAgain.current = false;
+      formRef.current?.querySelector<HTMLElement>("#contact-name")?.focus();
+    }
   }, [sentTo]);
 
   const update =
@@ -225,6 +233,7 @@ export default function ContactPage() {
                   type="button"
                   className={styles.secondary}
                   onClick={() => {
+                    startingAgain.current = true;
                     setSentTo(null);
                     setSendError(null);
                   }}

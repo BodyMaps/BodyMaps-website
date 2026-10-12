@@ -6485,11 +6485,13 @@ const aiAvailableOrgans = useMemo(() => {
 					</button>
 				</div>
 			)}
+			{/* Always mounted, so the notice is announced: a live region inserted together
+			    with its text is often not read. The toast below is only for the eye. */}
+			<span className="sr-only" role="status">{toolNotice ?? ""}</span>
 			{toolNotice && (
 				<div
 					className="vp-tool-notice"
-					role="status"
-					aria-live="polite"
+					aria-hidden="true"
 					style={{
 						position: "fixed",
 						bottom: 24,

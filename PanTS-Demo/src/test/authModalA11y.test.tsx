@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import AuthModal from "../components/AuthModal";
+import BatchDetailsModal from "../components/BatchDetailsModal";
 import { AuthProvider, useAuth } from "../contexts/authContext";
 
 const json = (body: unknown, status = 200) => ({
@@ -104,6 +105,61 @@ describe("sign-in popup focus", () => {
 
 		await user.click(within(signIn).getByRole("button", { name: /Other options/ }));
 		expect(document.activeElement).toBe(within(signIn).getByRole("button", { name: "Continue with email" }));
+	});
+});
+
+describe("sign-in popup over another dialog", () => {
+	// A lapsed sign-in can bring the popup up over a dialog that is already open (the
+	// batch details dialog's download meets a 401). The popup is drawn on top, so its
+	// own keys must not be taken by the dialog underneath.
+	const renderOverBatch = () =>
+		render(
+			<AuthProvider>
+				<MemoryRouter>
+					<Opener />
+					<BatchDetailsModal
+						label="Batch 1"
+						uploads={[]}
+						onClose={onBatchClose}
+						onView={vi.fn()}
+						onDownloadScan={vi.fn()}
+						onDownloadAll={vi.fn()}
+					/>
+					<AuthModal />
+				</MemoryRouter>
+			</AuthProvider>,
+		);
+	const onBatchClose = vi.fn();
+	beforeEach(() => onBatchClose.mockClear());
+
+	it("keeps Tab inside the sign-in card", async () => {
+		const user = userEvent.setup();
+		renderOverBatch();
+		const batch = screen.getByRole("dialog", { name: "Batch 1 details" });
+		expect(batch.contains(document.activeElement)).toBe(true);
+		const { dialog } = await open(user);
+
+		for (let i = 0; i < 6; i++) {
+			await user.tab();
+			expect(dialog.contains(document.activeElement)).toBe(true);
+		}
+		for (let i = 0; i < 6; i++) {
+			await user.tab({ shift: true });
+			expect(dialog.contains(document.activeElement)).toBe(true);
+		}
+	});
+
+	it("closes only the sign-in card on Escape, and the dialog under it stays open", async () => {
+		const user = userEvent.setup();
+		renderOverBatch();
+		const { dialog } = await open(user);
+		expect(dialog.contains(document.activeElement)).toBe(true);
+
+		await user.keyboard("{Escape}");
+
+		expect(screen.queryByRole("dialog", { name: "Sign in" })).not.toBeInTheDocument();
+		expect(onBatchClose).not.toHaveBeenCalled();
+		expect(screen.getByRole("dialog", { name: "Batch 1 details" })).toBeInTheDocument();
 	});
 });
 

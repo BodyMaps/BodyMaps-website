@@ -127,6 +127,23 @@ describe("contact page", () => {
     expect(screen.getByLabelText(/^Name/)).toHaveValue("");
   });
 
+  it("puts focus on the first field when Send another inquiry brings the form back", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    // Nothing takes focus when the page first opens.
+    expect(screen.getByLabelText(/^Name/)).not.toHaveFocus();
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: "Send inquiry" }));
+    await screen.findByRole("heading", { name: "Thanks, your inquiry is on its way." });
+
+    // The button that had focus leaves the page with the confirmation.
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Send another inquiry" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByLabelText(/^Name/)).toHaveFocus();
+  });
+
   it("keeps the message and explains a refusal from the form service", async () => {
     formReply = async () =>
       new Response(JSON.stringify({ errors: [{ message: "Form not found." }] }), { status: 404 });

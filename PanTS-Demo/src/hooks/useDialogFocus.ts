@@ -133,6 +133,10 @@ export function useDialogFocus(
 			// An IME's own Escape (cancelling a candidate window) and Tab (picking
 			// a candidate) belong to the composition, not to the dialog.
 			if (e.isComposing || e.keyCode === 229) return;
+			// A modal this hook does not manage (the sign-in card keeps its own trap and
+			// can open over one of these dialogs) owns the keys while focus is inside it.
+			const owner = e.target instanceof Element ? e.target.closest("[aria-modal='true']") : null;
+			if (owner && owner !== container && !container.contains(owner) && !owner.contains(container)) return;
 			if (e.key === "Escape") {
 				if (openDialogs[openDialogs.length - 1] !== entry || !onEscapeRef.current) return;
 				e.stopPropagation();
