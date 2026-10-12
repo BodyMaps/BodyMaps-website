@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The featured strip is cached for the whole session, so only a complete answer
 // may be kept: half a strip or an empty one would stay on screen with no error.
+// Half a strip is still shown for this visit, as the library always did.
 type Reply = { ok: boolean; items?: unknown[] };
 let replies: { tumor: Reply; noTumor: Reply };
 
@@ -22,10 +23,12 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("featured strip cache", () => {
-	it("fails as a whole when either half fails, and asks again next time", async () => {
+	it("shows the half that arrived without keeping it, and asks for both again next time", async () => {
 		const { fetchCurated, getCachedCurated } = await import("../helpers/curatedCache");
 		replies.noTumor = { ok: false };
-		await expect(fetchCurated()).rejects.toThrow();
+		const half = await fetchCurated();
+		expect(half).toHaveLength(4);
+		expect(half.every((item) => item.tumor === 1)).toBe(true);
 		expect(getCachedCurated()).toBeNull();
 
 		replies.noTumor = { ok: true, items: items(0) };
@@ -33,9 +36,21 @@ describe("featured strip cache", () => {
 		expect(getCachedCurated()).toHaveLength(8);
 	});
 
+	it("fails when both halves fail", async () => {
+		const { fetchCurated, getCachedCurated } = await import("../helpers/curatedCache");
+		replies = { tumor: { ok: false }, noTumor: { ok: false } };
+		await expect(fetchCurated()).rejects.toThrow();
+		expect(getCachedCurated()).toBeNull();
+	});
+
 	it("does not keep an empty strip", async () => {
 		const { fetchCurated, getCachedCurated } = await import("../helpers/curatedCache");
 		replies = { tumor: { ok: true, items: [] }, noTumor: { ok: true, items: [] } };
+		await expect(fetchCurated()).rejects.toThrow();
+		expect(getCachedCurated()).toBeNull();
+
+		// Nor an empty half next to a failed one.
+		replies = { tumor: { ok: true, items: [] }, noTumor: { ok: false } };
 		await expect(fetchCurated()).rejects.toThrow();
 		expect(getCachedCurated()).toBeNull();
 	});
