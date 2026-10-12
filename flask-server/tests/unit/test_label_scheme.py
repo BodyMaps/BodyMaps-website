@@ -160,6 +160,49 @@ def test_converted_copy_follows_its_source(dataset):
     assert np.asanyarray(nib.load(second).dataobj)[0, 0, 0] == 25
 
 
+def test_the_converted_copy_is_as_readable_as_its_source(tmp_path, monkeypatch):
+    """nginx serves the copies from beside the low-res masks. A service umask of
+    077 must not close them to a user who can read the masks they came from."""
+    lowres = tmp_path / "lowres"
+    lowres.mkdir()
+    lowres.chmod(0o755)
+    monkeypatch.setenv("PANTS_LOWRES_PATH", str(lowres))
+    monkeypatch.delenv("PANTS_LABELMAP_CACHE", raising=False)
+    sources = {}
+    for name, mode in (("PanTS_00000001", 0o644), ("PanTS_00000002", 0o600)):
+        (tmp_path / name).mkdir()
+        source = tmp_path / name / "combined_labels.nii.gz"
+        nib.save(nib.Nifti1Image(np.full((4, 4, 4), 24, dtype=np.uint8), np.eye(4)), source)
+        source.chmod(mode)
+        sources[mode] = source
+    previous = os.umask(0o077)
+    try:
+        readable = viewer_labelmap_path(sources[0o644])
+        private = viewer_labelmap_path(sources[0o600])
+    finally:
+        os.umask(previous)
+    cache = lowres / f"labels-{SCHEME}"
+    assert Path(readable).parent == cache
+    assert cache.stat().st_mode & 0o777 == 0o755
+    assert Path(readable).stat().st_mode & 0o777 == 0o644
+    assert Path(private).stat().st_mode & 0o777 == 0o600
+    assert np.asanyarray(nib.load(readable).dataobj)[0, 0, 0] == 25
+
+
+def test_a_filesystem_that_refuses_chmod_still_gets_the_copy(tmp_path, monkeypatch):
+    monkeypatch.setenv("PANTS_LABELMAP_CACHE", str(tmp_path / "cache"))
+    (tmp_path / "PanTS_00000003").mkdir()
+    source = tmp_path / "PanTS_00000003" / "combined_labels.nii.gz"
+    nib.save(nib.Nifti1Image(np.full((4, 4, 4), 24, dtype=np.uint8), np.eye(4)), source)
+
+    def refuse(*_args, **_kwargs):
+        raise PermissionError("chmod not supported")
+
+    monkeypatch.setattr(os, "chmod", refuse)
+    path = viewer_labelmap_path(source)
+    assert np.asanyarray(nib.load(path).dataobj)[0, 0, 0] == 25
+
+
 def test_organ_metrics_name_the_dataset_organs_correctly(dataset):
     names = {m["organ_name"] for m in bp._ai_compute_organ_metrics_from_labels("35")["organ_metrics"]}
     assert names == {"adrenal_gland_left", "aorta", "liver", "pancreas_head", "postcava", "spleen", "pancreatic_lesion"}

@@ -133,13 +133,30 @@ def _cache_dir() -> str:
         candidates.append(os.path.join(lowres_root, f"labels-{SCHEME}"))
     candidates.append(os.path.join(tempfile.gettempdir(), f"bodymaps-labels-{SCHEME}"))
     for directory in candidates:
+        created = not os.path.isdir(directory)
         try:
             os.makedirs(directory, exist_ok=True)
         except OSError:
             continue
+        if created:
+            _open_like_parent(directory)
         if os.access(directory, os.W_OK):
             return directory
     raise OSError("No writable directory for converted label maps")
+
+
+def _open_like_parent(directory: str) -> None:
+    """Let whoever can list the parent directory list the new one too.
+
+    The service can run with a umask of 077 (deploy/systemd/pants-flask.service),
+    which would leave the directory beside the low-res masks closed to nginx,
+    which serves the copies from it. Best effort.
+    """
+    try:
+        parent = os.stat(os.path.dirname(os.path.abspath(directory)))
+        os.chmod(directory, 0o700 | (parent.st_mode & 0o055))
+    except OSError:
+        pass
 
 
 _CONVERT_LOCKS: dict[str, threading.Lock] = {}
@@ -183,6 +200,13 @@ def viewer_labelmap_path(raw_path) -> str:
         converted.header.set_slope_inter(1, 0)
         with atomic_destination(path, suffix=".tmp.nii.gz") as temporary:
             nib.save(converted, temporary)
+            # Exactly as readable as the mask it came from, whatever the umask,
+            # so nginx can serve it wherever it can serve the dataset. Best
+            # effort: a filesystem that refuses chmod still gets the copy.
+            try:
+                os.chmod(temporary, 0o600 | (stat.st_mode & 0o044))
+            except OSError:
+                pass
 
     # Earlier copies of the same source are stale now; removing them is best effort.
     # The exact pattern keeps PanTS_x_combined_labels_ from matching the low-res copy.
