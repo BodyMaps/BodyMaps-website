@@ -972,9 +972,10 @@ const UploadPage: React.FC = () => {
   // the assembled file. The server keeps a scan that was run, and holds the
   // deletion for a finalize still assembling the file. Keepalive, so it outlives
   // a page that is being left. A request the server did not answer for good (the
-  // sign-in had lapsed, the network dropped, it erred or was busy) deleted
-  // nothing, and is kept to be made again at the account's next sign-in or page
-  // load. So is one whose account signed out or changed before it could be sent.
+  // sign-in had lapsed, another tab had signed in to another account, the network
+  // dropped, it erred or was busy) deleted nothing, and is kept to be made again
+  // at the account's next sign-in or page load. So is one whose account signed out
+  // or changed before it could be sent.
   const discardServerUpload = (sid: string) => {
     const ownerId = user?.id ?? null;
     if (!ownerId) return;
@@ -988,8 +989,11 @@ const UploadPage: React.FC = () => {
       headers: { "X-Upload-Owner": ownerId },
       keepalive: true,
     })
-      .then((res) => {
-        const again = res.status === 401 || res.status === 408 || res.status === 429 || res.status >= 500;
+      .then(async (res) => {
+        // A 409 also answers a scan that a run has taken, which is final.
+        const accountChanged = res.status === 409
+          && ((await res.json().catch(() => null)) as { code?: unknown } | null)?.code === "account_changed";
+        const again = accountChanged || res.status === 401 || res.status === 408 || res.status === 429 || res.status >= 500;
         if (again) queueDiscardAfterSignIn(sid, ownerId);
         else forgetQueuedDiscard(sid, ownerId);
       })
@@ -1204,13 +1208,24 @@ const UploadPage: React.FC = () => {
       return;
     }
     const shown = addNiftiFiles(filteredFiles);
-    // NIfTI files win, as in a folder; slices or a folder dropped with them are
-    // left out, and the status line says so.
-    const others = dropped.filter((file) => !filteredFiles.includes(file) && looksLikeDicom(file)).length;
-    if (others > 0) {
-      const note = `${others} other dropped ${others === 1 ? "item was" : "items were"} left out. To add a DICOM series, drop it on its own.`;
-      setSelectionMessage(shown ? `${shown} ${note}` : note);
-    }
+    // NIfTI files win, as in a folder; slices dropped with them, loose or in a
+    // folder, are left out, and the status line says so. Only files that read as
+    // DICOM are counted (a README or a LICENSE is not a slice). The count reads
+    // the files, so the note follows only while the status line still says what
+    // this drop left there.
+    const rest = Array.from(e.dataTransfer.items ?? [])
+      .map((item) => item.webkitGetAsEntry?.() ?? null)
+      .filter((entry): entry is FileSystemEntry => entry !== null)
+      .filter((entry) => entry.isDirectory || !allowedExtensions.some((ext) => entry.name.toLowerCase().endsWith(ext)));
+    const seq = ++folderNoteSeq.current;
+    void readDroppedEntries(rest)
+      .then(countDicomSlices)
+      .then((slices) => {
+        if (slices === 0 || seq !== folderNoteSeq.current || (selectionMessageRef.current ?? "") !== shown) return;
+        const note = `${slices} dropped DICOM ${slices === 1 ? "slice was" : "slices were"} left out. To add a DICOM series, drop it on its own.`;
+        setSelectionMessage(shown ? `${shown} ${note}` : note);
+      })
+      .catch(() => {});
   };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {

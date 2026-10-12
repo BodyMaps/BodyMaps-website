@@ -8,8 +8,10 @@ import { getPanTSId } from "./utils";
 
 // Local CT preview first, HuggingFace mirror fallback for the CT. The mask comes from the
 // backend, which converts the dataset's organ numbering (and reads the mirror itself when it
-// has no local copy), unless the lab server cannot answer at all: then it cannot read or
-// convert the mask either, and both volumes come from the mirror, as in the case viewer.
+// has no local copy), while the lab server serves the CT or answers 404 for a case it does
+// not store. Any other answer (unreachable, a server error, a refused request) means it will
+// not read or convert the mask either, and both volumes come from the mirror, as in the case
+// viewer.
 // Labelmaps stay full resolution because nearest-neighbour downsampling visibly
 // stair-steps organ boundaries and can erase small structures.
 // `full` asks for the full-resolution local CT instead of the fast preview, as ?hd=1 does
@@ -37,8 +39,8 @@ export async function resolveSources(id: string, full = false): Promise<{ ct: st
 	const probe = await fetch(localCt, { method: "HEAD" })
 		.then((r) => ({ ok: r.ok, status: r.status }))
 		.catch(() => ({ ok: false, status: 0 }));
-	const serverDown = !probe.ok && (probe.status === 0 || probe.status >= 500);
-	return { ct: probe.ok ? `${localCt}${res}` : hfCt, seg: serverDown ? hfSeg : datasetSegmentationUrl(id) };
+	const mirrorMask = !probe.ok && probe.status !== 404;
+	return { ct: probe.ok ? `${localCt}${res}` : hfCt, seg: mirrorMask ? hfSeg : datasetSegmentationUrl(id) };
 }
 
 // Respect the user's data budget: skip prefetch under Save-Data or on very slow (2G)

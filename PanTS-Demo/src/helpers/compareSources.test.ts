@@ -25,8 +25,8 @@ describe("comparison volume resolution", () => {
 		expect(sources.seg).toContain("/api/get-segmentations/35.nii.gz?labels=viewer-v1");
 	});
 
-	it("loads the mask from the backend even when the CT comes from the mirror", async () => {
-		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+	it("loads the mask from the backend when the lab server says it has no such case", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
 
 		const sources = await resolveSources("35");
 
@@ -36,26 +36,19 @@ describe("comparison volume resolution", () => {
 		expect(sources.seg).not.toContain("mask_only");
 	});
 
-	it("loads the mask from the backend when the lab server says it has no such case", async () => {
-		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
-
-		const sources = await resolveSources("35");
-
-		expect(sources.ct).toContain("huggingface.co");
-		expect(sources.seg).toContain("/api/get-segmentations/35.nii.gz?labels=viewer-v1");
-	});
-
 	it.each([
 		["cannot be reached", () => Promise.reject(new TypeError("Failed to fetch"))],
 		["answers with a gateway error", () => Promise.resolve({ ok: false, status: 502 })],
 		["has its dataset storage down", () => Promise.resolve({ ok: false, status: 503 })],
+		["answers that the sign-in has ended", () => Promise.resolve({ ok: false, status: 401 })],
+		["refuses the request", () => Promise.resolve({ ok: false, status: 403 })],
 	])("loads both volumes from the mirror when the lab server %s", async (_why, answer) => {
 		const fetchMock = vi.fn(answer);
 		vi.stubGlobal("fetch", fetchMock);
 
 		const sources = await resolveSources("35");
 
-		// The lab server cannot read or convert the mask either, so the mirror's own mask
+		// The lab server will not read or convert the mask either, so the mirror's own mask
 		// goes with the mirror's CT, as in the case viewer.
 		expect(sources.ct).toMatch(/^https:\/\/huggingface\.co\/.*\/image_only\//);
 		expect(sources.seg).toMatch(/^https:\/\/huggingface\.co\/.*\/mask_only\//);

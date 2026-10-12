@@ -212,7 +212,46 @@ describe("dropping on the drop zone", () => {
     expect(await screen.findByText("ct.nii.gz")).toBeInTheDocument();
     expect(screen.queryByText(/^DICOM series/)).toBeNull();
     await waitFor(() => expect(statusLine(container)).toBe(
-      "2 other dropped items were left out. To add a DICOM series, drop it on its own.",
+      "2 dropped DICOM slices were left out. To add a DICOM series, drop it on its own.",
+    ));
+  });
+
+  it("counts only the files that read as DICOM among those dropped with a NIfTI file", async () => {
+    const { container } = renderUpload();
+    await signedIn();
+    // A DICOM file carries "DICM" after its 128-byte preamble; a README and a LICENSE do not.
+    const bytes = new Uint8Array(200);
+    bytes.set([0x44, 0x49, 0x43, 0x4d], 128);
+    const dropped = [makeFile("ct.nii.gz"), makeFile("README", 200), makeFile("LICENSE", 200), new File([bytes], "IM000001")];
+    drop(container, dropped, dropped.map(fileEntry));
+
+    expect(await screen.findByText("ct.nii.gz")).toBeInTheDocument();
+    await waitFor(() => expect(statusLine(container)).toBe(
+      "1 dropped DICOM slice was left out. To add a DICOM series, drop it on its own.",
+    ));
+  });
+
+  it("says nothing was left out when only other files came with the NIfTI file", async () => {
+    const { container } = renderUpload();
+    await signedIn();
+    const dropped = [makeFile("ct.nii.gz"), makeFile("README", 200), makeFile("LICENSE", 200)];
+    drop(container, dropped, dropped.map(fileEntry));
+
+    expect(await screen.findByText("ct.nii.gz")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(statusLine(container)).not.toMatch(/left out/);
+  });
+
+  it("counts the slices in a folder dropped with a NIfTI file", async () => {
+    const { container } = renderUpload();
+    await signedIn();
+    const scan = makeFile("ct.nii.gz");
+    const inside = [makeFile("IM0001.dcm", 10), makeFile("IM0002.dcm", 10), makeFile("README", 200)];
+    drop(container, [scan, makeFile("series", 0)], [fileEntry(scan), folderEntry("series", inside.map(fileEntry))]);
+
+    expect(await screen.findByText("ct.nii.gz")).toBeInTheDocument();
+    await waitFor(() => expect(statusLine(container)).toBe(
+      "2 dropped DICOM slices were left out. To add a DICOM series, drop it on its own.",
     ));
   });
 

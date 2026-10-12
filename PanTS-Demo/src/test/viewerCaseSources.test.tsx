@@ -5,10 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Where the viewer reads a dataset case from, decided by a HEAD probe of the lab server's CT.
 // A case is only "not in the dataset" when the lab server answers 404 and the public mirror
-// does too. While the lab server cannot answer at all (unreachable, or any 5xx such as the
-// dataset storage being down) the case loads from the mirror, mask included, because the lab
-// server cannot read or convert the mask either. Every other mirror case gets its mask from the
-// backend, which converts the organ numbering. A CancerVerse case keeps its Report button.
+// does too. Any other answer that is not OK (unreachable, any 5xx such as the dataset storage
+// being down, a refused 401 or 403) loads the case from the mirror, mask included, because the
+// lab server will not read or convert the mask either. A case the lab server says it does not
+// store (404) still gets its mask from the backend, which reads the mirror and converts the
+// organ numbering. A CancerVerse case keeps its Report button.
 
 const viewerDispose = vi.hoisted(() => vi.fn());
 const viewerVolumeSequence = vi.hoisted(() => ({ value: 0 }));
@@ -170,6 +171,8 @@ describe("dataset case sources", () => {
 		["cannot be reached", 0],
 		["answers with a gateway error", 502],
 		["answers with a server error", 500],
+		["answers that the sign-in has ended", 401],
+		["refuses the request", 403],
 	])("loads the mirror's CT and mask when the lab server %s", async (_why, labServer) => {
 		stubApi({ labServer, mirror: 200 });
 		const { unmount } = open("1");

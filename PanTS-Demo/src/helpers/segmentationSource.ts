@@ -1,8 +1,9 @@
 // Where the viewers load a dataset case's segmentation from. The backend: the PanTS masks
 // number some organs differently from the viewer's catalog (spleen, stomach, the IVC and
 // the pancreatic lesion among them), and the backend converts them to catalog ids. It also
-// fetches the HuggingFace mirror itself when the case is not stored locally. Only while the
-// lab server cannot answer at all do the viewers load the mirror's raw mask instead.
+// fetches the HuggingFace mirror itself when the case is not stored locally (the lab server
+// answers 404 for the CT). When the lab server does not serve the CT for any other reason
+// (unreachable, a server error, a refused request) the viewers load the mirror's raw mask.
 import { API_BASE } from "./constants";
 
 // The organ numbering the backend serves. Masks are cached for a week as immutable, so it is

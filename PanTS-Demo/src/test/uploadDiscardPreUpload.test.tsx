@@ -155,4 +155,33 @@ describe("a scan uploaded before Run and taken back", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(discards(sid)).toHaveLength(2);
   });
+
+  it("is asked for again at its account's next sign-in when another tab had changed the account", async () => {
+    const { user, sid } = await pickScan();
+    await screen.findByText("Uploaded");
+    // Another tab signed in to another account, so the server sees that account's cookie.
+    ownersDiscard = () => json({ error: "Your signed-in account changed.", code: "account_changed" }, false, 409);
+    await user.click(screen.getByRole("button", { name: "Remove scan.nii.gz" }));
+    await waitFor(() => expect(discards(sid)).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    ownersDiscard = () => json({ status: "discarded" });
+    await user.click(screen.getByRole("button", { name: "test sign in" }));
+    await waitFor(() => expect(discards(sid)).toHaveLength(2));
+    expect(discards(sid)[1].owner).toBe("u1");
+  });
+
+  it("is not asked for again once the server says the scan belongs to a run", async () => {
+    const { user, sid } = await pickScan();
+    await screen.findByText("Uploaded");
+    ownersDiscard = () => json({ error: "This scan has already been run." }, false, 409);
+    await user.click(screen.getByRole("button", { name: "Remove scan.nii.gz" }));
+    await waitFor(() => expect(discards(sid)).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    await user.click(screen.getByRole("button", { name: "test sign in" }));
+    await screen.findByRole("button", { name: /^ePAI$/ });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(discards(sid)).toHaveLength(1);
+  });
 });
