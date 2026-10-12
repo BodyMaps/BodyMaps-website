@@ -88,18 +88,20 @@ def _purge_old_analytics():
     # Deletes only on a window the deployment chose. Nothing ran this purge at
     # boot before, so applying the built-in default here would delete a site's
     # older analytics on its first restart without anyone deciding to. A value
-    # that is not a whole number of days is reported and ignored for the same
-    # reason, rather than replaced by that default.
+    # that is not a whole number of days, or is below the minimum, is reported
+    # and ignored for the same reason, rather than replaced by that default.
     raw = os.environ.get("ANALYTICS_RETENTION_DAYS", "").strip()
     if not raw:
         return
     try:
         days = int(raw)
     except ValueError:
-        days = 0
+        print(f"[boot] analytics retention purge skipped: ANALYTICS_RETENTION_DAYS={raw!r} "
+              "is not a whole number of days")
+        return
     if days < analytics_store.MIN_RETENTION_DAYS:
         print(f"[boot] analytics retention purge skipped: ANALYTICS_RETENTION_DAYS={raw!r} "
-              "is not a number of days")
+              f"is below the {analytics_store.MIN_RETENTION_DAYS}-day minimum")
         return
     # Same boot-only trigger, and the same caveat: a server that stays up for
     # months holds its oldest events a little past the window. Acceptable for

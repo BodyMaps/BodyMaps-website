@@ -303,10 +303,10 @@ class LiveRoomStore:
     def _adopt_viewer_base_mask_locked(self, room_dir: Path, metadata: dict[str, Any]) -> None:
         """Give a room made before rooms kept a viewer-id copy that copy, once.
 
-        Such a room's base_mask_path is the raw dataset mask, and its cached snapshot and
-        value map were built from it, while the client numbers organs with viewer ids.
-        The steps run in an order that is safe to repeat: until the metadata is written,
-        the next load does the same work again.
+        Such a room's base_mask_path is the raw dataset mask, and its cached snapshot,
+        value map and exports were built from it, while the client numbers organs with
+        viewer ids. The steps run in an order that is safe to repeat: until the metadata
+        is written, the next load does the same work again.
         """
         raw_path = Path(metadata["base_mask_path"])
         try:
@@ -320,6 +320,7 @@ class LiveRoomStore:
         os.replace(temporary, base_mask)
         base_mask.chmod(0o600)
         (room_dir / "mask_snapshot.nii.gz").unlink(missing_ok=True)
+        self._invalidate_exports(room_dir)
         metadata["source_mask_path"] = str(raw_path)
         metadata["base_mask_path"] = str(base_mask)
         metadata["mask_snapshot_seq"] = 0

@@ -38,8 +38,9 @@ neither reach nor release another's session. While a client keeps sending
 the same token, interactions
 ACCUMULATE on its session (no reset between requests) and each new click
 REFINES the same object — the model sees every prior prompt as context,
-exactly how the official Slicer plugin drives it. Tokenless requests share
-one anonymous slot that resets per request. Each state's `history` mirrors
+exactly how the official Slicer plugin drives it. Each account's tokenless
+requests share one anonymous slot that resets per request, and it counts
+toward that account's cap below. Each state's `history` mirrors
 its accumulated interactions so that when the model server reaps an idle
 session (SessionExpiredError, its timeout counts only real actions), we can
 claim a fresh lease and replay the whole exchange with predictions deferred
@@ -55,10 +56,12 @@ PromptCapacityError rather than silently destroying someone's live session
 One account holds at most NNINTERACTIVE_MAX_SESSIONS_PER_USER states
 (default 2: the prompt tool's session plus a Refine running beside it); a
 new token past that gives back the account's own least recently used idle
-state. Only an account's first lease is its own, though: when the pool is
-full and an account with no lease arrives, it takes back the least recently
-used idle lease of an account holding more than one. The account that loses
-it sees "session lost" on its next prompt, which the viewer answers by
+state. The pair runs side by side only while the pool has a free slot for
+each: with the default pool of 2, while no other account holds a lease.
+Only an account's first lease is its own, though: when the pool is full and
+an account with no lease arrives, it takes back the least recently used
+idle lease of an account holding more than one. The account that loses it
+sees "session lost" on its next prompt, which the viewer answers by
 starting a fresh session seeded from its labelmap.
 
 Apple Silicon note: launch the model server with PYTORCH_ENABLE_MPS_FALLBACK=1.
@@ -107,7 +110,9 @@ MAX_SESSIONS = max(1, int(os.environ.get("NNINTERACTIVE_MAX_SESSIONS", "2")))
 # a new user is never refused because of an abandoned tab.
 SESSION_IDLE_S = float(os.environ.get("NNINTERACTIVE_SESSION_IDLE_S", "600"))
 # States one account may hold at once. Two covers the viewer's normal use: the
-# prompt tool's session and a Refine, which runs in a session of its own.
+# prompt tool's session and a Refine, which runs in a session of its own. Each
+# also needs a free slot under MAX_SESSIONS, so with both defaults at 2 the pair
+# coexists only while no other account holds a lease.
 MAX_SESSIONS_PER_USER = max(1, int(os.environ.get("NNINTERACTIVE_MAX_SESSIONS_PER_USER", "2")))
 
 

@@ -7,7 +7,8 @@ the same function app.py calls at boot.
 
 Both steps only ever act on what the deployment chose: the grant adds admin to
 verified accounts listed in ADMIN_EMAILS and never takes a role away, and the
-purge deletes nothing unless ANALYTICS_RETENTION_DAYS names a number of days.
+purge deletes nothing unless ANALYTICS_RETENTION_DAYS names a whole number of
+days of at least one.
 """
 
 import importlib
@@ -146,8 +147,13 @@ def test_boot_deletes_no_analytics_when_no_retention_is_configured(boot):
     assert _analytics_rows() == 1
 
 
-@pytest.mark.parametrize("value", ["0", "-5", "forever", " "])
-def test_a_retention_that_is_not_a_number_of_days_deletes_nothing(boot, monkeypatch, capsys, value):
+@pytest.mark.parametrize("value, said", [
+    ("0", "is below the 1-day minimum"),
+    ("-5", "is below the 1-day minimum"),
+    ("forever", "is not a whole number of days"),
+    (" ", None),
+])
+def test_a_retention_that_is_not_a_whole_number_of_days_deletes_nothing(boot, monkeypatch, capsys, value, said):
     boot_housekeeping, sessions_dir = boot
     _old_analytics_event()
     monkeypatch.setenv("ANALYTICS_RETENTION_DAYS", value)
@@ -155,8 +161,9 @@ def test_a_retention_that_is_not_a_number_of_days_deletes_nothing(boot, monkeypa
     boot_housekeeping.run(sessions_dir)
 
     assert _analytics_rows() == 1
-    if value.strip():
-        assert "ANALYTICS_RETENTION_DAYS" in capsys.readouterr().out
+    if said:
+        out = capsys.readouterr().out
+        assert f"ANALYTICS_RETENTION_DAYS={value!r} {said}" in out
 
 
 def test_the_admin_grant_only_adds_admin_to_verified_listed_accounts(boot):

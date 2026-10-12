@@ -452,11 +452,20 @@ def test_a_room_edited_before_the_viewer_copy_drops_its_raw_caches(room_store):
     stored["mask_snapshot_seq"] = 1
     stored["mask_values_seq"] = 1
     (room_dir / "metadata.json").write_text(json.dumps(stored))
+    # And an export it had built from that snapshot, still in dataset values.
+    with zipfile.ZipFile(room_dir / "export.zip", "w") as archive:
+        archive.write(room_dir / "mask_snapshot.nii.gz", "edited_labelmap.nii.gz")
+    (room_dir / "report.pdf").write_bytes(b"%PDF-1.4 old")
 
     mask_path, sequence = store.get_mask_snapshot(metadata["room_id"], key)
 
     assert sequence == 1
     assert _flat(mask_path)[:4] == [22, 25, 23, 1]
+    assert not (room_dir / "report.pdf").exists()
+    exported = store.root.parent / "exported_labelmap.nii.gz"
+    with zipfile.ZipFile(store.build_export(metadata["room_id"], key)) as archive:
+        exported.write_bytes(archive.read("edited_labelmap.nii.gz"))
+    assert _flat(exported)[:4] == [22, 25, 23, 1]
     event = _patch(store, metadata, key, "after-upgrade", 0, 2)
     assert event["payload"]["ranges"][0]["before"] == 22
     mask_path, _ = store.get_mask_snapshot(metadata["room_id"], key)
