@@ -104,6 +104,7 @@ def test_get_capabilities_caches_and_survives_outages(monkeypatch):
     monkeypatch.setattr(requests, "get", fake_get)
     monkeypatch.setattr(predictor, "_caps_cache", None)
     monkeypatch.setattr(predictor, "_caps_fetched_at", 0.0)
+    monkeypatch.setattr(predictor, "_caps_failed_at", None)
 
     first = predictor.get_capabilities()
     assert first["license"] == "CC BY-NC-SA 4.0"
@@ -114,4 +115,33 @@ def test_get_capabilities_caches_and_survives_outages(monkeypatch):
     # Past the TTL with the server down: the stale payload beats nothing.
     monkeypatch.setattr(predictor, "_caps_fetched_at", -10_000.0)
     assert predictor.get_capabilities()["license"] == "CC BY-NC-SA 4.0"
+    assert calls["n"] == 2
+
+
+def test_an_unreachable_model_server_is_asked_again_only_after_a_pause(monkeypatch):
+    """Each try at a server that does not answer can hold a request thread for
+    the whole timeout, so a failure is remembered for CAPS_RETRY_S instead of
+    being repeated for every viewer that opens."""
+    import requests
+
+    clock = {"now": 1000.0}
+    calls = {"n": 0}
+
+    def fake_get(url, headers=None, timeout=None):
+        calls["n"] += 1
+        raise requests.ConnectTimeout("no answer")
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(predictor.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(predictor, "_caps_cache", None)
+    monkeypatch.setattr(predictor, "_caps_fetched_at", 0.0)
+    monkeypatch.setattr(predictor, "_caps_failed_at", None)
+
+    assert predictor.get_capabilities() is None
+    clock["now"] += predictor.CAPS_RETRY_S - 1
+    assert predictor.get_capabilities() is None
+    assert calls["n"] == 1
+
+    clock["now"] += 2
+    assert predictor.get_capabilities() is None
     assert calls["n"] == 2

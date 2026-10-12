@@ -213,16 +213,23 @@ atexit.register(_release_on_exit)
 _caps_cache: dict | None = None
 _caps_fetched_at = 0.0
 CAPS_TTL_S = 3600.0
+# A server that does not answer holds the request thread for the whole timeout,
+# so after a failed fetch nothing asks again for this long.
+CAPS_RETRY_S = 30.0
+_caps_failed_at: float | None = None
 
 
 def get_capabilities() -> dict | None:
     """The model server's /capabilities payload — licence string, supported
     interactions, checkpoint version — cached for an hour. Returns the last
     good payload when the server is unreachable, or None if it never
-    answered; callers fall back to their built-in text."""
-    global _caps_cache, _caps_fetched_at
+    answered; callers fall back to their built-in text. A failed fetch is
+    not repeated for CAPS_RETRY_S."""
+    global _caps_cache, _caps_fetched_at, _caps_failed_at
     now = time.monotonic()
     if _caps_cache is not None and now - _caps_fetched_at < CAPS_TTL_S:
+        return _caps_cache
+    if _caps_failed_at is not None and now - _caps_failed_at < CAPS_RETRY_S:
         return _caps_cache
     try:
         import requests
@@ -231,11 +238,14 @@ def get_capabilities() -> dict | None:
                             headers=headers, timeout=3)
         resp.raise_for_status()
         payload = resp.json()
-        if isinstance(payload, dict):
-            _caps_cache = payload
-            _caps_fetched_at = now
     except Exception:
-        pass
+        payload = None
+    if isinstance(payload, dict):
+        _caps_cache = payload
+        _caps_fetched_at = now
+        _caps_failed_at = None
+    else:
+        _caps_failed_at = now
     return _caps_cache
 
 
