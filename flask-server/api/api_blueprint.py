@@ -2629,8 +2629,9 @@ def check_inference_status_legacy():
 
 @api_blueprint.route('/jobs', methods=['POST'])
 def create_pull_inference_job():
-    # Operators queue pull-worker jobs with the same X-Worker-Token the workers
-    # use; the site itself runs scans through /run-inference and never calls this.
+    # Operators queue pull-worker jobs from a signed-in session (the access policy)
+    # plus the X-Worker-Token the workers use (here); the site itself runs scans
+    # through /run-inference and never calls this.
     auth_error = _require_worker_auth()
     if auth_error is not None:
         return auth_error
