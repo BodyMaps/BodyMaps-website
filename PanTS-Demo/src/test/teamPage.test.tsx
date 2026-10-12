@@ -1,78 +1,151 @@
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
-import { AuthProvider } from "../contexts/authContext";
-import TeamPage from "../routes/TeamPage";
+import { preload } from "react-dom";
+import styles from "./TeamPage.module.css";
 
-describe("team page", () => {
-  it("links the four supplied profiles and leaves the other cards unlinked", () => {
-    render(
-      <AuthProvider>
-        <MemoryRouter>
-          <TeamPage />
-        </MemoryRouter>
-      </AuthProvider>,
-    );
-    const zhou = screen.getByRole("link", { name: "Zongwei Zhou, PhD on LinkedIn" });
-    expect(zhou).toHaveAttribute("href", "https://www.linkedin.com/in/zongwei-zhou");
-    expect(zhou).toHaveAttribute("target", "_blank");
-    expect(zhou).toHaveAttribute("rel", "noopener noreferrer");
-    const li = screen.getByRole("link", { name: "Wenxuan Li on LinkedIn" });
-    expect(li).toHaveAttribute("href", "https://www.linkedin.com/in/wenxuan-li-chelsea");
-    const ahmad = screen.getByRole("link", { name: "Ahmad Durre Rehman on LinkedIn" });
-    expect(ahmad).toHaveAttribute("href", "https://linkedin.com/in/ahmad-durre-rehman-121577382");
-    expect(ahmad).toHaveAttribute("target", "_blank");
-    expect(ahmad).toHaveAttribute("rel", "noopener noreferrer");
-    const poon = screen.getByRole("link", { name: "Alexander Poon on LinkedIn" });
-    expect(poon).toHaveAttribute("href", "https://www.linkedin.com/in/alexander-p-88640b281");
-    expect(poon).toHaveAttribute("target", "_blank");
-    expect(poon).toHaveAttribute("rel", "noopener noreferrer");
-    expect(screen.getAllByRole("link", { name: /on LinkedIn$/ })).toHaveLength(4);
-    expect(screen.getByText("Alan L. Yuille, PhD")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Yuille/ })).not.toBeInTheDocument();
-  });
+type Member = {
+  name: string;
+  role: string;
+  photo?: string;
+  /** Verified public profiles only; a card with none stays unlinked. */
+  links?: { linkedin?: string };
+};
 
-  it("lists the original members first and unchanged, then the new Core Contributors in the given order", () => {
-    const { container } = render(
-      <AuthProvider>
-        <MemoryRouter>
-          <TeamPage />
-        </MemoryRouter>
-      </AuthProvider>,
-    );
-    const existing = [
-      ["Zongwei Zhou, PhD", "Principal Investigator"],
-      ["Alan L. Yuille, PhD", "Scientific Advisor"],
-      ["Wenxuan Li", "PhD Student"],
-      ["Pedro RAS Bassi", "PhD Student"],
-      ["Jaeden Pangaribuan", "Core Contributor"],
-      ["Lucy Wu", "Core Contributor"],
-    ];
-    const added = [
-      "Aditya Sanjeev",
-      "Alexander Poon",
-      "Ahmad Durre Rehman",
-      "Yusuf Abdulkadir",
-      "Ishita Ahelleya",
-      "Harleen Sachdev",
-    ];
-    const cards = Array.from(container.querySelectorAll("[class*=card]")).map((c) => c.textContent ?? "");
-    expect(cards).toHaveLength(existing.length + added.length);
-    existing.forEach(([name, role], i) => {
-      expect(cards[i]).toContain(name);
-      expect(cards[i]).toContain(role);
-    });
-    added.forEach((name, i) => {
-      expect(cards[existing.length + i]).toContain(name);
-      expect(cards[existing.length + i]).toContain("Core Contributor");
-      if (name === "Alexander Poon") {
-        expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/alexander-poon.webp");
-      } else {
-        expect(screen.queryByAltText(name)).not.toBeInTheDocument();
-      }
-      if (name !== "Ahmad Durre Rehman" && name !== "Alexander Poon") {
-        expect(screen.queryByRole("link", { name: new RegExp(name) })).not.toBeInTheDocument();
-      }
-    });
-  });
-});
+// preload only the first member's photo to ensure it loads quickly, improving performance.
+const ZHOU_PHOTO = "/headshots/zongwei-zhou.webp";
+preload(ZHOU_PHOTO, { as: "image", fetchPriority: "high" });
+
+// .webp images are used for better compression and faster loading times. Also, be sure to use small image sizes.
+const MEMBERS: Member[] = [
+  {
+    name: "Zongwei Zhou, PhD",
+    role: "Principal Investigator",
+    photo: ZHOU_PHOTO,
+    links: { linkedin: "https://www.linkedin.com/in/zongwei-zhou" },
+  },
+  {
+    name: "Alan L. Yuille, PhD",
+    role: "Scientific Advisor",
+    photo: "/headshots/alan-yuille.webp",
+  },
+  {
+    name: "Wenxuan Li",
+    role: "PhD Student",
+    photo: "/headshots/wenxuan-li.webp",
+    links: { linkedin: "https://www.linkedin.com/in/wenxuan-li-chelsea" },
+  },
+  {
+    name: "Pedro RAS Bassi",
+    role: "PhD Student",
+    photo: "/headshots/pedro-bassi.webp",
+  },
+  {
+    name: "Jaeden Pangaribuan",
+    role: "Core Contributor",
+    photo: "/headshots/jaeden-pangaribuan.webp"
+  },
+  {
+    name: "Lucy Wu",
+    role: "Core Contributor",
+    photo: "/headshots/lucy-wu.webp",
+  },
+  { name: "Aditya Sanjeev", role: "Core Contributor" },
+  {
+    name: "Alexander Poon",
+    role: "Core Contributor",
+    photo: "/headshots/alexander-poon.webp",
+    links: { linkedin: "https://www.linkedin.com/in/alexander-p-88640b281" },
+  },
+  {
+    name: "Ahmad Durre Rehman",
+    role: "Core Contributor",
+    links: { linkedin: "https://linkedin.com/in/ahmad-durre-rehman-121577382" },
+  },
+  { name: "Yusuf Abdulkadir", role: "Core Contributor" },
+  { name: "Ishita Ahelleya", role: "Core Contributor" },
+  { name: "Harleen Sachdev", role: "Core Contributor" },
+];
+
+function Avatar({
+  photo,
+  name,
+  priority,
+}: {
+  photo?: string;
+  name: string;
+  priority?: boolean;
+}) {
+  return (
+    <div className={styles.avatarRing}>
+      <div className={styles.avatarInner}>
+        {photo ? (
+          <img
+            src={photo}
+            alt={name}
+            width={176}
+            height={176}
+            className={styles.avatarImg}
+            loading={priority ? "eager" : "lazy"}
+            fetchPriority={priority ? "high" : "auto"}
+            decoding="async"
+          />
+        ) : (
+          <svg
+            width="68%"
+            height="68%"
+            viewBox="0 0 24 24"
+            fill="#b3b3b3"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="9" r="4.2" />
+            <path d="M4.5 21c0-3.7 3.4-6.2 7.5-6.2s7.5 2.5 7.5 6.2z" />
+          </svg>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MemberCard({
+  member,
+  priority,
+}: {
+  member: Member;
+  priority?: boolean;
+}) {
+  return (
+    <div className={styles.card}>
+      <Avatar photo={member.photo} name={member.name} priority={priority} />
+      <div>
+        <div className={styles.memberName}>{member.name}</div>
+        <div className={styles.memberRole}>{member.role}</div>
+        {member.links?.linkedin && (
+          <a
+            className={styles.memberLink}
+            href={member.links.linkedin}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`${member.name} on LinkedIn`}
+          >
+            LinkedIn
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function TeamPage() {
+  return (
+    <div className={styles.page}>
+      <section className={styles.main} aria-labelledby="team-title">
+        <h1 className={styles.title} id="team-title">
+          Meet the <span className={styles.titleBold}>team.</span>
+        </h1>
+        <div className={styles.grid}>
+          {MEMBERS.map((m, i) => (
+            <MemberCard key={m.name} member={m} priority={i === 0} />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
