@@ -253,7 +253,7 @@ const estimateRemaining = (
 // raw .dcm slices). Both are previewable individually and runnable through inference.
 // Only automatic sample selection has this transfer budget. User-selected
 // scans and inference keep their existing limits; no sample is downsampled.
-const MAX_SAMPLE_BYTES = 40 * 1024 * 1024;
+const MAX_SAMPLE_BYTES = 16 * 1024 * 1024;
 
 type SelectedItem =
   | { id: string; kind: "nifti"; file: File; sampleCaseId?: CaseId }

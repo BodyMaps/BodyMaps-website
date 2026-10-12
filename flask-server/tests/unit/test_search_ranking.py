@@ -245,8 +245,8 @@ def _sample_row(case_id, ct_bytes, *, sex='F', age=50, thumbnail_rank=0, order=1
 def test_sample_prefers_compact_originals_without_changing_gallery_quality_order():
     df = _frame([
         _sample_row('huge', 248_000_000, order=1),
-        _sample_row('compact', 25_000_000, order=2),
-        _sample_row('smaller', 15_000_000, order=3),
+        _sample_row('compact', 15_000_000, order=2),
+        _sample_row('smaller', 11_000_000, order=3),
     ])
     original = df.copy(deep=True)
     assert rank_sample_results(df)['id'].tolist() == ['smaller', 'compact', 'huge']
@@ -260,7 +260,7 @@ def test_sample_retains_usable_thumbnails_and_known_demographics_before_smallest
         _sample_row('unknown-thumbnail', 2_000_000, thumbnail_rank=1),
         _sample_row('missing-sex', 3_000_000, sex=''),
         _sample_row('missing-age', 4_000_000, age=math.nan),
-        _sample_row('ready', 25_000_000),
+        _sample_row('ready', 12_000_000),
     ])
     assert rank_sample_results(df)['id'].tolist() == [
         'ready', 'missing-sex', 'missing-age', 'unknown-thumbnail', 'distorted',

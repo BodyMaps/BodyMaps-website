@@ -88,7 +88,7 @@ it("bounds candidate attempts and explains when every ranked scan is missing", a
   expect(screen.getByRole("button", { name: "Sample case", exact: true })).toBeEnabled();
 });
 
-it.each([40 * 1024 * 1024 + 1, 248354566])("skips an oversized %s-byte sample without buffering it, then accepts a response without Content-Length", async (size) => {
+it.each([16 * 1024 * 1024 + 1, 40442531, 248354566])("skips an oversized %s-byte sample without buffering it, then accepts a response without Content-Length", async (size) => {
   const oversized = new Response(new Uint8Array([31, 139, 8]), { headers: { "Content-Type": "application/gzip", "Content-Length": String(size) } });
   const read = vi.spyOn(oversized, "arrayBuffer");
   const cancel = vi.spyOn(oversized.body!, "cancel");

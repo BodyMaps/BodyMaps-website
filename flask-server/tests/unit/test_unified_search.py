@@ -224,8 +224,8 @@ def test_sample_sort_uses_loaded_sizes_and_keeps_filtering_pagination_and_defaul
     data = u.DF_ALL.copy()
     data['__ct_bytes'] = data['__case_str'].map({
         'PanTS_00000012': 248_000_000,
-        'PanTS_00000030': 25_000_000,
-        'PanTS_00008854': 15_000_000,
+        'PanTS_00000030': 15_000_000,
+        'PanTS_00008854': 11_000_000,
     })
     data['__thumbnail_quality_rank'] = 0
     monkeypatch.setattr(u, 'DF_ALL', data)

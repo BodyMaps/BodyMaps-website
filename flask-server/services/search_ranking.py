@@ -141,7 +141,7 @@ def rank_quality_results(
 
 
 
-SAMPLE_MAX_CT_BYTES = 40 * 1024 * 1024
+SAMPLE_MAX_CT_BYTES = 16 * 1024 * 1024
 
 
 def rank_sample_results(df: pd.DataFrame) -> pd.DataFrame:
