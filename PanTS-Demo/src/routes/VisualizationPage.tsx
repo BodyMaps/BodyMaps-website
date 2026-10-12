@@ -828,12 +828,14 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 				setSegUrl(quizPracticeMaskUrl ?? null);
 			} else if (isCvCase) {
 				setSegUrl(cvMaskOk ? `${localSeg}${resParam}` : null);
-			} else if (localStatus === 503) {
-				// The lab server's dataset storage is down, so it cannot read or convert the
-				// full-resolution mask either: the mirror's own mask goes with the mirror's CT.
+			} else if (localStatus === 0 || localStatus >= 500) {
+				// The lab server cannot answer (unreachable, a server error, or its dataset
+				// storage is down), so it cannot read or convert the mask either: the mirror's
+				// own mask goes with the mirror's CT.
 				setSegUrl(hfSeg);
 			} else {
-				// Otherwise the backend, even when the CT comes from the mirror: it converts the
+				// Otherwise the backend, even when the CT comes from the mirror (the lab server
+				// answered, for example 404 for a case it does not store): it converts the
 				// dataset's organ numbering to the viewer's and reads the mirror itself when
 				// it has no local copy. A mirror CT keeps a full-resolution mask, as before.
 				setSegUrl(datasetSegmentationUrl(id, { low: localOk && !isHd }));

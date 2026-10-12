@@ -6,10 +6,12 @@ import { API_BASE } from "./constants";
 import { datasetSegmentationUrl } from "./segmentationSource";
 import { getPanTSId } from "./utils";
 
-// Local CT preview first, HuggingFace mirror fallback for the CT. The mask always comes from
-// the backend, which converts the dataset's organ numbering (and reads the mirror itself when
-// it has no local copy). Labelmaps stay full resolution because nearest-neighbour
-// downsampling visibly stair-steps organ boundaries and can erase small structures.
+// Local CT preview first, HuggingFace mirror fallback for the CT. The mask comes from the
+// backend, which converts the dataset's organ numbering (and reads the mirror itself when it
+// has no local copy), unless the lab server cannot answer at all: then it cannot read or
+// convert the mask either, and both volumes come from the mirror, as in the case viewer.
+// Labelmaps stay full resolution because nearest-neighbour downsampling visibly
+// stair-steps organ boundaries and can erase small structures.
 // `full` asks for the full-resolution local CT instead of the fast preview, as ?hd=1 does
 // in the case viewer.
 export async function resolveSources(id: string, full = false): Promise<{ ct: string; seg: string }> {
@@ -30,10 +32,13 @@ export async function resolveSources(id: string, full = false): Promise<{ ct: st
 	}
 	const p = getPanTSId(id);
 	const hfCt = `https://huggingface.co/datasets/BodyMaps/iPanTSMini/resolve/main/image_only/${p}/ct.nii.gz?download=true`;
-	const ok = await fetch(localCt, { method: "HEAD" })
-		.then((r) => r.ok)
-		.catch(() => false);
-	return { ct: ok ? `${localCt}${res}` : hfCt, seg: datasetSegmentationUrl(id) };
+	const hfSeg = `https://huggingface.co/datasets/BodyMaps/iPanTSMini/resolve/main/mask_only/${p}/combined_labels.nii.gz?download=true`;
+	// status 0: the request itself failed (network, a backend that is down).
+	const probe = await fetch(localCt, { method: "HEAD" })
+		.then((r) => ({ ok: r.ok, status: r.status }))
+		.catch(() => ({ ok: false, status: 0 }));
+	const serverDown = !probe.ok && (probe.status === 0 || probe.status >= 500);
+	return { ct: probe.ok ? `${localCt}${res}` : hfCt, seg: serverDown ? hfSeg : datasetSegmentationUrl(id) };
 }
 
 // Respect the user's data budget: skip prefetch under Save-Data or on very slow (2G)

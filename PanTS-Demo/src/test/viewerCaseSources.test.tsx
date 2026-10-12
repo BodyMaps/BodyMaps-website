@@ -5,10 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Where the viewer reads a dataset case from, decided by a HEAD probe of the lab server's CT.
 // A case is only "not in the dataset" when the lab server answers 404 and the public mirror
-// does too; while the dataset storage is down (503) the case loads from the mirror, mask
-// included, because the lab server cannot read or convert the mask either. Every other mirror
-// case gets its mask from the backend, which converts the organ numbering. A CancerVerse case
-// keeps its Report button.
+// does too. While the lab server cannot answer at all (unreachable, or any 5xx such as the
+// dataset storage being down) the case loads from the mirror, mask included, because the lab
+// server cannot read or convert the mask either. Every other mirror case gets its mask from the
+// backend, which converts the organ numbering. A CancerVerse case keeps its Report button.
 
 const viewerDispose = vi.hoisted(() => vi.fn());
 const viewerVolumeSequence = vi.hoisted(() => ({ value: 0 }));
@@ -99,12 +99,16 @@ import VisualizationPage from "../routes/VisualizationPage";
 
 const MIRROR = "https://huggingface.co/datasets/BodyMaps/iPanTSMini/resolve/main";
 
-// labServer: the status the lab server gives the CT; mirror: the status the mirror gives it.
+// labServer: the status the lab server gives the CT (0: the request never reaches it);
+// mirror: the status the mirror gives it.
 function stubApi({ labServer, mirror }: { labServer: number; mirror: number }) {
 	global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
 		if (init?.method === "HEAD") {
-			if (url.includes("/api/get-main-nifti/")) return { ok: labServer < 300, status: labServer, headers: { get: () => null } };
+			if (url.includes("/api/get-main-nifti/")) {
+				if (labServer === 0) throw new TypeError("Failed to fetch");
+				return { ok: labServer < 300, status: labServer, headers: { get: () => null } };
+			}
 			if (url.startsWith(MIRROR)) return { ok: mirror < 300, status: mirror, headers: { get: () => null } };
 			if (url.includes("/api/get-segmentations/")) return { ok: true, status: 200, headers: { get: () => "application/gzip" } };
 		}
@@ -153,6 +157,21 @@ describe("dataset case sources", () => {
 
 	it("loads the mirror's CT and mask while the dataset storage is down, even for a case the mirror lacks", async () => {
 		stubApi({ labServer: 503, mirror: 404 });
+		const { unmount } = open("1");
+		await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
+		expect(screen.queryByRole("heading", { name: "This case isn't available" })).toBeNull();
+		const { ct, seg } = loadedUrls();
+		expect(ct).toMatch(new RegExp(`^${MIRROR}/image_only/`));
+		expect(seg).toMatch(new RegExp(`^${MIRROR}/mask_only/`));
+		unmount();
+	});
+
+	it.each([
+		["cannot be reached", 0],
+		["answers with a gateway error", 502],
+		["answers with a server error", 500],
+	])("loads the mirror's CT and mask when the lab server %s", async (_why, labServer) => {
+		stubApi({ labServer, mirror: 200 });
 		const { unmount } = open("1");
 		await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
 		expect(screen.queryByRole("heading", { name: "This case isn't available" })).toBeNull();
