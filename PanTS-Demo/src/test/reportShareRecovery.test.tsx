@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { MemoryRouter as DomMemoryRouter } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ReportScreen from '../components/ReportScreen/ReportScreen';
 import SharePatientCard from '../routes/SharePatientCard';
 import LegalPage from '../routes/LegalPage';
@@ -165,6 +165,51 @@ describe('shared summary card', () => {
     Reflect.deleteProperty(navigator, 'share');
     fireEvent.click(button);
     expect(await screen.findByText("Couldn't copy the link. Copy the address from your browser instead.")).toBeInTheDocument();
+  });
+});
+
+// Every /api route needs a signed-in session, and the server answers 401 with this code
+// once it has ended. That is not a missing report or a dead link: the account context is
+// told, signs the page out and brings up the sign-in prompt, as the quiz and live rooms do.
+describe('an ended sign-in', () => {
+  const ended = () => ({ ok: false, status: 401, json: async () => ({ error: 'Authentication required', code: 'authentication_required' }) }) as Response;
+  const expired = vi.fn();
+  beforeEach(() => {
+    expired.mockClear();
+    window.addEventListener('bodymaps:session-expired', expired);
+  });
+  afterEach(() => window.removeEventListener('bodymaps:session-expired', expired));
+
+  it('is reported when the report data is asked for', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ended()));
+    render(<ReportScreen id="ended-report" {...props} />);
+    await screen.findByText('Report unavailable.');
+    expect(expired).toHaveBeenCalledOnce();
+  });
+
+  it('is reported when a share link is made', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) =>
+      Promise.resolve(url.includes('/api/get-report-data/') ? ok(fixture('ended-share')) : ended())));
+    render(<ReportScreen id="ended-share" {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Share report/ }));
+    await waitFor(() => expect(expired).toHaveBeenCalledOnce());
+  });
+
+  it('is reported by a shared summary card instead of calling the link dead', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(ended()));
+    renderShare();
+    await waitFor(() => expect(expired).toHaveBeenCalledOnce());
+    expect(await screen.findByRole('alert')).toHaveTextContent("We couldn't load this summary.");
+    expect(screen.queryByText("This report link isn't available.")).not.toBeInTheDocument();
+  });
+
+  it('is not reported for any other refusal', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(failed(401)));
+    renderShare();
+    expect(await screen.findByRole('alert')).toHaveTextContent("This report link isn't available.");
+    render(<ReportScreen id="other-refusal" {...props} />);
+    await screen.findByText('Report unavailable.');
+    expect(expired).not.toHaveBeenCalled();
   });
 });
 

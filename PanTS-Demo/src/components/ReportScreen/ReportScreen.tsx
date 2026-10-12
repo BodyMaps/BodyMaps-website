@@ -2,6 +2,7 @@ import { IconShare } from '@tabler/icons-react';
 import React, { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react';
 import { APP_CONSTANTS } from '../../helpers/constants';
 import { prefersReducedMotion } from '../../helpers/motion';
+import { reportIfSessionEnded } from '../../education/sessionEnded';
 import { useDialogFocus } from '../../hooks/useDialogFocus';
 import { appRootRelativeUrl } from '../../liveRooms/protocol';
 import FindingsTimeline from './FindingsTimeline';
@@ -42,7 +43,13 @@ export function prefetchReportData(id: string): Promise<ReportData | null> {
   const inFlight = reportDataRequests.get(key);
   if (inFlight) return inFlight;
   const loaded = fetch(`${APP_CONSTANTS.API_ORIGIN}/api/get-report-data/${encodeURIComponent(id)}`, { cache: 'no-store' })
-    .then(async response => response.ok ? normalizeReportData(await response.json()) : null)
+    .then(async response => {
+      if (response.ok) return normalizeReportData(await response.json());
+      // An ended sign-in is not a missing report: the account context signs the page out
+      // and asks for a sign-in. The request still settles as unavailable.
+      await reportIfSessionEnded(response);
+      return null;
+    })
     .then(report => {
       if (report) cache.set(key, { data: report, expiresAt: Date.now() + REPORT_CACHE_TTL_MS });
       return report;
@@ -521,7 +528,10 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
     setShareLoading(true);
     try {
       const r = await fetch(`${APP_CONSTANTS.API_ORIGIN}/api/share/${id}/token`, { method: 'POST' });
-      if (!r.ok) throw new Error(`Share token request failed with status ${r.status}`);
+      if (!r.ok) {
+        await reportIfSessionEnded(r);
+        throw new Error(`Share token request failed with status ${r.status}`);
+      }
       const j = await r.json();
       const token = typeof j.url === 'string' ? j.url.split('/').pop() : null;
       if (currentCaseRef.current !== id) return;

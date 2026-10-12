@@ -22,6 +22,7 @@ vi.mock("../routes/VisualizationPage", () => ({
 }));
 
 import SoloChallengePage from "./SoloChallengePage";
+import { SoloChallengeDock } from "./SoloChallengeChrome";
 
 const challengeId = "pancreas-case-35";
 const challenge = {
@@ -251,6 +252,49 @@ describe("SoloChallengePage when the sign-in ends", () => {
 
 		await waitFor(() => expect(expired).toHaveBeenCalledOnce());
 		expect(screen.getByTestId("solo-reveal-error")).toHaveTextContent("");
+	});
+});
+
+describe("the AI tutor when the sign-in ends", () => {
+	const expired = vi.fn();
+	beforeEach(() => {
+		expired.mockClear();
+		window.addEventListener("bodymaps:session-expired", expired);
+	});
+	afterEach(() => {
+		window.removeEventListener("bodymaps:session-expired", expired);
+		vi.unstubAllGlobals();
+	});
+
+	const result = {
+		attempt_id: attempt.attempt_id, challenge_id: challengeId, status: "graded",
+		submitted_at: "2099-01-01T12:03:00Z", elapsed_seconds: 180,
+		objective_points: 60, total_points: 96, max_points: 100,
+		scores: {
+			localization: { points: 35, max_points: 35, distance_mm: 0, inside_lesion: true },
+			measurement: { points: 15, max_points: 15, measured_mm: 31, reference_mm: 30, error_percent: 3.3 },
+			finding: { points: 10, max_points: 10, selected: "focal_pancreatic_lesion", correct: "focal_pancreatic_lesion" },
+		},
+		ai_grade: { status: "graded", model: "qwen", rubric_version: 1, criteria: { finding: 10, location: 9, evidence: 8, impression: 9 }, points: 36, max_points: 40, feedback: "Calibrated." },
+		ground_truth: { correct_finding: "focal_pancreatic_lesion", correct_finding_label: "Abnormal area in the pancreas", segmentation_label: 1, mesh_organ_id: 28, location: "pancreatic head", reference_diameter_mm: 30, reference_measurement_lps: [], teaching_points: [] },
+	} as unknown as EducationResult;
+	const ask = async (answer: () => Response) => {
+		vi.stubGlobal("fetch", vi.fn(async () => answer()));
+		const controller = { challenge, attempt, result, taskDockOpen: true, setTaskDockOpen: vi.fn() } as unknown as SoloChallengeController;
+		render(<SoloChallengeDock controller={controller} crosshair={null} measurement={null} serializedMeasurement={null} onSetMarker={vi.fn()} onActivateMeasure={vi.fn()} onSubmit={vi.fn()} />);
+		fireEvent.change(screen.getByPlaceholderText("Ask why the measurement or impression was scored this way…"), { target: { value: "Why?" } });
+		fireEvent.click(screen.getByRole("button", { name: "Send question to AI tutor" }));
+		await screen.findByText(/Could not reach the tutor/);
+	};
+
+	it("reports the ended sign-in when a question meets it", async () => {
+		await ask(sessionEnded);
+		expect(expired).toHaveBeenCalledOnce();
+	});
+
+	it("does not report it for a tutor that is only unavailable", async () => {
+		await ask(() => jsonResponse({ error: "Tutor unavailable" }, 503));
+		expect(expired).not.toHaveBeenCalled();
 	});
 });
 

@@ -4,6 +4,7 @@ import { APP_CONSTANTS } from '../helpers/constants';
 import type { ReportData } from '../helpers/reportFindings';
 import { formatMeasurement, getSourceReportText, labelize, normalizeReportData, splitOrgans } from '../helpers/reportFindings';
 import SourceReportDetails from '../components/ReportScreen/SourceReportDetails';
+import { reportIfSessionEnded } from '../education/sessionEnded';
 
 const NAVY = '#14265C';
 const NAVY_DEEP = '#0D1B47';
@@ -86,8 +87,11 @@ export default function SharePatientCard() {
     setCopyFailed(false);
     fetch(`${APP_CONSTANTS.API_ORIGIN}/api/share/${encodeURIComponent(shareId)}`, { cache: 'no-store' })
       .catch(() => { throw new SummaryUnreachableError('The request did not reach the server'); })
-      .then(r => {
+      .then(async r => {
         if (r.status >= 500) throw new SummaryUnreachableError(`Server error ${r.status}`);
+        // An ended sign-in says nothing about the link: it is reported (the page is signed
+        // out and asks for a sign-in), and the card offers a retry instead of a dead link.
+        if (await reportIfSessionEnded(r)) throw new SummaryUnreachableError('The sign-in has ended');
         if (!r.ok) throw new Error('Report unavailable');
         return r.json().catch(() => { throw new SummaryUnreachableError('The answer could not be read'); });
       })

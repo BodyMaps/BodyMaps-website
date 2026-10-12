@@ -16,3 +16,19 @@ export function isSessionEnded(caught: unknown): boolean {
 export function reportSessionEnded(): void {
 	window.dispatchEvent(new Event("bodymaps:session-expired"));
 }
+
+// For a request that otherwise treats any refusal as a plain failure (the report, a share
+// link, the tutor): when the answer is the ended sign-in, report it as above. Reads the
+// response body only for a 401.
+export async function reportIfSessionEnded(response: { status: number; json: () => Promise<unknown> }): Promise<boolean> {
+	if (response.status !== 401) return false;
+	let body: unknown = null;
+	try {
+		body = await response.json();
+	} catch {
+		return false;
+	}
+	if (!isSessionEnded(body)) return false;
+	reportSessionEnded();
+	return true;
+}

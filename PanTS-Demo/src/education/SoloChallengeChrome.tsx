@@ -15,6 +15,7 @@ import { API_BASE } from "../helpers/constants";
 import type { MeasurementSummary, SharedMeasurement } from "../helpers/CornerstoneNifti2";
 import { submitOnEnter } from "../liveRooms/composerHelpers";
 import { appRootRelativeUrl } from "../liveRooms/protocol";
+import { isSessionEnded, reportSessionEnded } from "./sessionEnded";
 import type { SoloChallengeController, SoloChallengeTutor, SoloChallengeTutorMessage } from "./types";
 
 function clock(seconds: number): string {
@@ -233,7 +234,11 @@ function ChallengeResult({ controller }: { controller: SoloChallengeController }
 				body: JSON.stringify({ message: text, history: messages.filter((message) => message.text !== TUTOR_FAILED_TEXT).slice(-6) }),
 			});
 			const body = await response.json();
-			if (!response.ok) throw new Error(body.error || "Tutor unavailable");
+			if (!response.ok) {
+				// The sign-in has ended, as the answer submit on this page reports it.
+				if (response.status === 401 && isSessionEnded(body)) reportSessionEnded();
+				throw new Error(body.error || "Tutor unavailable");
+			}
 			if (endedAttempts.has(attemptId)) return;
 			setMessages((current) => [...current, { role: "tutor", text: body.reply }]);
 		} catch {
