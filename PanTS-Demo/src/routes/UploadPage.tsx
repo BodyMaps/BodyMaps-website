@@ -1166,7 +1166,7 @@ const UploadPage: React.FC = () => {
     // so nothing here even runs and the picker just quietly does nothing.
     e.target.value = "";
     if (filteredFiles.length === 0) {
-      setSelectionMessage("Please select .nii or .nii.gz files only.");
+      setSelectionMessage("Please select .nii or .nii.gz files only");
       return;
     }
     addNiftiFiles(filteredFiles);
@@ -1176,16 +1176,17 @@ const UploadPage: React.FC = () => {
     e.preventDefault();
     setIsDragOver(false);
     if (!e.dataTransfer.files) return;
-    const filteredFiles = Array.from(e.dataTransfer.files).filter((file) =>
+    const dropped = Array.from(e.dataTransfer.files);
+    const filteredFiles = dropped.filter((file) =>
       allowedExtensions.some((ext) => file.name.toLowerCase().endsWith(ext)),
     );
+    const refuse = () => setSelectionMessage("Please drop .nii or .nii.gz files or a DICOM series");
     if (filteredFiles.length === 0) {
       // A DICOM drop: loose slices arrive as files, a folder as one directory
       // entry that has to be walked (entries are only readable during the drop).
       const entries = Array.from(e.dataTransfer.items ?? [])
         .map((item) => item.webkitGetAsEntry?.() ?? null)
         .filter((entry): entry is FileSystemEntry => entry !== null);
-      const dropped = Array.from(e.dataTransfer.files);
       if (entries.some((entry) => entry.isDirectory)) {
         readDroppedEntries(entries)
           .then(addFolderFiles)
@@ -1193,13 +1194,22 @@ const UploadPage: React.FC = () => {
         return;
       }
       if (dropped.some(looksLikeDicom)) {
-        addDicomFiles(dropped);
+        // A README or a LICENSE has no extension either: only files that read
+        // as DICOM make a series.
+        void countDicomSlices(dropped).then((slices) => (slices > 0 ? addDicomFiles(dropped) : refuse()));
         return;
       }
-      setSelectionMessage("Please drop .nii or .nii.gz files or a DICOM series.");
+      refuse();
       return;
     }
-    addNiftiFiles(filteredFiles);
+    const shown = addNiftiFiles(filteredFiles);
+    // NIfTI files win, as in a folder; slices or a folder dropped with them are
+    // left out, and the status line says so.
+    const others = dropped.filter((file) => !filteredFiles.includes(file) && looksLikeDicom(file)).length;
+    if (others > 0) {
+      const note = `${others} other dropped ${others === 1 ? "item was" : "items were"} left out. To add a DICOM series, drop it on its own.`;
+      setSelectionMessage(shown ? `${shown} ${note}` : note);
+    }
   };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {

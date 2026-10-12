@@ -113,6 +113,16 @@ describe("picking NIfTI files", () => {
     expect(container.querySelector(".file-chip")).toBeNull();
   });
 
+  it("says which files it takes when none of the picked ones is a NIfTI file", async () => {
+    const { container } = renderUpload();
+    await signedIn();
+
+    fireEvent.change(niftiInput(container), { target: { files: [makeFile("photo.png", 10)] } });
+
+    await waitFor(() => expect(statusLine(container)).toBe("Please select .nii or .nii.gz files only"));
+    expect(container.querySelector(".file-chip")).toBeNull();
+  });
+
   it("words the server's refusal of the file's size without asking to press Run again", async () => {
     route = (u) => (u.includes("/api/upload-inference-chunk")
       ? json({ error: "Chunk index is outside upload bounds" }, false, 400) : undefined);
@@ -174,7 +184,36 @@ describe("dropping on the drop zone", () => {
 
     const image = makeFile("photo.png", 10);
     drop(container, [image], [fileEntry(image)]);
-    await waitFor(() => expect(statusLine(container)).toBe("Please drop .nii or .nii.gz files or a DICOM series."));
+    await waitFor(() => expect(statusLine(container)).toBe("Please drop .nii or .nii.gz files or a DICOM series"));
+  });
+
+  it("takes a dropped file without an extension as a slice only when it reads as DICOM", async () => {
+    const { container } = renderUpload();
+    await signedIn();
+    const license = makeFile("LICENSE", 200);
+    drop(container, [license], [fileEntry(license)]);
+    await waitFor(() => expect(statusLine(container)).toBe("Please drop .nii or .nii.gz files or a DICOM series"));
+    expect(screen.queryByText("DICOM series (1 slice)")).toBeNull();
+
+    // A DICOM file carries "DICM" after its 128-byte preamble.
+    const bytes = new Uint8Array(200);
+    bytes.set([0x44, 0x49, 0x43, 0x4d], 128);
+    const slice = new File([bytes], "IM000001");
+    drop(container, [slice], [fileEntry(slice)]);
+    expect(await screen.findByText("DICOM series (1 slice)")).toBeInTheDocument();
+  });
+
+  it("takes the NIfTI files from a drop that also holds slices, and says the rest was left out", async () => {
+    const { container } = renderUpload();
+    await signedIn();
+    const dropped = [makeFile("ct.nii.gz"), makeFile("IM0001.dcm", 10), makeFile("IM0002.dcm", 10)];
+    drop(container, dropped, dropped.map(fileEntry));
+
+    expect(await screen.findByText("ct.nii.gz")).toBeInTheDocument();
+    expect(screen.queryByText(/^DICOM series/)).toBeNull();
+    await waitFor(() => expect(statusLine(container)).toBe(
+      "2 other dropped items were left out. To add a DICOM series, drop it on its own.",
+    ));
   });
 
   it("does not open the NIfTI chooser when Upload DICOM clicks its own hidden input", async () => {
