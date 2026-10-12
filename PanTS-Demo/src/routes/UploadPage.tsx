@@ -116,6 +116,7 @@ import "./UploadPage.css";
 const CtPreview = lazy(() => import("../components/CtPreview/CtPreview"));
 const DicomPreview = lazy(() => import("../components/CtPreview/DicomPreview"));
 import { API_BASE } from "../helpers/constants";
+import { caseIdToApiId, itemToId, type CaseId, type SearchItem } from "../helpers/search";
 import {
   addRecentUpload,
   friendlyScanName,
@@ -251,7 +252,7 @@ const estimateRemaining = (
 // A selection is either a single NIfTI file or a picked DICOM folder (the series'
 // raw .dcm slices). Both are previewable individually and runnable through inference.
 type SelectedItem =
-  | { id: string; kind: "nifti"; file: File; sampleCaseId?: 35 }
+  | { id: string; kind: "nifti"; file: File; sampleCaseId?: CaseId }
   | { id: string; kind: "dicom"; files: File[]; label: string };
 
 // The File System Access API is available in desktop Chrome and Edge, but it
@@ -642,21 +643,49 @@ const UploadPage: React.FC = () => {
     let timedOut = false;
     const timer = window.setTimeout(() => { timedOut = true; controller.abort(); }, 90_000);
     try {
-      const response = await fetch(`${API_BASE}/api/get-main-nifti/35.nii.gz`, {
+      const catalogResponse = await fetch(`${API_BASE}/api/search?dataset=all&sort_by=quality&page=1&per_page=5`, {
         credentials: "include", signal: controller.signal,
       });
-      if (!response.ok) throw new Error(response.status === 503 ? "The sample dataset is temporarily unavailable. Try again when storage is available." : "The sample could not be loaded. Please try again.");
-      if (/json|text\//i.test(response.headers.get("content-type") || "")) throw new Error("The sample response was not a scan. Please try again.");
-      // Read this fixed sample as bytes before constructing the File. Some
-      // Chrome profiles fail Response.blob() while the same binary transfer
-      // and an in-memory File work correctly.
-      const bytes = await response.arrayBuffer();
+      if (!catalogResponse.ok) throw new Error(catalogResponse.status === 401 ? "Sign in again to load a sample case."
+        : "The sample dataset is temporarily unavailable. Try again when storage is available.");
+      const catalog = await catalogResponse.json();
       assertUploadAccount(ownerId, controller.signal);
-      if (!bytes.byteLength) throw new Error("The sample scan was empty. Please try again.");
-      setSelectedItems((previous) => [...previous, {
-        id: crypto.randomUUID(), kind: "nifti", sampleCaseId: 35, file: new File([bytes], "PanTS_00000035.nii.gz", { type: "application/gzip" }),
-      }]);
-      setSelectionMessage("Sample case 35 is loaded into the workspace. Choose a model and select Run, or choose None to view it.");
+      // Search already ranks thumbnail usability and dataset quality. Retain
+      // that order, and check only a bounded set of distinct, valid case IDs.
+      const candidates = [...new Set<CaseId>((Array.isArray(catalog?.items) ? catalog.items : [])
+        .slice(0, 5).filter((item: unknown) => item !== null && typeof item === "object")
+        .map((item: SearchItem) => itemToId(item))
+        .filter((id: CaseId) => typeof id === "number" ? Number.isSafeInteger(id) && id > 0 : /^CV_[A-Za-z0-9_-]+$/i.test(id)))];
+      for (const caseId of candidates) {
+        assertUploadAccount(ownerId, controller.signal);
+        let bytes: ArrayBuffer;
+        try {
+          const response = await fetch(`${API_BASE}/api/get-main-nifti/${encodeURIComponent(caseId)}.nii.gz`, {
+            credentials: "include", signal: controller.signal,
+          });
+          if (response.status === 404 || response.status === 503) continue;
+          if (!response.ok) throw new Error(response.status === 401 ? "Sign in again to load a sample case." : "The sample could not be loaded. Please try again.");
+          if (/json|text\//i.test(response.headers.get("content-type") || "")) continue;
+          // Byte buffers work in Chrome profiles where Response.blob() fails
+          // for an otherwise successful scan transfer.
+          bytes = await response.arrayBuffer();
+        } catch (error) {
+          assertUploadAccount(ownerId, controller.signal);
+          // A network/body-read failure can affect one candidate. Authentication
+          // errors and cancellation stop the selection rather than trying again.
+          if (error instanceof TypeError) continue;
+          throw error;
+        }
+        assertUploadAccount(ownerId, controller.signal);
+        if (!bytes.byteLength) continue;
+        setSelectedItems((previous) => [...previous, {
+          id: crypto.randomUUID(), kind: "nifti", sampleCaseId: caseId,
+          file: new File([bytes], `${caseIdToApiId(caseId)}.nii.gz`, { type: "application/gzip" }),
+        }]);
+        setSelectionMessage(`Sample case ${caseId} is loaded into the workspace. Choose a model and select Run, or choose None to view it.`);
+        return;
+      }
+      throw new Error("No sample scan is available right now. Try again later or upload a CT scan.");
     } catch (error) {
       if (isUploadAccountCurrent(ownerId) && (!controller.signal.aborted || timedOut)) {
         setSelectionMessage(timedOut ? "Loading the sample timed out. Please try again." : error instanceof Error ? error.message : "The sample could not be loaded.");
@@ -2221,7 +2250,7 @@ const UploadPage: React.FC = () => {
       <span className="workspace-picker-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3 3 7.5l9 4.5 9-4.5z" /><path d="M3 12l9 4.5 9-4.5" /><path d="M3 16.5 12 21l9-4.5" /></svg></span>
       Upload DICOM
     </button>
-    <button type="button" className="dropzone-btn workspace-picker-action workspace-sample" title="Load sample case 35 into the workspace"
+    <button type="button" className="dropzone-btn workspace-picker-action workspace-sample" title="Load an available sample from the dataset into the workspace"
       disabled={sampleLoading} onClick={(event) => { event.stopPropagation(); void loadSample(); }}>
       <span className="workspace-picker-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3h6M10 3v6l-5.2 9.1A2 2 0 0 0 6.5 21h11a2 2 0 0 0 1.7-2.9L14 9V3" /><path d="M7.5 15h9" /></svg></span>
       {sampleLoading ? "Loading sample…" : "Sample case"}
@@ -2331,7 +2360,7 @@ const UploadPage: React.FC = () => {
                   const subtext =
                     item.kind === "dicom"
                       ? `DICOM series · ${item.files.length} slice${item.files.length === 1 ? "" : "s"}`
-                      : item.sampleCaseId === 35 ? "NIfTI · Sample case" : `NIfTI · ${formatBytes(item.file.size)}`;
+                      : item.sampleCaseId !== undefined ? "NIfTI · Sample case" : `NIfTI · ${formatBytes(item.file.size)}`;
                   const isOpen = previewItemId === item.id;
                   const uploadStatus =
                     item.kind === "nifti" ? itemUploadStatus[item.id] : undefined;
@@ -2346,8 +2375,8 @@ const UploadPage: React.FC = () => {
                           aria-label={`${isOpen ? "Hide preview for" : "Preview"} ${name}`}
                           aria-pressed={isOpen} title={isOpen ? "Hide scan preview" : "Preview scan"}
                           onClick={() => setPreviewItemId((previous) => previous === item.id ? null : item.id)}>
-                          {item.kind === "nifti" && item.sampleCaseId === 35 ? (
-                            <img className="file-chip-thumbnail" src="/case_35_slice.png" alt="" />
+                          {item.kind === "nifti" && item.sampleCaseId !== undefined ? (
+                            <img className="file-chip-thumbnail" src={`${API_BASE}/api/get_image_preview/${encodeURIComponent(item.sampleCaseId)}`} alt="" />
                           ) : <span className="file-chip-icon" aria-hidden="true">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
