@@ -390,6 +390,18 @@ def test_sign_ups_through_a_proxy_that_hides_addresses_are_not_capped_site_wide(
     assert codes == [201, 201, 201, 201]
 
 
+def test_a_lecture_behind_one_campus_address_can_all_sign_up_within_the_hour(client, monkeypatch):
+    """Live rooms and Solo VQA Practice need an account, so a class signs up
+    together, usually from one campus network address."""
+    import api.auth_blueprint as bp_mod
+    monkeypatch.setattr(bp_mod.mailer, "send", lambda *_args: True)
+    campus = {"REMOTE_ADDR": "198.51.100.40"}
+    for i in range(80):
+        assert client.post("/api/auth/register", json={"email": f"student{i}@d.com", "password": "password1"},
+                           environ_base=campus).status_code == 201
+        client.post("/api/auth/logout")
+
+
 def test_the_signup_name_is_escaped_in_the_html_email(client, monkeypatch):
     import api.auth_blueprint as bp_mod
     mails = []

@@ -87,7 +87,9 @@ LOGIN_MAX_PER_ACCOUNT = 100
 # An email address is at most 254 characters; the throttle never keys on more.
 _LOGIN_KEY_EMAIL_CHARS = 254
 REGISTER_WINDOW_S = 3600
-REGISTER_MAX_PER_IP = 30
+# Live rooms and Solo VQA Practice need an account, so a lecture behind one
+# campus address may sign up all at once; the ceiling leaves room for that.
+REGISTER_MAX_PER_IP = 100
 
 _login_limiter = Limiter(LOGIN_WINDOW_S)
 _register_limiter = Limiter(REGISTER_WINDOW_S)
