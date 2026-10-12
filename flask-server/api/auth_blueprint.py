@@ -59,18 +59,25 @@ _reset_limiter = Limiter(RESET_WINDOW_S)
 _verify_limiter = Limiter(RESET_WINDOW_S)
 
 # Login and register take no auth either. Login is an online password-guessing
-# channel (and an argon2 verify per call), so it has two ceilings: one per IP,
-# and one per account, because a guesser with many addresses would otherwise
-# get a fresh per-IP allowance against the same password each time.
+# channel (and an argon2 verify per call), so it has three ceilings: one per IP;
+# a tight one per account and IP, so one address gets a handful of guesses at a
+# password; and a much higher one per account, so a guesser spread over many
+# addresses is still slowed. The tight one is keyed on the address too because a
+# per-account count alone let anyone who knew an address lock its owner out with
+# ten wrong passwords: a stranger's failures now count against the stranger's
+# own network, and locking the owner out takes failures from many addresses.
 # Register creates an account and sends mail to any address it is given, so it
 # gets a per-IP ceiling like the reset endpoints. The per-IP numbers are set
 # with a campus NAT in mind, where a whole lab can share one address.
-# Only failed sign-ins count, and the right password clears the account's
-# count, so a shared lab account or a class behind one NAT is never locked out
-# by people signing in successfully.
+# Only failed sign-ins count, and the right password clears that address's count
+# for the account, so a shared lab account or a class behind one NAT is never
+# locked out by people signing in successfully.
 LOGIN_WINDOW_S = 900
 LOGIN_MAX_PER_IP = 60
-LOGIN_MAX_PER_EMAIL = 10
+LOGIN_MAX_PER_ACCOUNT_AND_IP = 10
+LOGIN_MAX_PER_ACCOUNT = 100
+# An email address is at most 254 characters; the throttle never keys on more.
+_LOGIN_KEY_EMAIL_CHARS = 254
 REGISTER_WINDOW_S = 3600
 REGISTER_MAX_PER_IP = 30
 
@@ -161,17 +168,22 @@ def login():
     if not isinstance(remember_me, bool):
         return jsonify({"error": "Keep me signed in must be true or false"}), 400
     email = data.get("email") or ""
-    ip_key = "ip:" + (request.remote_addr or "unknown")
-    email_key = "email:" + str(email).strip().lower()
+    ip = request.remote_addr or "unknown"
+    account = str(email).strip().lower()[:_LOGIN_KEY_EMAIL_CHARS]
+    ip_key = "ip:" + ip
+    account_ip_key = f"account-ip:{ip}|{account}"
+    account_key = "account:" + account
     if (_login_limiter.at_limit(ip_key, LOGIN_MAX_PER_IP)
-            or _login_limiter.at_limit(email_key, LOGIN_MAX_PER_EMAIL)):
+            or _login_limiter.at_limit(account_ip_key, LOGIN_MAX_PER_ACCOUNT_AND_IP)
+            or _login_limiter.at_limit(account_key, LOGIN_MAX_PER_ACCOUNT)):
         return jsonify({"error": "Too many sign-in attempts. Try again in a few minutes."}), 429
     user = auth_store.authenticate(email, data.get("password") or "")
     if user is None:
         _login_limiter.hit(ip_key)
-        _login_limiter.hit(email_key)
+        _login_limiter.hit(account_ip_key)
+        _login_limiter.hit(account_key)
         return jsonify({"error": "Invalid email or password"}), 401
-    _login_limiter.clear(email_key)
+    _login_limiter.clear(account_ip_key)
     return _logged_in_response(user, remember_me=remember_me)
 
 

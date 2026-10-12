@@ -161,6 +161,47 @@ def test_the_right_password_clears_the_account_count(client):
         assert client.post("/api/auth/login", json={"email": "typo@d.com", "password": "nope"}).status_code == 401
 
 
+def test_failures_from_another_address_never_lock_the_owner_out(client):
+    """Knowing someone's address must not be enough to keep them out: a stranger's
+    failed guesses count against the stranger's own network, not the account."""
+    client.post("/api/auth/register", json={"email": "owner@d.com", "password": "password1"})
+    client.post("/api/auth/logout")
+    stranger = {"REMOTE_ADDR": "203.0.113.9"}
+    for _ in range(10):
+        bad = client.post("/api/auth/login", json={"email": "owner@d.com", "password": "nope"},
+                          environ_base=stranger)
+        assert bad.status_code == 401
+    # The guesser is stopped, even with the right password...
+    blocked = client.post("/api/auth/login", json={"email": "owner@d.com", "password": "password1"},
+                          environ_base=stranger)
+    assert blocked.status_code == 429
+    # ...while the owner, from their own network, signs in as usual.
+    ok = client.post("/api/auth/login", json={"email": "Owner@D.com", "password": "password1"},
+                     environ_base={"REMOTE_ADDR": "198.51.100.7"})
+    assert ok.status_code == 200
+
+
+def test_an_account_wide_ceiling_still_slows_a_guesser_on_many_addresses(client, monkeypatch):
+    import api.auth_blueprint as bp_mod
+    monkeypatch.setattr(bp_mod, "LOGIN_MAX_PER_ACCOUNT", 15)
+    client.post("/api/auth/register", json={"email": "spread@d.com", "password": "password1"})
+    client.post("/api/auth/logout")
+    for address, tries in (("203.0.113.1", 10), ("203.0.113.2", 5)):
+        for _ in range(tries):
+            assert client.post("/api/auth/login", json={"email": "spread@d.com", "password": "nope"},
+                               environ_base={"REMOTE_ADDR": address}).status_code == 401
+    third = client.post("/api/auth/login", json={"email": "spread@d.com", "password": "password1"},
+                        environ_base={"REMOTE_ADDR": "203.0.113.3"})
+    assert third.status_code == 429
+
+
+def test_the_sign_in_throttle_keeps_only_a_bounded_key_per_address(client):
+    import api.auth_blueprint as bp_mod
+    huge = "x" * 100_000 + "@d.com"
+    assert client.post("/api/auth/login", json={"email": huge, "password": "nope"}).status_code == 401
+    assert max(len(key) for key in bp_mod._login_limiter._buckets) < 400
+
+
 def test_login_is_throttled_per_ip(client, monkeypatch):
     import api.auth_blueprint as bp_mod
     monkeypatch.setattr(bp_mod, "LOGIN_MAX_PER_IP", 3)
