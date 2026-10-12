@@ -143,7 +143,8 @@ describe("a run refused when it is dispatched", () => {
   });
 
   // What is waiting to be deleted, in this browser.
-  const waiting = () => JSON.parse(localStorage.getItem("bodymaps-discard-after-sign-in") ?? "[]") as string[];
+  const waiting = () =>
+    (JSON.parse(localStorage.getItem("bodymaps-discard-after-sign-in") ?? "[]") as { sid: string }[]).map((entry) => entry.sid);
 
   it.each([
     ["the network fails", () => { throw new TypeError("Failed to fetch"); }],

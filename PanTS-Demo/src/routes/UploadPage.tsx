@@ -972,10 +972,15 @@ const UploadPage: React.FC = () => {
   // deletion for a finalize still assembling the file. Keepalive, so it outlives
   // a page that is being left. A request the server did not answer for good (the
   // sign-in had lapsed, the network dropped, it erred or was busy) deleted
-  // nothing, and is kept to be made again at the next sign-in or page load.
+  // nothing, and is kept to be made again at the account's next sign-in or page
+  // load. So is one whose account signed out or changed before it could be sent.
   const discardServerUpload = (sid: string) => {
     const ownerId = user?.id ?? null;
-    if (!ownerId || !isUploadAccountCurrent(ownerId)) return;
+    if (!ownerId) return;
+    if (!isUploadAccountCurrent(ownerId)) {
+      queueDiscardAfterSignIn(sid, ownerId);
+      return;
+    }
     fetch(`${API_BASE}/api/discard-upload/${sid}`, {
       method: "POST",
       credentials: "include",
@@ -984,10 +989,10 @@ const UploadPage: React.FC = () => {
     })
       .then((res) => {
         const again = res.status === 401 || res.status === 408 || res.status === 429 || res.status >= 500;
-        if (again) queueDiscardAfterSignIn(sid);
-        else forgetQueuedDiscard(sid);
+        if (again) queueDiscardAfterSignIn(sid, ownerId);
+        else forgetQueuedDiscard(sid, ownerId);
       })
-      .catch(() => queueDiscardAfterSignIn(sid));
+      .catch(() => queueDiscardAfterSignIn(sid, ownerId));
   };
 
   // Cancel a session's job on the server, for a run cancelled while its run
@@ -1683,12 +1688,12 @@ const UploadPage: React.FC = () => {
   }, [user?.id]);
 
   // Deletions the server has not answered for good wait in this browser (see
-  // discardServerUpload): they are sent again at each sign-in and page load.
-  // Keyed on the user object, which every sign-in replaces, so signing in again
-  // to the same account after a lapsed sign-in sends them too.
+  // discardServerUpload): each is sent again at its account's sign-ins and page
+  // loads. Keyed on the user object, which every sign-in replaces, so signing in
+  // again to the same account after a lapsed sign-in sends them too.
   useEffect(() => {
     if (!user?.id) return;
-    queuedDiscards().forEach((sid) => discardServerUpload(sid));
+    queuedDiscards(user.id).forEach((sid) => discardServerUpload(sid));
     // discardServerUpload reads the account it is keyed on and refs only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
@@ -1809,7 +1814,8 @@ const UploadPage: React.FC = () => {
         }
         const entry = itemUploadRef.current.get(item.id);
         if (entry && !entry.claimed) {
-          entry.cancel();
+          // Cleared before Run, like Remove: nothing will use what it sent.
+          discardPreUpload(entry);
           itemUploadRef.current.delete(item.id);
         }
       }
@@ -1836,6 +1842,8 @@ const UploadPage: React.FC = () => {
       setFocusedRunId(workspaceRunId);
     }
     navigate(location.pathname + location.search + location.hash, { replace: true, state });
+    // discardPreUpload reads the account and refs only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location, navigate, selectedItems]);
   useEffect(() => {
     if (composerFocusRequest) focusComposer();
