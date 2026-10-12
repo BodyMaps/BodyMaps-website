@@ -1,5 +1,3 @@
-from werkzeug.datastructures import MultiDict, FileStorage
-from werkzeug.utils import secure_filename
 from flask import Blueprint, send_file, make_response, request, jsonify
 from services.nifti_processor import NiftiProcessor
 from services.session_manager import generate_uuid
@@ -139,22 +137,6 @@ def organname_to_name(filename):
     """Convert a NIfTI file name to a human-readable organ name."""
     name = filename.replace(".nii.gz", "").replace("_", " ")
     return name.title()
-
-def create_nifti_multi_dict(seg_filenames: list[str], segmentation_path: str):
-    
-    nifti_multi_dict = MultiDict()
-    for filename in seg_filenames:
-        safe_name = secure_filename(filename)
-        if not safe_name or safe_name != filename:
-            continue
-        path = os.path.join(segmentation_path, safe_name)
-        
-        with open(path, 'rb') as file_stream:
-            file_storage = FileStorage(stream=BytesIO(file_stream.read()), filename=safe_name, content_type='application/gzip')
-            nifti_multi_dict.add(key=safe_name, value=file_storage)
-    
-    return nifti_multi_dict
-
 
 def get_mask_data_internal(id, fallback=False):
     """Retrieve or compute organ metadata from NIfTI and mask paths for a session."""

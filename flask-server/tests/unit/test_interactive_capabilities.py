@@ -33,7 +33,9 @@ def test_reports_the_servers_own_licence(monkeypatch):
         "refine": None,
         "undo": None,
     }
-    assert "max-age=3600" in resp.headers["Cache-Control"]
+    # Caching is the app-wide API policy's (private, no-store); the hourly cache is
+    # get_capabilities() on the server side.
+    assert "Cache-Control" not in resp.headers
 
 
 def test_reports_what_the_loaded_checkpoint_can_do(monkeypatch):
@@ -78,9 +80,7 @@ def test_degrades_cleanly_when_the_model_server_never_answered(monkeypatch):
         "refine": None,
         "undo": None,
     }
-    # An outage answer must not be cached like a real one, or the viewer keeps
-    # its fallback tools after the model server is back.
-    assert resp.headers["Cache-Control"] == "no-store"
+    assert "Cache-Control" not in resp.headers
 
 
 def test_get_capabilities_caches_and_survives_outages(monkeypatch):

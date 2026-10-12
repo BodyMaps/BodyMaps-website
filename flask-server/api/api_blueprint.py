@@ -8451,7 +8451,7 @@ def interactive_capabilities():
     def flag(value):
         return value if isinstance(value, bool) else None
 
-    resp = jsonify({
+    return jsonify({
         "available": bool(caps),
         "license": caps.get("license"),
         "model_version": caps.get("inference_session_version"),
@@ -8465,10 +8465,6 @@ def interactive_capabilities():
         if caps.get("supports_initial_label") is not False else False,
         "undo": flag(caps.get("supports_undo")),
     })
-    # An outage answer must not be cached for the hour a real one is, or the
-    # viewer keeps its fallback tools and licence line after the server is back.
-    resp.headers['Cache-Control'] = 'public, max-age=3600' if caps else 'no-store'
-    return resp
 
 
 @api_blueprint.route('/interactive-segment/<case_id>/release', methods=['POST'])
