@@ -1006,10 +1006,6 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	const aiWidthRef = useRef(400);
 	const vpRootRef = useRef<HTMLDivElement>(null);
 	const [organStats, setOrganStats] = useState<OrganStat[] | null>(null);
-	// The same stats for the assistant's metric answers, tagged with their case
-	// so a question never gets another case's numbers. A ref keeps the
-	// assistant's actions from being rebuilt whenever the stats arrive.
-	const organStatsRef = useRef<{ caseId: string; stats: OrganStat[] } | null>(null);
 	const [statsLoading, setStatsLoading] = useState(false);
 	const [statsError, setStatsError] = useState(false);
 	// The request itself failed (offline, a server error), as opposed to the server answering
@@ -4332,7 +4328,6 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 				return;
 			}
 			const stats = (data.organ_metrics ?? []) as OrganStat[];
-			organStatsRef.current = { caseId: String(caseId), stats };
 			setOrganStats(stats);
 		} catch (e) {
 			console.error(e);
@@ -4583,10 +4578,6 @@ const aiActions = useMemo(() => buildViewerActions({
 	handleWindowChange,
 	setViewModeFn: setViewMode,
 	setActiveMeasureToolFn: setActiveMeasureTool,
-	caseId: String(caseId),
-	apiBase: API_BASE,
-	getOrganStats: () =>
-		organStatsRef.current?.caseId === String(caseId) ? organStatsRef.current.stats : null,
 	setZoomLevel,
 }), [checkBoxData, caseId, handleWindowChange]);
 

@@ -111,11 +111,6 @@ export interface ViewerActions {
   setViewMode: (view: "mpr" | "axial" | "sagittal" | "coronal" | "3d") => void;
   activateMeasurementTool: (tool: "distance" | "probe" | "roi") => void;
   clearMeasurements: () => void;
-  getOrganMetric: (organ: string, metric: "volume_cm3" | "mean_hu" | "all") => Promise<string>;
-  listStructures: () => Promise<string>;
-  getStructureCount: () => Promise<string>;
-  getLargestStructure: () => Promise<string>;
-  getSmallestStructure: () => Promise<string>;
 }
 
 export interface ViewportCapture {
