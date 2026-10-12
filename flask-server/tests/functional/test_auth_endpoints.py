@@ -39,6 +39,10 @@ def client(tmp_path, monkeypatch):
     app = Flask(__name__)
     app.register_blueprint(bp_mod.auth_blueprint, url_prefix="/api")
     with app.test_client() as c:
+        # A documentation address rather than the client's default 127.0.0.1:
+        # the sign-in and sign-up ceilings skip loopback callers, who cannot
+        # be told apart behind a proxy.
+        c.environ_base["REMOTE_ADDR"] = "192.0.2.10"
         yield c
     engine.reset_engine_for_tests()
 
@@ -313,6 +317,77 @@ def test_register_is_throttled_per_ip(client, monkeypatch):
     assert codes == [201, 201, 429]
     assert sent == ["new0@d.com", "new1@d.com"]
     assert auth_store.authenticate("new2@d.com", "password1") is None
+
+
+@pytest.mark.parametrize("address", ["127.0.0.1", "::1", "::ffff:127.0.0.1", "0.0.0.0", "", "not-an-address"])
+def test_a_caller_on_a_loopback_or_unreadable_address_has_no_address_for_the_throttle(client, address):
+    import api.auth_blueprint as bp_mod
+    from flask import Flask
+    with Flask(__name__).test_request_context(environ_base={"REMOTE_ADDR": address}):
+        assert bp_mod._client_address() is None
+
+
+@pytest.mark.parametrize("address", ["203.0.113.5", "10.1.2.3", "2001:db8::7"])
+def test_a_caller_on_a_real_address_keeps_it_for_the_throttle(client, address):
+    import api.auth_blueprint as bp_mod
+    from flask import Flask
+    with Flask(__name__).test_request_context(environ_base={"REMOTE_ADDR": address}):
+        assert bp_mod._client_address() == address
+
+
+def test_failed_sign_ins_through_a_proxy_that_hides_addresses_never_lock_the_site_out(client, monkeypatch):
+    """Behind a proxy that does not pass the visitor's address on, every request
+    comes from loopback. The per-address ceilings would then be one ceiling for
+    the whole site, so they do not apply to such a request."""
+    import api.auth_blueprint as bp_mod
+    monkeypatch.setattr(bp_mod, "LOGIN_MAX_PER_IP", 3)
+    proxy = {"REMOTE_ADDR": "127.0.0.1"}
+    client.post("/api/auth/register", json={"email": "owner@d.com", "password": "password1"},
+                environ_base=proxy)
+    client.post("/api/auth/logout")
+    for index in range(5):
+        assert client.post("/api/auth/login", json={"email": f"spray{index}@d.com", "password": "nope"},
+                           environ_base=proxy).status_code == 401
+    for _ in range(12):
+        assert client.post("/api/auth/login", json={"email": "owner@d.com", "password": "nope"},
+                           environ_base=proxy).status_code == 401
+    ok = client.post("/api/auth/login", json={"email": "owner@d.com", "password": "password1"},
+                     environ_base=proxy)
+    assert ok.status_code == 200
+    assert not any(key.startswith(("ip:", "account-ip:")) for key in bp_mod._login_limiter._buckets)
+    assert "owner@d.com" not in bp_mod._known_addresses
+
+
+def test_the_account_wide_ceiling_still_applies_when_callers_cannot_be_told_apart(client, monkeypatch):
+    """Without an address there is no network the owner is known on, so the
+    account-wide ceiling holds for every loopback caller, even after a sign-in."""
+    import api.auth_blueprint as bp_mod
+    monkeypatch.setattr(bp_mod, "LOGIN_MAX_PER_ACCOUNT", 15)
+    proxy = {"REMOTE_ADDR": "127.0.0.1"}
+    client.post("/api/auth/register", json={"email": "owner@d.com", "password": "password1"},
+                environ_base=proxy)
+    client.post("/api/auth/logout")
+    assert client.post("/api/auth/login", json={"email": "owner@d.com", "password": "password1"},
+                       environ_base=proxy).status_code == 200
+    client.post("/api/auth/logout")
+    for _ in range(15):
+        assert client.post("/api/auth/login", json={"email": "owner@d.com", "password": "nope"},
+                           environ_base=proxy).status_code == 401
+    blocked = client.post("/api/auth/login", json={"email": "owner@d.com", "password": "password1"},
+                          environ_base=proxy)
+    assert blocked.status_code == 429
+
+
+def test_sign_ups_through_a_proxy_that_hides_addresses_are_not_capped_site_wide(client, monkeypatch):
+    import api.auth_blueprint as bp_mod
+    monkeypatch.setattr(bp_mod, "REGISTER_MAX_PER_IP", 2)
+    monkeypatch.setattr(bp_mod.mailer, "send", lambda *_args: True)
+    codes = [
+        client.post("/api/auth/register", json={"email": f"class{i}@d.com", "password": "password1"},
+                    environ_base={"REMOTE_ADDR": "127.0.0.1"}).status_code
+        for i in range(4)
+    ]
+    assert codes == [201, 201, 201, 201]
 
 
 def test_the_signup_name_is_escaped_in_the_html_email(client, monkeypatch):

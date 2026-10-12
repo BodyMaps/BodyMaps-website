@@ -25,6 +25,7 @@ import base64
 import hashlib
 import hmac
 import html as _html_mod
+import ipaddress
 import json
 import os
 import sys
@@ -101,6 +102,32 @@ _known_addresses: OrderedDict = OrderedDict()  # account -> OrderedDict(address 
 _known_lock = threading.Lock()
 
 
+def _client_address() -> str | None:
+    """The caller's address for the sign-in and sign-up ceilings, or None when
+    every caller would share it.
+
+    Behind a proxy that does not pass the visitor's address on, every request
+    arrives from the proxy's own loopback address: TRUST_PROXY unset, or a
+    TRUST_PROXY_HOPS larger than the X-Forwarded-For entries nginx sends (the
+    nginx config in deploy/ replaces that header with a single entry). A
+    per-address ceiling keyed on that address is one ceiling for the whole
+    site, and sixty failed sign-ins from anyone would stop everyone signing in.
+    Those ceilings are skipped for such a request; the account-wide one still
+    applies, with no address counted as one the owner signed in from.
+    """
+    raw = request.remote_addr or ""
+    try:
+        address = ipaddress.ip_address(raw)
+    except ValueError:
+        return None
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        address = mapped
+    if address.is_loopback or address.is_unspecified:
+        return None
+    return raw
+
+
 def _signed_in_from(account: str, ip: str) -> bool:
     with _known_lock:
         return ip in _known_addresses.get(account, ())
@@ -168,7 +195,8 @@ def _logged_in_response(user: dict, status: int = 200, *, remember_me: bool = Fa
 
 @auth_blueprint.route("/auth/register", methods=["POST"])
 def register():
-    if _register_limiter.over(request.remote_addr or "unknown", REGISTER_MAX_PER_IP):
+    address = _client_address()
+    if address is not None and _register_limiter.over(address, REGISTER_MAX_PER_IP):
         return jsonify({"error": "Too many sign-ups from this network. Try again later."}), 429
     data = _json()
     remember_me = data.get("remember_me", False)
@@ -201,24 +229,27 @@ def login():
     if not isinstance(remember_me, bool):
         return jsonify({"error": "Keep me signed in must be true or false"}), 400
     email = data.get("email") or ""
-    ip = request.remote_addr or "unknown"
+    ip = _client_address()
     account = str(email).strip().lower()[:_LOGIN_KEY_EMAIL_CHARS]
-    ip_key = "ip:" + ip
-    account_ip_key = f"account-ip:{ip}|{account}"
+    # Without an address (see _client_address) only the account-wide key is used.
+    ip_key = "ip:" + ip if ip is not None else None
+    account_ip_key = f"account-ip:{ip}|{account}" if ip is not None else None
     account_key = "account:" + account
-    if (_login_limiter.at_limit(ip_key, LOGIN_MAX_PER_IP)
-            or _login_limiter.at_limit(account_ip_key, LOGIN_MAX_PER_ACCOUNT_AND_IP)
+    if ((ip_key is not None and _login_limiter.at_limit(ip_key, LOGIN_MAX_PER_IP))
+            or (account_ip_key is not None
+                and _login_limiter.at_limit(account_ip_key, LOGIN_MAX_PER_ACCOUNT_AND_IP))
             or (_login_limiter.at_limit(account_key, LOGIN_MAX_PER_ACCOUNT)
-                and not _signed_in_from(account, ip))):
+                and not (ip is not None and _signed_in_from(account, ip)))):
         return jsonify({"error": "Too many sign-in attempts. Try again in a few minutes."}), 429
     user = auth_store.authenticate(email, data.get("password") or "")
     if user is None:
-        _login_limiter.hit(ip_key)
-        _login_limiter.hit(account_ip_key)
-        _login_limiter.hit(account_key)
+        for key in (ip_key, account_ip_key, account_key):
+            if key is not None:
+                _login_limiter.hit(key)
         return jsonify({"error": "Invalid email or password"}), 401
-    _login_limiter.clear(account_ip_key)
-    _remember_sign_in(account, ip)
+    if ip is not None:
+        _login_limiter.clear(account_ip_key)
+        _remember_sign_in(account, ip)
     return _logged_in_response(user, remember_me=remember_me)
 
 

@@ -350,6 +350,21 @@ address (the whole site shares one 120/min analytics bucket) and analytics
 geolocates every visitor to the server. The backend prints a `[boot]` warning
 to the gunicorn log when it starts without it.
 
+The hop count only helps if the proxies pass the visitor's address along. The
+nginx config in `flask-server/deploy/` sets `X-Forwarded-For` to
+`$remote_addr`, which drops what the campus edge proxy sent: with
+`TRUST_PROXY_HOPS=2` every request then comes from `127.0.0.1`, and with 1
+from the edge proxy's address. For the visitor's address to arrive, nginx has
+to append to the header instead (`proxy_set_header X-Forwarded-For
+$proxy_add_x_forwarded_for;`) and the hop count has to match the entries on a
+request from outside the network, as the comment above `ProxyFix` in `app.py`
+describes. When every request comes from `127.0.0.1`, the sign-in and sign-up
+limits skip their per-address ceilings and only the per-account sign-in
+ceiling applies. When every request comes from the edge proxy's address they
+cannot tell that apart from one busy network, so 60 failed sign-ins from
+anyone in 15 minutes would stop all sign-ins; check the address before
+deploying.
+
 #### 6. Verify the backend is running
 Give it a few seconds to load, then check that health is public and dataset APIs refuse signed-out requests.
 ```
