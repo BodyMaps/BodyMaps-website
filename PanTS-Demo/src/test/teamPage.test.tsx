@@ -5,7 +5,7 @@ import { AuthProvider } from "../contexts/authContext";
 import TeamPage from "../routes/TeamPage";
 
 describe("team page", () => {
-  it("links the three supplied profiles and leaves the other cards unlinked", () => {
+  it("links the four supplied profiles and leaves the other cards unlinked", () => {
     render(
       <AuthProvider>
         <MemoryRouter>
@@ -23,7 +23,11 @@ describe("team page", () => {
     expect(ahmad).toHaveAttribute("href", "https://linkedin.com/in/ahmad-durre-rehman-121577382");
     expect(ahmad).toHaveAttribute("target", "_blank");
     expect(ahmad).toHaveAttribute("rel", "noopener noreferrer");
-    expect(screen.getAllByRole("link", { name: /on LinkedIn$/ })).toHaveLength(3);
+    const poon = screen.getByRole("link", { name: "Alexander Poon on LinkedIn" });
+    expect(poon).toHaveAttribute("href", "https://www.linkedin.com/in/alexander-p-88640b281");
+    expect(poon).toHaveAttribute("target", "_blank");
+    expect(poon).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getAllByRole("link", { name: /on LinkedIn$/ })).toHaveLength(4);
     expect(screen.getByText("Alan L. Yuille, PhD")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Yuille/ })).not.toBeInTheDocument();
   });
@@ -61,9 +65,12 @@ describe("team page", () => {
     added.forEach((name, i) => {
       expect(cards[existing.length + i]).toContain(name);
       expect(cards[existing.length + i]).toContain("Core Contributor");
-      // Keep the placeholder silhouettes; only Ahmad supplied a profile link.
-      expect(screen.queryByAltText(name)).not.toBeInTheDocument();
-      if (name !== "Ahmad Durre Rehman") {
+      if (name === "Alexander Poon") {
+        expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/alexander-poon.webp");
+      } else {
+        expect(screen.queryByAltText(name)).not.toBeInTheDocument();
+      }
+      if (name !== "Ahmad Durre Rehman" && name !== "Alexander Poon") {
         expect(screen.queryByRole("link", { name: new RegExp(name) })).not.toBeInTheDocument();
       }
     });
