@@ -48,7 +48,7 @@ const MEMBERS: Member[] = [
     photo: "/headshots/lucy-wu.webp",
   },
   { name: "Aditya Sanjeev", role: "Core Contributor" },
-    {
+  {
     name: "Alexander Poon",
     role: "Core Contributor",
     photo: "/headshots/alexander-poon.webp",
