@@ -143,7 +143,8 @@ def inflate_seed_labelmap(seg_b64, voxels: int, grid: str, hint: str) -> bytes:
 
 
 def segment_from_prompt(
-    ct: np.ndarray, affine: np.ndarray, prompt: dict, case_key: str | None = None
+    ct: np.ndarray, affine: np.ndarray, prompt: dict, case_key: str | None = None,
+    owner=None,
 ) -> tuple[np.ndarray, list | None]:
     """Model-agnostic entry point for the click-to-segment tool.
 
@@ -154,7 +155,9 @@ def segment_from_prompt(
     server), meaning the caller must treat the whole volume as changed.
 
     `case_key` (e.g. "17:full") lets the nnInteractive path cache the
-    uploaded volume across requests for the same case+resolution.
+    uploaded volume across requests for the same case+resolution. `owner` is
+    the signed-in account's id; its prompt sessions are its own (see
+    nninteractive_predictor).
 
     `prompt["session_token"]` (opaque client string) keeps the nnInteractive
     prompt session open across requests: consecutive prompts carrying the
@@ -276,6 +279,7 @@ def segment_from_prompt(
                 initial_seg=initial_seg,
                 refine=refine,
                 expect_session=bool(prompt.get("expect_session")),
+                owner=owner,
             )
             if session_token is not None or model_only or mask.sum() > 0:
                 # In-session responses are authoritative even when empty (a
@@ -289,7 +293,7 @@ def segment_from_prompt(
             if (
                 isinstance(e, (_predictor.PromptCapacityError, _predictor.PromptSessionLostError))
                 or model_only
-                or _predictor.session_is_active(session_token)
+                or _predictor.session_is_active(session_token, owner)
             ):
                 # No fallback exists for model-only prompts, a token that
                 # already refined an object across earlier prompts must not

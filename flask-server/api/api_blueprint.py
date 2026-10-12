@@ -8247,6 +8247,14 @@ def _load_ct_cached(ct_path, cache_key):
 # nearest for labels), so the result lands on the served grid by construction.
 # --------------------------------------------------------------------------- #
 
+def _prompt_owner():
+    """The account a prompt session belongs to. Every interactive route sits
+    behind the sign-in policy, so this is the signed-in user's id; a session
+    started by one account can't be refined, undone or released by another."""
+    user = current_user()
+    return user["id"] if user else None
+
+
 def _lowres_grid(low_path):
     """Shape, affine and header of the low-res volume the viewer loaded."""
     img = nib.load(low_path)
@@ -8361,14 +8369,15 @@ def interactive_segment(case_id):
                     min(f - 1, max(0, int(round(v * f / l))))
                     for v, f, l in zip(body["point_ijk"], ct.shape, low_shape)
                 ]
-        mask, changed_bbox = segment_from_prompt(ct, ct_obj.affine, body, case_key=case_key)
+        mask, changed_bbox = segment_from_prompt(
+            ct, ct_obj.affine, body, case_key=case_key, owner=_prompt_owner())
         if low_grid is not None:
             low_shape, low_affine, low_header = low_grid
             mask = _downsample_mask(mask, low_shape)
             if changed_bbox is not None:
                 changed_bbox = _scale_bbox_down(changed_bbox, ct.shape, low_shape)
         from services.nninteractive_predictor import session_is_active
-        session_active = session_is_active(body.get("session_token"))
+        session_active = session_is_active(body.get("session_token"), _prompt_owner())
         include = body.get("include")
         include = True if include is None else bool(include)
         if int(mask.sum()) == 0 and body.get("refine"):
@@ -8482,7 +8491,7 @@ def interactive_segment_release(case_id):
     except ImportError:
         return jsonify({"error": "The interactive model server integration is not installed."}), 503
     try:
-        released = release_session(body.get("session_token"))
+        released = release_session(body.get("session_token"), _prompt_owner())
     except Exception as error:
         print("[interactive_segment_release error]", type(error).__name__, error)
         return jsonify({"released": False})
@@ -8511,7 +8520,7 @@ def interactive_segment_undo(case_id):
             from services.nninteractive_predictor import undo_last
         except ImportError:
             return jsonify({"error": "The interactive model server integration is not installed."}), 503
-        remaining = undo_last(body.get("session_token"))
+        remaining = undo_last(body.get("session_token"), _prompt_owner())
         return jsonify({"undone": True, "remaining": remaining})
     except ValueError as ve:
         return jsonify({"error": str(ve)}), 409

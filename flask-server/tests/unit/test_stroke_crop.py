@@ -130,7 +130,7 @@ def test_strokes_reach_the_model_with_their_box(monkeypatch):
     try:
         predictor.predict(ct, "1:full", scribble_ijk=STROKES["axial"], session_token="s")
         predictor.predict(ct, "1:full", lasso_ijk=STROKES["sagittal"], session_token="s", include=False)
-        remote = predictor._states["s"].session
+        remote = predictor._states[(None, "s")].session
         (kind1, shape1, box1, inc1), (kind2, shape2, box2, inc2) = remote.calls
         assert (kind1, inc1) == ("scribble", True) and (kind2, inc2) == ("lasso", False)
         assert list(shape1) == [hi - lo for lo, hi in box1] and box1[2] == [12, 13]

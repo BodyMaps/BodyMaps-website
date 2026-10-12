@@ -106,7 +106,7 @@ def test_an_empty_class_is_refused_before_claiming_a_lease(seed):
     with pytest.raises(ValueError, match="no voxels to refine"):
         predictor.predict(CT, "1:full", session_token="r", initial_seg=seed, refine=True)
     assert RefineRemote.instances == []
-    assert "r" not in predictor._states
+    assert (None, "r") not in predictor._states
 
 
 def test_a_checkpoint_without_zero_shot_refinement_is_refused():
@@ -118,7 +118,7 @@ def test_a_checkpoint_without_zero_shot_refinement_is_refused():
 
 def test_a_replay_after_expiry_restores_the_refined_object_without_rerunning_it():
     predictor.predict(CT, "1:full", session_token="r", initial_seg=seed_mask(), refine=True)
-    state = predictor._states["r"]
+    state = predictor._states[(None, "r")]
     refined = state.target_buffer.copy()
 
     predictor._rebuild_and_replay(state, CT, "1:full")
@@ -179,7 +179,7 @@ def test_the_endpoint_answers_a_model_outage_with_503_and_a_plain_message(monkey
     monkeypatch.setattr(api_routes, "_ct_cache_obj", None)
     monkeypatch.setattr(api_routes, "_ct_cache_array", None)
 
-    def down(ct, affine, prompt, case_key=None):
+    def down(ct, affine, prompt, case_key=None, owner=None):
         raise predictor.PromptModelUnavailableError(predictor.PromptModelUnavailableError.MESSAGE)
 
     monkeypatch.setattr(analysis, "segment_from_prompt", down)
@@ -201,8 +201,8 @@ def test_an_empty_redraw_is_refused_instead_of_erasing_the_class(monkeypatch, tm
     monkeypatch.setattr(api_routes, "_ct_cache_obj", None)
     monkeypatch.setattr(api_routes, "_ct_cache_array", None)
     monkeypatch.setattr(analysis, "segment_from_prompt",
-                        lambda ct, affine, prompt, case_key=None: (np.zeros(ct.shape, dtype=np.uint8), None))
-    monkeypatch.setattr(predictor, "session_is_active", lambda token: True)
+                        lambda ct, affine, prompt, case_key=None, owner=None: (np.zeros(ct.shape, dtype=np.uint8), None))
+    monkeypatch.setattr(predictor, "session_is_active", lambda token, owner=None: True)
 
     app = Flask(__name__)
     body = {"refine": True, "initial_seg_gz_b64": _b64(seed_mask()), "session_token": "r", "res": "full"}

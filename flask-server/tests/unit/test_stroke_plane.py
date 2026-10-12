@@ -99,7 +99,7 @@ def test_a_straight_axial_scribble_reaches_the_model_on_its_slice(remote, points
          "plane": "axial", "session_token": "s"},
         case_key="1:full",
     )
-    (kind, bbox), = predictor._states["s"].session.calls
+    (kind, bbox), = predictor._states[(None, "s")].session.calls
     assert kind == "scribble"
     assert bbox[2] == [12, 13]
 
@@ -112,7 +112,7 @@ def test_the_plane_is_kept_in_the_history_so_a_replay_draws_the_same_stroke(remo
          "plane": "axial", "session_token": "s"},
         case_key="1:full",
     )
-    state = predictor._states["s"]
+    state = predictor._states[(None, "s")]
     assert state.history[-1]["axis"] == 2
     # The model server forgot the session: rebuild and replay from history.
     predictor._rebuild_and_replay(state, ct, "1:full")

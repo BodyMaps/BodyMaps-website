@@ -57,14 +57,15 @@ def _write_grids(tmp_path, monkeypatch, with_lowres=True):
     monkeypatch.setattr(api_routes, "_ct_cache_key", None)
     monkeypatch.setattr(api_routes, "_ct_cache_obj", None)
     monkeypatch.setattr(api_routes, "_ct_cache_array", None)
-    monkeypatch.setattr(nninteractive_predictor, "session_is_active", lambda t: False)
+    monkeypatch.setattr(nninteractive_predictor, "session_is_active", lambda t, owner=None: False)
 
 
 def _stub_model(monkeypatch, mask, bbox=None):
     """Replace segment_from_prompt, recording exactly what inference saw."""
     seen = {}
 
-    def fake(ct, affine, prompt, case_key=None):
+    def fake(ct, affine, prompt, case_key=None, owner=None):
+        seen["owner"] = owner
         seen["shape"] = tuple(ct.shape)
         seen["affine"] = affine.copy()
         seen["prompt"] = dict(prompt)
@@ -190,3 +191,17 @@ def test_a_lost_prompt_session_is_a_409_the_client_can_recognise(tmp_path, monke
 
     assert code == 409
     assert body.get_json()["code"] == "session_lost"
+
+
+def test_the_prompt_session_belongs_to_the_signed_in_account(tmp_path, monkeypatch):
+    _write_grids(tmp_path, monkeypatch)
+    seen = _stub_model(monkeypatch, np.ones(FULL_SHAPE, np.uint8))
+    monkeypatch.setattr(api_routes, "current_user", lambda: {"id": "account-7"})
+    asked = []
+    monkeypatch.setattr(nninteractive_predictor, "session_is_active",
+                        lambda token, owner=None: asked.append((token, owner)) or False)
+
+    _post({"point_lps": [0.0, 0.0, 0.0], "res": "low", "session_token": "t"})
+
+    assert seen["owner"] == "account-7"
+    assert asked == [("t", "account-7")]

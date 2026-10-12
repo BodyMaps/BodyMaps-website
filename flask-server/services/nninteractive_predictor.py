@@ -21,15 +21,21 @@ smallest extent -- see _corners_to_axis_pairs(). This matches a box drawn
 on one 2D viewport pane, but has NOT yet been verified against a real
 frontend box-drag; verify this once wired up.
 
-Since api_blueprint.py's `_ANALYSIS_SLOTS` semaphore already serializes all
-calls into `interactive_segment()`, no extra locking is needed here.
 Gunicorn is `--workers 1 --threads 8` (single process), so this module-level
-state is correctly shared across every request thread.
+state is shared across every request thread. api_blueprint.py's
+`_ANALYSIS_SLOTS` lets two prompts run at once and `/release` takes no slot
+at all, so the registry of states is guarded by `_lock`. The lock is held
+only for bookkeeping, never across a call to the model server: a running
+prompt marks its state busy instead, which keeps the reaper and the slot
+counts away from it, and a state released while busy is closed by the
+request that was using it when it finishes.
 
-Prompt sessions are KEYED BY TOKEN: each `session_token` owns its own model
-server lease (volume, accumulated interactions, target buffer), so two
-people prompting at once refine their own objects instead of resetting each
-other's context. While a client keeps sending the same token, interactions
+Prompt sessions are KEYED BY ACCOUNT AND TOKEN: each `session_token` of a
+signed-in account owns its own model server lease (volume, accumulated
+interactions, target buffer), so two people prompting at once refine their
+own objects instead of resetting each other's context, and one account can
+neither reach nor release another's session. While a client keeps sending
+the same token, interactions
 ACCUMULATE on its session (no reset between requests) and each new click
 REFINES the same object — the model sees every prior prompt as context,
 exactly how the official Slicer plugin drives it. Tokenless requests share
@@ -46,6 +52,14 @@ NNINTERACTIVE_SESSION_IDLE_S (default 600 s, mirroring the server's own
 policy). A new token arriving with every slot busy raises
 PromptCapacityError rather than silently destroying someone's live session
 — the third user waits a moment instead of the first two losing context.
+One account holds at most NNINTERACTIVE_MAX_SESSIONS_PER_USER states
+(default 2: the prompt tool's session plus a Refine running beside it); a
+new token past that gives back the account's own least recently used idle
+state. Only an account's first lease is its own, though: when the pool is
+full and an account with no lease arrives, it takes back the least recently
+used idle lease of an account holding more than one. The account that loses
+it sees "session lost" on its next prompt, which the viewer answers by
+starting a fresh session seeded from its labelmap.
 
 Apple Silicon note: launch the model server with PYTORCH_ENABLE_MPS_FALLBACK=1.
 nnInteractive's autozoom path calls interpolate(mode="area") ->
@@ -77,6 +91,7 @@ Configuration (env vars, both optional):
 from __future__ import annotations
 
 import os
+import threading
 import time
 
 import numpy as np
@@ -91,6 +106,9 @@ MAX_SESSIONS = max(1, int(os.environ.get("NNINTERACTIVE_MAX_SESSIONS", "2")))
 # default: a state nobody has prompted for this long gives its lease back so
 # a new user is never refused because of an abandoned tab.
 SESSION_IDLE_S = float(os.environ.get("NNINTERACTIVE_SESSION_IDLE_S", "600"))
+# States one account may hold at once. Two covers the viewer's normal use: the
+# prompt tool's session and a Refine, which runs in a session of its own.
+MAX_SESSIONS_PER_USER = max(1, int(os.environ.get("NNINTERACTIVE_MAX_SESSIONS_PER_USER", "2")))
 
 
 class PromptCapacityError(RuntimeError):
@@ -122,10 +140,11 @@ class _PromptState:
     it uploaded, the buffer predictions land in, and the interaction history
     used to replay after a server-side expiry."""
 
-    __slots__ = ("token", "session", "case_key", "ct_shape", "target_buffer",
-                 "history", "last_used")
+    __slots__ = ("owner", "token", "session", "case_key", "ct_shape", "target_buffer",
+                 "history", "last_used", "busy")
 
-    def __init__(self, token: str | None):
+    def __init__(self, owner, token: str | None):
+        self.owner = owner
         self.token = token
         self.session = None
         self.case_key: str | None = None
@@ -133,10 +152,22 @@ class _PromptState:
         self.target_buffer: np.ndarray | None = None
         self.history: list[dict] = []
         self.last_used = time.monotonic()
+        # Requests using this state right now. A busy state is never reaped or
+        # given back to make room, and counts as holding a slot while it claims
+        # its lease.
+        self.busy = 0
+
+    @property
+    def key(self) -> tuple:
+        return (self.owner, self.token)
 
 
-# token -> state; the anonymous (tokenless, one-shot) slot lives under None.
-_states: dict[str | None, _PromptState] = {}
+# (account id, token) -> state; an account's anonymous (tokenless, one-shot)
+# slot lives under token None.
+_states: dict[tuple, _PromptState] = {}
+# Guards _states and every state's busy count. Never held across a call to the
+# model server.
+_lock = threading.RLock()
 
 
 def _close_state(state: _PromptState) -> None:
@@ -148,6 +179,11 @@ def _close_state(state: _PromptState) -> None:
         state.session = None
 
 
+def _close_states(states) -> None:
+    for state in states:
+        _close_state(state)
+
+
 def _release_on_exit() -> None:
     """Give every lease back when this process dies. The model server caps
     concurrent sessions (3 by default) and reaps idle ones only after
@@ -155,9 +191,10 @@ def _release_on_exit() -> None:
     which the werkzeug dev reloader does on EVERY watched-file edit —
     strands slots for hours. Three hot-restarts in a dev session were
     enough to hit 'server is at capacity' on every request after."""
-    for state in list(_states.values()):
-        _close_state(state)
-    _states.clear()
+    with _lock:
+        states = list(_states.values())
+        _states.clear()
+    _close_states(states)
 
 
 import atexit
@@ -229,33 +266,104 @@ def _new_remote_session():
     return session
 
 
-def _reap_idle(now: float) -> None:
+def _reap_idle(now: float) -> list[_PromptState]:
+    """Take states idle past SESSION_IDLE_S out of the registry and return them
+    for the caller to close once it has let go of _lock. Call with _lock held."""
+    reaped = []
     for key, state in list(_states.items()):
-        if now - state.last_used > SESSION_IDLE_S:
-            _close_state(state)
-            _states.pop(key, None)
+        if state.busy == 0 and now - state.last_used > SESSION_IDLE_S:
+            reaped.append(_states.pop(key))
+    return reaped
 
 
-def _acquire_state(token: str | None) -> _PromptState:
-    """The state for `token`, creating one if a slot is free. Never evicts a
-    live session for a new token — see PromptCapacityError.
+def _holds_slot(state: _PromptState) -> bool:
+    # A busy state without a session is claiming one right now.
+    return state.session is not None or state.busy > 0
 
-    Slots count leases actually held. A state parked by a refused rebuild
-    (its lease expired and the model server was full when it tried to claim
-    another) keeps its history for that user's retry but holds no lease, so
-    it doesn't lock anyone else out; the idle reaper still collects it."""
+
+def _least_recent_idle(states) -> _PromptState | None:
+    idle = [s for s in states if s.busy == 0]
+    return min(idle, key=lambda s: s.last_used) if idle else None
+
+
+def _make_room(owner, state: _PromptState | None) -> _PromptState | None:
+    """Check there is a model-server slot for `state` (None: a new one) of
+    `owner`. Returns a state to give back to make room, or None when there is
+    room already; raises PromptCapacityError when neither holds. Call with
+    _lock held.
+
+    Slots count leases held or being claimed. A state parked by a refused
+    rebuild (its lease expired and the model server was full when it tried to
+    claim another) keeps its history for that user's retry but holds no lease,
+    so it doesn't lock anyone else out; the idle reaper still collects it.
+
+    Never evicts a live session for a new token, except a lease an account
+    holds beyond its first: an account with no lease may take back the least
+    recently used idle one of those, so one account can't keep everyone else
+    out by opening sessions under several tokens."""
+    held = [s for s in _states.values() if s is not state and _holds_slot(s)]
+    if len(held) < MAX_SESSIONS:
+        return None
+    if not any(s.owner == owner for s in held):
+        per_owner: dict = {}
+        for s in held:
+            per_owner[s.owner] = per_owner.get(s.owner, 0) + 1
+        borrowed = _least_recent_idle(s for s in held if per_owner[s.owner] > 1)
+        if borrowed is not None:
+            return borrowed
+    raise PromptCapacityError(
+        f"All {MAX_SESSIONS} interactive annotation slots are in use "
+        "right now. Try again in a moment.")
+
+
+def _acquire_state(owner, token: str | None) -> _PromptState:
+    """The state for `owner`'s `token`, creating one if a slot is free, and
+    marked busy: the caller must hand it to _finish when it is done.
+
+    A new token past the account's MAX_SESSIONS_PER_USER gives back that
+    account's own least recently used idle state (the viewer releases a
+    finished class's session itself, so that is one whose release never
+    arrived); see _make_room for the shared pool."""
     now = time.monotonic()
-    _reap_idle(now)
-    state = _states.get(token)
-    if state is None:
-        if sum(1 for s in _states.values() if s.session is not None) >= MAX_SESSIONS:
-            raise PromptCapacityError(
-                f"All {MAX_SESSIONS} interactive annotation slots are in use "
-                "right now. Try again in a moment.")
-        state = _PromptState(token)
-        _states[token] = state
-    state.last_used = now
+    dropped: list[_PromptState] = []
+    try:
+        with _lock:
+            dropped.extend(_reap_idle(now))
+            state = _states.get((owner, token))
+            if state is None:
+                mine = [s for s in _states.values() if s.owner == owner]
+                if len(mine) >= MAX_SESSIONS_PER_USER:
+                    oldest = _least_recent_idle(mine)
+                    if oldest is None:
+                        raise PromptCapacityError(
+                            "Your other interactive annotations are still running. "
+                            "Try again in a moment.")
+                    dropped.append(_states.pop(oldest.key))
+            if state is None or (state.session is None and state.busy == 0):
+                reclaimed = _make_room(owner, state)
+                if reclaimed is not None:
+                    dropped.append(_states.pop(reclaimed.key))
+            if state is None:
+                state = _PromptState(owner, token)
+                _states[state.key] = state
+            state.busy += 1
+            state.last_used = now
+    finally:
+        # Closing talks to the model server, so it happens outside the lock,
+        # and also when this request is refused.
+        _close_states(dropped)
     return state
+
+
+def _finish(state: _PromptState) -> None:
+    """A request is done with `state`. If the state left the registry while it
+    was busy (released, or dropped after a failure), its lease, possibly one
+    claimed after the release arrived, is given back now."""
+    with _lock:
+        state.busy -= 1
+        orphaned = state.busy == 0 and _states.get(state.key) is not state
+    if orphaned:
+        _close_state(state)
 
 
 def _ensure_volume_loaded(state: _PromptState, ct: np.ndarray, case_key: str) -> None:
@@ -372,8 +480,9 @@ def _normalize_token(session_token) -> str | None:
     return str(session_token)[:64]
 
 
-def release_session(session_token) -> bool:
-    """Drop the state for `session_token` and give its model-server lease back.
+def release_session(session_token, owner=None) -> bool:
+    """Drop `owner`'s state for `session_token` and give its model-server lease
+    back (at once, or when the request still using it finishes).
 
     Sessions are per annotation class, and a class is finished the moment the
     user switches to the next one. Without this the finished class keeps its
@@ -382,20 +491,23 @@ def release_session(session_token) -> bool:
     with PromptCapacityError while three abandoned sessions sit idle. Returns
     True when a state was actually released.
 
-    The anonymous slot (token None) is deliberately unreachable here: it is
-    shared and resets per request, so nothing owns it to release.
+    The anonymous slot (token None) is deliberately unreachable here: it
+    resets per request, so there is nothing in it to release.
     """
     token = _normalize_token(session_token)
     if token is None:
         return False
-    state = _states.pop(token, None)
-    if state is None:
-        return False
-    _close_state(state)
+    with _lock:
+        state = _states.pop((owner, token), None)
+        if state is None:
+            return False
+        close_now = state.busy == 0
+    if close_now:
+        _close_state(state)
     return True
 
 
-def session_is_active(session_token) -> bool:
+def session_is_active(session_token, owner=None) -> bool:
     """True when `session_token` names a live accumulated prompt session —
     i.e. the mask the caller just received is session-scoped (refines one
     object across requests), not a one-shot proposal. False after any
@@ -404,8 +516,9 @@ def session_is_active(session_token) -> bool:
     token = _normalize_token(session_token)
     if token is None:
         return False
-    state = _states.get(token)
-    return state is not None and len(state.history) > 0
+    with _lock:
+        state = _states.get((owner, token))
+        return state is not None and len(state.history) > 0
 
 
 def _add_interaction(session, entry: dict, ct_shape: tuple, run_prediction: bool = True) -> None:
@@ -501,7 +614,7 @@ def _rebuild_and_replay(state: _PromptState, ct: np.ndarray, case_key: str):
     return state.session
 
 
-def undo_last(session_token) -> int:
+def undo_last(session_token, owner=None) -> int:
     """Rewind the live prompt session by ONE interaction, on the model server
     and in the state's history, so a client-side ctrl+z keeps the model's context in
     lockstep with the labelmap voxels it just restored. Returns how many
@@ -516,38 +629,45 @@ def undo_last(session_token) -> int:
     from nnInteractive.inference.remote.remote_session import SessionExpiredError
 
     token = _normalize_token(session_token)
-    state = _states.get(token) if token is not None else None
-    if state is None or state.session is None:
-        raise ValueError("That prompt session is no longer active.")
-    state.last_used = time.monotonic()
-    if not any(e["kind"] != "initial_seg" for e in state.history):
-        raise ValueError("Nothing to undo in this prompt session.")
-    if not getattr(state.session, "supports_undo", False):
-        raise ValueError("The model server was started without undo support.")
+    with _lock:
+        state = _states.get((owner, token)) if token is not None else None
+        if state is None or state.session is None:
+            raise ValueError("That prompt session is no longer active.")
+        state.busy += 1
+        state.last_used = time.monotonic()
     try:
-        undone = state.session.undo()
-    except SessionExpiredError:
-        # The lease died under us; there is no server state left to rewind.
-        # Drop the state so a stray reuse of this token can't replay a
-        # history the client no longer believes in.
-        _close_state(state)
-        _states.pop(token, None)
-        raise ValueError("The prompt session expired on the model server.")
-    if not undone:
-        # Single-level undo exhausted. The history is untouched — the server
-        # didn't pop anything.
-        raise ValueError("The model server can only undo the newest prompt.")
-    # Interactions append [seed?, p1, ..., pN]; with any prompt present the
-    # newest entry is always a prompt, never the seed.
-    state.history.pop()
-    return sum(1 for e in state.history if e["kind"] != "initial_seg")
+        if not any(e["kind"] != "initial_seg" for e in state.history):
+            raise ValueError("Nothing to undo in this prompt session.")
+        if not getattr(state.session, "supports_undo", False):
+            raise ValueError("The model server was started without undo support.")
+        try:
+            undone = state.session.undo()
+        except SessionExpiredError:
+            # The lease died under us; there is no server state left to rewind.
+            # Drop the state so a stray reuse of this token can't replay a
+            # history the client no longer believes in (_finish closes it).
+            with _lock:
+                if _states.get(state.key) is state:
+                    _states.pop(state.key)
+            raise ValueError("The prompt session expired on the model server.")
+        if not undone:
+            # Single-level undo exhausted. The history is untouched — the server
+            # didn't pop anything.
+            raise ValueError("The model server can only undo the newest prompt.")
+        # Interactions append [seed?, p1, ..., pN]; with any prompt present the
+        # newest entry is always a prompt, never the seed.
+        state.history.pop()
+        return sum(1 for e in state.history if e["kind"] != "initial_seg")
+    finally:
+        _finish(state)
 
 
-def _forget_if_empty(state: _PromptState, token: str | None) -> None:
+def _forget_if_empty(state: _PromptState) -> None:
     """After a capacity refusal: a state with no lease and nothing to replay is
     just an empty slot, so drop it instead of leaving it for the idle reaper."""
-    if state.session is None and not state.history:
-        _states.pop(token, None)
+    with _lock:
+        if state.session is None and not state.history and _states.get(state.key) is state:
+            _states.pop(state.key)
 
 
 def predict(
@@ -563,6 +683,7 @@ def predict(
     refine: bool = False,
     expect_session: bool = False,
     stroke_axis: int | None = None,
+    owner=None,
 ) -> tuple[np.ndarray, list | None]:
     """Returns (mask, changed_bbox). changed_bbox is the [[i0,i1],[j0,j1],
     [k0,k1]] region (upper-exclusive, clipped) the prediction actually wrote,
@@ -589,9 +710,12 @@ def predict(
     answered from an empty session. A seeded request never expects one: the
     seed itself is the fresh start.
 
+    `owner` is the signed-in account's id: the session is that account's, and
+    the same token from another account is a different session.
+
     Raises PromptCapacityError when a NEW token arrives while every slot
     holds someone's live session — deliberately, instead of evicting an
-    active user's context."""
+    active user's context (see _make_room for the one exception)."""
     from nnInteractive.inference.remote.remote_session import SessionExpiredError
 
     if refine and (initial_seg is None or not initial_seg.any()):
@@ -601,108 +725,114 @@ def predict(
     if expect_session and token is not None and initial_seg is None:
         # Reap first, so a session that idled out is judged as gone. A parked
         # state (history kept, lease refused) still counts: it resumes below.
-        _reap_idle(time.monotonic())
-        known = _states.get(token)
-        if known is None or not known.history or known.case_key != case_key or known.ct_shape != ct.shape:
-            if known is not None:
-                _close_state(known)
-                _states.pop(token, None)
+        with _lock:
+            dropped = _reap_idle(time.monotonic())
+            known = _states.get((owner, token))
+            lost = (known is None or not known.history or known.case_key != case_key
+                    or known.ct_shape != ct.shape)
+            if lost and known is not None and known.busy == 0:
+                dropped.append(_states.pop(known.key))
+        _close_states(dropped)
+        if lost:
             raise PromptSessionLostError(
                 "The model no longer holds this object. Click again to carry on "
                 "from the mask as it is now.")
-    state = _acquire_state(token)
-    volume_changed = not (state.case_key == case_key and state.ct_shape == ct.shape)
-    if volume_changed:
-        # A different volume on this state's session invalidates whatever
-        # prompt context it had accumulated.
-        state.history = []
-    # A state parked by a refused rebuild (see _rebuild_and_replay) resumes by
-    # replaying its history, unless this request starts a new object anyway.
-    resume_parked = (
-        state.session is None and bool(state.history) and not volume_changed
-        and initial_seg is None
-    )
+    state = _acquire_state(owner, token)
     try:
+        volume_changed = not (state.case_key == case_key and state.ct_shape == ct.shape)
+        if volume_changed:
+            # A different volume on this state's session invalidates whatever
+            # prompt context it had accumulated.
+            state.history = []
+        # A state parked by a refused rebuild (see _rebuild_and_replay) resumes by
+        # replaying its history, unless this request starts a new object anyway.
+        resume_parked = (
+            state.session is None and bool(state.history) and not volume_changed
+            and initial_seg is None
+        )
         try:
-            if resume_parked:
+            try:
+                if resume_parked:
+                    _rebuild_and_replay(state, ct, case_key)
+                else:
+                    _ensure_volume_loaded(state, ct, case_key)
+            except SessionExpiredError:
+                # The lease died between requests and the very first server call
+                # of this one (the volume upload) tripped over it. History was
+                # just cleared, so this "replay" is simply a clean rebuild.
                 _rebuild_and_replay(state, ct, case_key)
-            else:
-                _ensure_volume_loaded(state, ct, case_key)
-        except SessionExpiredError:
-            # The lease died between requests and the very first server call
-            # of this one (the volume upload) tripped over it. History was
-            # just cleared, so this "replay" is simply a clean rebuild.
-            _rebuild_and_replay(state, ct, case_key)
-    except PromptCapacityError:
-        _forget_if_empty(state, token)
-        raise
-    session = state.session
-
-    if refine:
-        if not getattr(session, "supports_zero_shot_label_refinement", True):
-            raise ValueError("This model checkpoint can't refine a label on its own.")
-        entry = None
-    elif scribble_ijk is not None:
-        entry = {
-            "kind": "scribble",
-            "points": [[int(v) for v in p] for p in scribble_ijk],
-            "axis": stroke_axis,
-            "include": bool(include),
-        }
-    elif lasso_ijk is not None:
-        entry = {
-            "kind": "lasso",
-            "points": [[int(v) for v in p] for p in lasso_ijk],
-            "axis": stroke_axis,
-            "include": bool(include),
-        }
-    elif box_ijk is not None:
-        lo, hi = box_ijk
-        entry = {"kind": "bbox", "axis_pairs": _corners_to_axis_pairs(lo, hi), "include": bool(include)}
-    elif point_ijk is not None:
-        entry = {"kind": "point", "coords": [int(v) for v in point_ijk], "include": bool(include)}
-    else:
-        raise ValueError("predict() needs point_ijk, box_ijk, scribble_ijk, or lasso_ijk")
-
-    # Fresh = this request does not continue an accumulated exchange: the
-    # anonymous slot always is, a seed marks a client-side restart, and an
-    # empty history has nothing to continue.
-    starting_fresh = token is None or initial_seg is not None or not state.history
-    if starting_fresh:
-        state.history = []
-
-    new_entries = []
-    if starting_fresh and initial_seg is not None:
-        # np.frombuffer views are read-only and F-strided after the reshape
-        # upstream; blosc2 packing wants a plain contiguous buffer.
-        seed_entry = {"kind": "initial_seg", "seg": np.ascontiguousarray(initial_seg)}
-        if refine:
-            seed_entry["refine"] = True
-        new_entries.append(seed_entry)
-    if entry is not None:
-        new_entries.append(entry)
-
-    try:
-        if starting_fresh:
-            session.reset_interactions()
-        for pending in new_entries:
-            _add_interaction(session, pending, state.ct_shape)
-    except SessionExpiredError:
-        try:
-            session = _rebuild_and_replay(state, ct, case_key)
         except PromptCapacityError:
-            # Same refusal as above, one step later: the lease expired
-            # mid-request and the model server is now full. The state is
-            # parked with its history, so a retry picks the object back up.
-            _forget_if_empty(state, token)
+            _forget_if_empty(state)
             raise
-        for pending in new_entries:
-            _add_interaction(session, pending, state.ct_shape)
+        session = state.session
 
-    if token is not None:
-        state.history.extend(new_entries)
+        if refine:
+            if not getattr(session, "supports_zero_shot_label_refinement", True):
+                raise ValueError("This model checkpoint can't refine a label on its own.")
+            entry = None
+        elif scribble_ijk is not None:
+            entry = {
+                "kind": "scribble",
+                "points": [[int(v) for v in p] for p in scribble_ijk],
+                "axis": stroke_axis,
+                "include": bool(include),
+            }
+        elif lasso_ijk is not None:
+            entry = {
+                "kind": "lasso",
+                "points": [[int(v) for v in p] for p in lasso_ijk],
+                "axis": stroke_axis,
+                "include": bool(include),
+            }
+        elif box_ijk is not None:
+            lo, hi = box_ijk
+            entry = {"kind": "bbox", "axis_pairs": _corners_to_axis_pairs(lo, hi), "include": bool(include)}
+        elif point_ijk is not None:
+            entry = {"kind": "point", "coords": [int(v) for v in point_ijk], "include": bool(include)}
+        else:
+            raise ValueError("predict() needs point_ijk, box_ijk, scribble_ijk, or lasso_ijk")
 
-    bbox = getattr(session, "_last_paste_bbox", None)
-    if bbox is not None:
-        bbox = [[int(lo), int(hi)] for lo, hi in bbox]
-    return state.target_buffer.copy(), bbox
+        # Fresh = this request does not continue an accumulated exchange: the
+        # anonymous slot always is, a seed marks a client-side restart, and an
+        # empty history has nothing to continue.
+        starting_fresh = token is None or initial_seg is not None or not state.history
+        if starting_fresh:
+            state.history = []
+
+        new_entries = []
+        if starting_fresh and initial_seg is not None:
+            # np.frombuffer views are read-only and F-strided after the reshape
+            # upstream; blosc2 packing wants a plain contiguous buffer.
+            seed_entry = {"kind": "initial_seg", "seg": np.ascontiguousarray(initial_seg)}
+            if refine:
+                seed_entry["refine"] = True
+            new_entries.append(seed_entry)
+        if entry is not None:
+            new_entries.append(entry)
+
+        try:
+            if starting_fresh:
+                session.reset_interactions()
+            for pending in new_entries:
+                _add_interaction(session, pending, state.ct_shape)
+        except SessionExpiredError:
+            try:
+                session = _rebuild_and_replay(state, ct, case_key)
+            except PromptCapacityError:
+                # Same refusal as above, one step later: the lease expired
+                # mid-request and the model server is now full. The state is
+                # parked with its history, so a retry picks the object back up.
+                _forget_if_empty(state)
+                raise
+            for pending in new_entries:
+                _add_interaction(session, pending, state.ct_shape)
+
+        if token is not None:
+            state.history.extend(new_entries)
+
+        bbox = getattr(session, "_last_paste_bbox", None)
+        if bbox is not None:
+            bbox = [[int(lo), int(hi)] for lo, hi in bbox]
+        return state.target_buffer.copy(), bbox
+    finally:
+        _finish(state)
