@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthProvider } from "../contexts/authContext";
+import { AuthProvider, useAuth } from "../contexts/authContext";
 import { groupUploads, recentUploadsStorageKey, splitByAge, type RecentUpload } from "../helpers/recentUploads";
 import UploadPage from "../routes/UploadPage";
 
@@ -383,13 +383,16 @@ describe("splitting finished runs for the Upload page and History", () => {
 });
 
 describe("while idle", () => {
-  it("does not re-render once a second", async () => {
-    // The intro's count-up animates for its first seconds; with reduced motion
-    // it shows the final numbers at once, so only the page itself is measured.
+  // The intro's count-up animates for its first seconds; with reduced motion
+  // it shows the final numbers at once, so only the page itself is measured.
+  const reduceMotion = () =>
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
       matches: query.includes("prefers-reduced-motion"), media: query, onchange: null,
       addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
     }) as unknown as MediaQueryList);
+
+  it("does not re-render once a second", async () => {
+    reduceMotion();
     let commits = 0;
     renderUpload(() => {
       commits += 1;
@@ -398,6 +401,35 @@ describe("while idle", () => {
     // Let the auth, plan and usage requests land. This first second also
     // absorbs the one empty pass React may make the first time a state
     // update turns out to change nothing.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1200)));
+    const before = commits;
+    await act(() => new Promise((resolve) => setTimeout(resolve, 2200)));
+    expect(commits).toBe(before);
+  });
+
+  it("stops re-rendering once a second when the account whose scan was running signs out", async () => {
+    reduceMotion();
+    seedRun({});
+    route = runningReply();
+    const SignOut = () => {
+      const { signOut } = useAuth();
+      return <button type="button" onClick={() => void signOut()}>test sign out</button>;
+    };
+    let commits = 0;
+    render(
+      <AuthProvider>
+        <MemoryRouter>
+          <SignOut />
+          <Profiler id="upload" onRender={() => { commits += 1; }}>
+            <UploadPage />
+          </Profiler>
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+    expect(await screen.findByRole("heading", { name: "Running ePAI on your scan." })).toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "test sign out" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Running ePAI on your scan." })).toBeNull());
     await act(() => new Promise((resolve) => setTimeout(resolve, 1200)));
     const before = commits;
     await act(() => new Promise((resolve) => setTimeout(resolve, 2200)));

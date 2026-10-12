@@ -872,9 +872,10 @@ const UploadPage: React.FC = () => {
   // shows an estimate): an unconditional 1s re-render of the whole page while
   // idle is wasted work, and it kept the dropzone in a constant reflow (see
   // the transition note in UploadPage.css). A leftover "Processing" entry
-  // this tab isn't driving (signed out, or queued) doesn't count.
+  // this tab isn't driving (signed out, or queued) doesn't count, and nor does
+  // a phase left behind by a card that is gone (the account signed out).
   const [, setEtaTick] = useState(0);
-  const anyRunning = Object.values(sessionPhases).includes("running");
+  const anyRunning = recentUploads.some((u) => u.status === "Processing" && sessionPhases[u.sessionId] === "running");
   useEffect(() => {
     if (!anyRunning) return;
     const timer = setInterval(() => setEtaTick((t) => t + 1), 1000);
