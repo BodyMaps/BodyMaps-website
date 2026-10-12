@@ -7,7 +7,13 @@ Each step has its own try/except. One step failing (a missing table, a bad env
 value) must not skip the steps after it: the admin grant and the analytics purge
 were once dropped from boot without anyone noticing, and a shared try block
 makes that kind of silent skip the default.
+
+Both of those act only on what the deployment configured: the grant adds admin
+to verified accounts listed in ADMIN_EMAILS and never removes a role, and the
+purge deletes nothing unless ANALYTICS_RETENTION_DAYS is set.
 """
+
+import os
 
 
 def _run_step(label, step):
@@ -79,13 +85,28 @@ def _purge_spent_tokens():
 def _purge_old_analytics():
     from services import analytics_store
 
+    # Deletes only on a window the deployment chose. Nothing ran this purge at
+    # boot before, so applying the built-in default here would delete a site's
+    # older analytics on its first restart without anyone deciding to. A value
+    # that is not a whole number of days is reported and ignored for the same
+    # reason, rather than replaced by that default.
+    raw = os.environ.get("ANALYTICS_RETENTION_DAYS", "").strip()
+    if not raw:
+        return
+    try:
+        days = int(raw)
+    except ValueError:
+        days = 0
+    if days < analytics_store.MIN_RETENTION_DAYS:
+        print(f"[boot] analytics retention purge skipped: ANALYTICS_RETENTION_DAYS={raw!r} "
+              "is not a number of days")
+        return
     # Same boot-only trigger, and the same caveat: a server that stays up for
     # months holds its oldest events a little past the window. Acceptable for
     # a retention bound, and it avoids a scheduler this app doesn't have.
-    expired = analytics_store.purge_old_events()
+    expired = analytics_store.purge_old_events(days)
     if expired:
-        print(f"[boot] purged {expired} analytics event(s) past "
-              f"{analytics_store.retention_days()}-day retention")
+        print(f"[boot] purged {expired} analytics event(s) past {days}-day retention")
 
 
 def run(sessions_dir: str) -> None:

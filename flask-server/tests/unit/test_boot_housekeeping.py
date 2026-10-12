@@ -4,6 +4,10 @@ The admin grant and the analytics retention purge were once dropped from the
 boot block without a test noticing, so ADMIN_EMAILS stopped granting anything
 and analytics rows (IP address included) were kept forever. These tests call
 the same function app.py calls at boot.
+
+Both steps only ever act on what the deployment chose: the grant adds admin to
+verified accounts listed in ADMIN_EMAILS and never takes a role away, and the
+purge deletes nothing unless ANALYTICS_RETENTION_DAYS names a number of days.
 """
 
 import importlib
@@ -18,6 +22,7 @@ from models.job import utcnow
 def boot(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'boot.db'}")
     monkeypatch.setenv("ADMIN_EMAILS", "Owner@Example.com")
+    monkeypatch.delenv("ANALYTICS_RETENTION_DAYS", raising=False)
 
     import constants
     importlib.reload(constants)
@@ -80,9 +85,10 @@ def _verified_user(email):
     return user_id
 
 
-def test_boot_grants_admin_emails_and_purges_old_analytics(boot):
+def test_boot_grants_admin_emails_and_purges_old_analytics(boot, monkeypatch):
     boot_housekeeping, sessions_dir = boot
     from services import role_store
+    monkeypatch.setenv("ANALYTICS_RETENTION_DAYS", "400")
 
     owner = _verified_user("owner@example.com")
     bystander = _verified_user("someone@example.com")
@@ -102,6 +108,7 @@ def test_a_failing_step_does_not_skip_the_others(boot, monkeypatch, capsys):
 
     owner = _verified_user("owner@example.com")
     _old_analytics_event()
+    monkeypatch.setenv("ANALYTICS_RETENTION_DAYS", "400")
 
     def broken():
         raise RuntimeError("job table unavailable")
@@ -128,3 +135,42 @@ def test_boot_closes_usage_rows_left_open_by_the_last_process(boot):
     assert summary["scans"]["in_flight"] == 0
     # The run still counts against the day; only the concurrent slot comes back.
     assert summary["scans"]["used"] == 1
+
+
+def test_boot_deletes_no_analytics_when_no_retention_is_configured(boot):
+    boot_housekeeping, sessions_dir = boot
+    _old_analytics_event()
+
+    boot_housekeeping.run(sessions_dir)
+
+    assert _analytics_rows() == 1
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "forever", " "])
+def test_a_retention_that_is_not_a_number_of_days_deletes_nothing(boot, monkeypatch, capsys, value):
+    boot_housekeeping, sessions_dir = boot
+    _old_analytics_event()
+    monkeypatch.setenv("ANALYTICS_RETENTION_DAYS", value)
+
+    boot_housekeeping.run(sessions_dir)
+
+    assert _analytics_rows() == 1
+    if value.strip():
+        assert "ANALYTICS_RETENTION_DAYS" in capsys.readouterr().out
+
+
+def test_the_admin_grant_only_adds_admin_to_verified_listed_accounts(boot):
+    boot_housekeeping, sessions_dir = boot
+    from services import auth_store, role_store
+
+    squatter = auth_store.create_user("owner@example.com", "password1")["id"]  # listed, unverified
+    bystander = _verified_user("someone@example.com")
+    earlier_admin = _verified_user("earlier@example.com")  # not listed any more
+    role_store.grant(earlier_admin, role_store.ROLE_ADMIN)
+
+    boot_housekeeping.run(sessions_dir)
+
+    assert role_store.roles_for(squatter) == []
+    assert role_store.roles_for(bystander) == []
+    assert role_store.has_role(earlier_admin, role_store.ROLE_ADMIN)
+
