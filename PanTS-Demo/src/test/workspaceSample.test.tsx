@@ -155,7 +155,7 @@ it.each([{ session_id: "someone-elses-session" }, { uploaded_filename: "../../pr
   }
 });
 
-it("cancels selection immediately and cleans a late successful copy without displaying it", async () => {
+it("loads the sample with stable controls, no cancel button, and no duplicate request", async () => {
   let finish!: (response: Response) => void;
   let sid = "";
   let transport!: AbortSignal;
@@ -169,14 +169,15 @@ it("cancels selection immediately and cleans a late successful copy without disp
   expect(screen.getByRole("button", { name: "Sample case", exact: true })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Sample case", exact: true })).toHaveAttribute("aria-busy", "true");
   expect(screen.queryByText(/Loading sample/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Cancel", exact: true })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Sample case", exact: true }));
   expect(calls("/api/stage-sample").filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-  await user.click(screen.getByRole("button", { name: "Cancel", exact: true }));
-  expect(screen.getByRole("button", { name: "Sample case", exact: true })).toBeEnabled();
   expect(transport.aborted).toBe(false);
   await act(async () => { finish(stageReply(sid)); });
-  expect(screen.queryByText("PanTS_00000031.nii.gz")).not.toBeInTheDocument();
-  expect(calls(`/api/stage-sample/${sid}`).filter(([, init]) => init?.method === "DELETE").length).toBeGreaterThanOrEqual(2);
+  expect(await screen.findByText("PanTS_00000031.nii.gz")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Sample case", exact: true })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Sample case", exact: true })).toHaveAttribute("aria-busy", "false");
+  expect(calls(`/api/stage-sample/${sid}`).filter(([, init]) => init?.method === "DELETE")).toHaveLength(0);
 });
 
 it("aborts staging transport on account switch and cannot let late old data clear the new request", async () => {
