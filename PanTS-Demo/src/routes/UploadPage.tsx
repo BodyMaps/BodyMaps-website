@@ -3243,13 +3243,13 @@ const UploadPage: React.FC = () => {
       <span className="workspace-picker-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3 3 7.5l9 4.5 9-4.5z" /><path d="M3 12l9 4.5 9-4.5" /><path d="M3 16.5 12 21l9-4.5" /></svg></span>
       Upload DICOM
     </button>
-    <button type="button" className="dropzone-btn workspace-picker-action workspace-sample" title="Load an available sample from the dataset into the workspace"
-      disabled={sampleLoading} onClick={(event) => { event.stopPropagation(); void loadSample(); }}>
+    <button type="button" className="dropzone-btn workspace-picker-action workspace-sample" title="Load sample case 31 into the workspace"
+      disabled={sampleLoading} aria-busy={sampleLoading} onClick={(event) => { event.stopPropagation(); void loadSample(); }}>
       <span className="workspace-picker-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3h6M10 3v6l-5.2 9.1A2 2 0 0 0 6.5 21h11a2 2 0 0 0 1.7-2.9L14 9V3" /><path d="M7.5 15h9" /></svg></span>
-      {sampleLoading ? "Loading sample…" : "Sample case"}
+      Sample case
     </button>
     {sampleLoading && <button type="button" className="dropzone-btn"
-      onClick={(event) => { event.stopPropagation(); sampleAbortRef.current?.abort(); }}>Cancel loading</button>}
+      onClick={(event) => { event.stopPropagation(); sampleAbortRef.current?.abort(); }}>Cancel</button>}
   </div>;
 
   return (

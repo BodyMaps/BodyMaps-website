@@ -5,6 +5,7 @@ type Member = {
   name: string;
   role: string;
   photo?: string;
+  portrait?: boolean;
   /** Verified public profiles only; a card with none stays unlinked. */
   links?: { linkedin?: string };
 };
@@ -59,6 +60,8 @@ const MEMBERS: Member[] = [
   {
     name: "Ahmad Durre Rehman",
     role: "Core Contributor",
+    photo: "/headshots/ahmad-durre-rehman.jpg",
+    portrait: true,
     links: { linkedin: "https://linkedin.com/in/ahmad-durre-rehman-121577382" },
   },
   { name: "Yusuf Abdulkadir", role: "Core Contributor" },
@@ -70,10 +73,12 @@ function Avatar({
   photo,
   name,
   priority,
+  portrait,
 }: {
   photo?: string;
   name: string;
   priority?: boolean;
+  portrait?: boolean;
 }) {
   return (
     <div className={styles.avatarRing}>
@@ -84,7 +89,7 @@ function Avatar({
             alt={name}
             width={176}
             height={176}
-            className={styles.avatarImg}
+            className={`${styles.avatarImg}${portrait ? ` ${styles.avatarPortrait}` : ""}`}
             loading={priority ? "eager" : "lazy"}
             fetchPriority={priority ? "high" : "auto"}
             decoding="async"
@@ -115,7 +120,7 @@ function MemberCard({
 }) {
   return (
     <div className={styles.card}>
-      <Avatar photo={member.photo} name={member.name} priority={priority} />
+      <Avatar photo={member.photo} name={member.name} priority={priority} portrait={member.portrait} />
       <div>
         <div className={styles.memberName}>{member.name}</div>
         <div className={styles.memberRole}>{member.role}</div>

@@ -64,7 +64,8 @@ describe("account control focus hand-offs", () => {
 		await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sign in" }));
 
 		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-		expect(screen.getByRole("button", { name: "Settings" })).toHaveFocus();
+		// The dialog disappears during commit; the focus hand-off follows in an effect.
+		await waitFor(() => expect(screen.getByRole("button", { name: "Settings" })).toHaveFocus());
 	});
 
 	it("puts focus on the Sign in button after signing out from the menu", async () => {

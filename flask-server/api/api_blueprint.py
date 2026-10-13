@@ -3092,20 +3092,13 @@ def _sample_error(error):
 
 
 def _sample_candidates():
-    # In-memory ranking only; at most five exact catalog paths are inspected.
-    frame = rank_sample_results(ensure_sort_cols(_search_tables.DF_ALL.copy())).head(5)
-    for _, row in frame.iterrows():
-        case_id = str(row.get('__case_str') or '')
-        if not re.fullmatch(r'(?:PanTS|CV)_[0-9]{8}', case_id):
-            continue
-        paths = get_case_nifti_paths(case_id)
-        source = paths['image']
-        roots = ([Constants.PANTS_PATH] if paths['dataset'] == 'PanTS' else
-                 [Constants.CANCERVERSE_OVERLAY_PATH, Constants.CANCERVERSE_PATH])
-        for root in roots:
-            if root and cv_catalog.is_under(source, root):
-                yield case_id, source, root
-                break
+    # The workspace demo is always the original PanTS case 31. Do not silently
+    # substitute a different patient if it is missing or temporarily unavailable.
+    case_id = 'PanTS_00000031'
+    paths = get_case_nifti_paths(case_id)
+    root = Constants.PANTS_PATH
+    if root and paths['dataset'] == 'PanTS' and cv_catalog.is_under(paths['image'], root):
+        yield case_id, paths['image'], root
 
 
 @api_blueprint.route('/stage-sample', methods=['POST'])
