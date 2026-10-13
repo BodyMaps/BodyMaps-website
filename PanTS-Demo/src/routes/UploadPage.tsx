@@ -3248,8 +3248,6 @@ const UploadPage: React.FC = () => {
       <span className="workspace-picker-icon" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3h6M10 3v6l-5.2 9.1A2 2 0 0 0 6.5 21h11a2 2 0 0 0 1.7-2.9L14 9V3" /><path d="M7.5 15h9" /></svg></span>
       Sample case
     </button>
-    {sampleLoading && <button type="button" className="dropzone-btn"
-      onClick={(event) => { event.stopPropagation(); sampleAbortRef.current?.abort(); }}>Cancel</button>}
   </div>;
 
   return (
