@@ -60,7 +60,7 @@ const MEMBERS: Member[] = [
   {
     name: "Ahmad Durre Rehman",
     role: "Core Contributor",
-    photo: "/headshots/ahmad-durre-rehman.jpg",
+    photo: "/headshots/ahmad-durre-rehman.jpg?v=20261013",
     portrait: true,
     links: { linkedin: "https://linkedin.com/in/ahmad-durre-rehman-121577382" },
   },
