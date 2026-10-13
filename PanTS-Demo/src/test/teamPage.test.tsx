@@ -65,9 +65,11 @@ describe("team page", () => {
     added.forEach((name, i) => {
       expect(cards[existing.length + i]).toContain(name);
       expect(cards[existing.length + i]).toContain("Core Contributor");
-      // Only Alexander supplied a photo; Ahmad and Alexander supplied profile links.
+      // Preserve both supplied contributor portraits and their profile links.
       if (name === "Alexander Poon") {
         expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/alexander-poon.webp");
+      } else if (name === "Ahmad Durre Rehman") {
+        expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/ahmad-durre-rehman.jpg");
       } else {
         expect(screen.queryByAltText(name)).not.toBeInTheDocument();
       }
