@@ -69,7 +69,7 @@ describe("team page", () => {
       if (name === "Alexander Poon") {
         expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/alexander-poon.webp");
       } else if (name === "Ahmad Durre Rehman") {
-        expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/ahmad-durre-rehman.jpg");
+        expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/ahmad-durre-rehman.jpg?v=20261013");
       } else {
         expect(screen.queryByAltText(name)).not.toBeInTheDocument();
       }
