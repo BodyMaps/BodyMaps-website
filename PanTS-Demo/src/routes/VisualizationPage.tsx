@@ -229,6 +229,7 @@ import { measurementToolDetail, measurementToolName } from "../helpers/measureme
 import { ClearMeasurementsFlyoutItem } from "../components/MeasurementPanel/ClearMeasurementsConfirm";
 import { datasetSegmentationUrl } from "../helpers/segmentationSource";
 import {getPanTSId } from "../helpers/utils";
+import { isAbdomenAtlasCaseId, isServerOnlyCaseId } from "../helpers/caseIds";
 import { classInSentence, filenameToName } from "../helpers/utils.name";
 import { decodeViewerState, encodeViewerState, VIEWER_STATE_PARAMS } from "../helpers/viewerShareState";
 import { scrollRowToActive } from "../helpers/scrollRowToActive";
@@ -663,6 +664,11 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	const quizPracticeMaskUrl = quizPractice?.maskUrl;
 	const pantsCase = liveRoom?.metadata.case_id ?? soloChallenge?.challenge.case_id ?? quizPractice?.pack.case_id ?? params.caseId;
 	const isCvCase = String(pantsCase ?? "").toUpperCase().startsWith("CV");
+	// A CancerVerse or AbdomenAtlas case: its CT is only on the lab's server (no public mirror), and its
+	// mask, when it has one, is served as stored (already in the viewer's numbering). Only CancerVerse's
+	// mask is tumors alone; an AbdomenAtlas case shows the same organ panel as a PanTS case.
+	const isAtlasCase = isAbdomenAtlasCaseId(pantsCase);
+	const isServerOnlyCase = isCvCase || isAtlasCase;
 	// /reconstruction/:reconstructionId carries the id of the uploaded scan's session.
 	const sessionId = liveRoom || soloChallenge || quizPractice ? undefined : params.sessionId ?? params.reconstructionId;
 	// A reconstruction (OpenVAE) run has a rebuilt CT and no organ segmentation.
@@ -769,10 +775,10 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			}
 			if (!pantsCase) return;
 			const id = pantsCase;
-			const isCvCase = String(id).toUpperCase().startsWith("CV");
-			// getPanTSId produces a garbage value for CV ids, but it's only used in the HF
-			// fallback URLs which are never reached for CV (CT is always on the JHU server).
-			const p = isCvCase ? "" : getPanTSId(id);
+			const isServerOnlyCase = isServerOnlyCaseId(id);
+			// getPanTSId produces a garbage value for CV and BDMAP ids, but it's only used in the HF
+			// fallback URLs which are never reached for them (the CT is always on the JHU server).
+			const p = isServerOnlyCase ? "" : getPanTSId(id);
 			const localCt = `${API_BASE}/api/get-main-nifti/${id}.nii.gz`;
 			const localSeg = `${API_BASE}/api/get-segmentations/${id}.nii.gz`;
 			const challengeSeg = soloChallengeMaskUrl ?? null;
@@ -786,11 +792,11 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			if (!localOk && localStatus === 404) {
 				// The volume loader never reports an HTTP status either, so a case id that
 				// exists nowhere would spin until the five-minute deadline. Only a definite
-				// answer counts: the lab's server saying 404 for a CV id, whose CT lives
+				// answer counts: the lab's server saying 404 for a CV or BDMAP id, whose CT lives
 				// nowhere else, and for the rest the mirror saying 404 as well. A 5xx (the
 				// dataset storage can be down while the case exists), a cold backend or a
 				// network failure still falls through to the loader, which retries.
-				const missing = isCvCase
+				const missing = isServerOnlyCase
 					|| await fetch(hfCt, { method: "HEAD" }).then((r) => r.status === 404).catch(() => false);
 				if (cancelled) return;
 				if (missing) {
@@ -798,11 +804,12 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 					return;
 				}
 			}
-			// CancerVerse has tumor masks only, for the scans with an annotated tumor. For any other
-			// scan the route answers {"masks_available": false} (JSON, HTTP 200), which hangs the nifti
-			// loader, so only hand the viewer the mask when the answer really is a gzip volume. Decided
-			// here, before the CT URL is set, so the viewer loads once with or without the mask.
-			const cvMaskOk = isCvCase
+			// CancerVerse has tumor masks only, for the scans with an annotated tumor, and AbdomenAtlas masks
+			// are built on the server. For any other scan the route answers {"masks_available": false}
+			// (JSON, HTTP 200), which hangs the nifti loader, so only hand the viewer the mask when the
+			// answer really is a gzip volume. Decided here, before the CT URL is set, so the viewer loads
+			// once with or without the mask.
+			const serverMaskOk = isServerOnlyCase
 				? await fetch(localSeg, { method: "HEAD" })
 						.then((r) => r.ok && (r.headers.get("content-type") ?? "").includes("gzip"))
 						.catch(() => false)
@@ -810,24 +817,24 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			if (cancelled) return;
 			setLocalAvailable(localOk);
 			// Only a case the viewer actually reads from the mirror counts as full resolution;
-			// a CancerVerse case always loads from the lab server at the low preview.
-			setMirrorServed(!localOk && !isCvCase);
+			// a CancerVerse or AbdomenAtlas case always loads from the lab server at the low preview.
+			setMirrorServed(!localOk && !isServerOnlyCase);
 			// Keep the categorical mask at full resolution even while the CT uses its fast
 			// preview. Cornerstone aligns both volumes in world space; downsampling labels
 			// creates avoidable stair-stepping and loses small structures.
 			const resParam = isHd ? "" : "?res=low";
-			// A CancerVerse CT lives only on the lab server (the mirror URL above has no
+			// A CancerVerse or AbdomenAtlas CT lives only on the lab server (the mirror URL above has no
 			// case folder), so even a 5xx or a failed probe goes to the loader, which retries.
-			setCtUrl(localOk || isCvCase ? `${localCt}${resParam}` : hfCt);
-			// A CancerVerse scan without a tumor mask opens CT-only (no seg URL at all).
+			setCtUrl(localOk || isServerOnlyCase ? `${localCt}${resParam}` : hfCt);
+			// A CancerVerse or AbdomenAtlas scan without a mask opens CT-only (no seg URL at all).
 			if (isLiveRoom) {
 				setSegUrl(liveRoomMaskUrl ?? null);
 			} else if (isSoloChallenge) {
 				setSegUrl(challengeSeg);
 			} else if (isQuizPractice) {
 				setSegUrl(quizPracticeMaskUrl ?? null);
-			} else if (isCvCase) {
-				setSegUrl(cvMaskOk ? `${localSeg}${resParam}` : null);
+			} else if (isServerOnlyCase) {
+				setSegUrl(serverMaskOk ? `${localSeg}${resParam}` : null);
 			} else if (!localOk && localStatus !== 404) {
 				// The lab server did not serve the CT (unreachable, a server error, its dataset
 				// storage is down, or it refused the request), so it will not read or convert
@@ -1096,7 +1103,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			!viewerReady ||
 			!pantsCase ||
 			isLocal ||
-			isCvCase ||
+			isServerOnlyCase ||
 			isLiveRoom ||
 			isSoloChallenge ||
 			isQuizPractice
@@ -1116,7 +1123,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 
 		const handle = window.setTimeout(prepare, 2_000);
 		return () => window.clearTimeout(handle);
-	}, [viewerReady, pantsCase, isLocal, isCvCase, isLiveRoom, isSoloChallenge, isQuizPractice]);
+	}, [viewerReady, pantsCase, isLocal, isServerOnlyCase, isLiveRoom, isSoloChallenge, isQuizPractice]);
 	const [crosshairMm, setCrosshairMm] = useState<[number, number, number] | null>(null);
 	const [labelColorMap, setLabelColorMap] = useState<{ [key: number]: Color }>(
 		segmentation_category_colors
@@ -3016,8 +3023,8 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			// mid-swap would hit the same mismatch this is meant to fix.
 			if (segUrl) {
 				enhancePhase = "seg";
-				// A CancerVerse tumor mask is served as stored; a dataset mask in the viewer's numbering.
-				const fullSegUrl = isCvCase
+				// A CancerVerse or AbdomenAtlas mask is served as stored; a PanTS mask in the viewer's numbering.
+				const fullSegUrl = isServerOnlyCase
 					? `${API_BASE}/api/get-segmentations/${pantsCase}.nii.gz`
 					: datasetSegmentationUrl(pantsCase);
 				segUpgrade = upgradeSegmentationVolume(fullSegUrl, enhanceAbort.signal);
@@ -3372,7 +3379,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 				!ctUrl ||
 				// Solo quiz modes are CT-only until submission unlocks their reveal masks.
 				// Requiring that hidden mask here leaves the viewer loading forever.
-				(!segUrl && !isCvCase && !isQuizPractice && !isSoloChallenge && !isReconstruction) ||
+				(!segUrl && !isServerOnlyCase && !isQuizPractice && !isSoloChallenge && !isReconstruction) ||
 				!axial_ref.current ||
 				!sagittal_ref.current ||
 				!coronal_ref.current ||
@@ -6572,9 +6579,9 @@ const aiAvailableOrgans = useMemo(() => {
 				sliceJumpRef={sliceJumpWrapRef}
 				// The model reads the CT from the PanTS dataset by case id; an uploaded
 				// scan's session view has none to give it, the server cannot read a
-				// CancerVerse case's CT for the model, and a case the viewer had to load
-				// from the public mirror is not on the lab server either.
-				modelToolsAvailable={pantsCase != null && !isCvCase && !mirrorServed}
+				// CancerVerse or AbdomenAtlas case's CT for the model, and a case the viewer had to
+				// load from the public mirror is not on the lab server either.
+				modelToolsAvailable={pantsCase != null && !isServerOnlyCase && !mirrorServed}
 			/>
 			{/* Point/box-segment APPLYING/SUCCESS/ERROR overlay. Reuses the exact
 			    same centered GuidedStepModal (blurred backdrop + "Got it") that
