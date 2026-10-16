@@ -140,6 +140,14 @@ jobs:
       - name: AbdomenAtlas routes
         run: python -m pytest tests/functional/test_abdomenatlas_routes.py -v
 
+      # An uploaded label map is combined into one mask (it crashed on every multi-file upload), and a
+      # malformed case id is a 400, not a 500. Own step: api.api_blueprint is imported once per process.
+      - name: Uploaded label-map combine
+        run: python -m pytest tests/unit/test_nifti_label_combine.py -v
+
+      - name: Malformed case ids
+        run: python -m pytest tests/functional/test_invalid_case_ids.py -v
+
       - name: Dataset search ranking
         env:
           PYTHON_DOTENV_DISABLED: '1'
