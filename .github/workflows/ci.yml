@@ -85,8 +85,8 @@ jobs:
 
       # User-dataset admission gatekeeper: quotas, dedup, CT/segmentation validity,
       # promotion into the PanTS-mirroring layout.
-      - name: User-dataset gatekeeper and provenance unit tests
-        run: python -m pytest tests/unit/test_user_dataset.py tests/unit/test_model_provenance.py -v
+      - name: User-dataset gatekeeper, provenance and second-opinion unit tests
+        run: python -m pytest tests/unit/test_user_dataset.py tests/unit/test_model_provenance.py tests/unit/test_user_dataset_models.py -v
 
       # Chunked-upload staging area: which chunks the server still holds (what a
       # resuming client checks its cursor against) and the stale-upload sweep.
