@@ -37,6 +37,10 @@ Every case's metadata.json says how the labels were made and how far to trust th
 
 The labels are model predictions, not annotations: nothing in this dataset is human-verified.
 
+Scans can also carry the other models' masks: scripts/user_dataset_second_opinions.py (a separate process, only while
+the GPUs are idle; deploy/USER_DATASET_SECOND_OPINIONS.md) adds mask_only/USER_x/by_model/<Model>/ and lists every
+version in metadata.json's `model_versions`.
+
 The whole feature is inert unless ``USER_DATASET_PATH`` is configured, so merging
 this changes nothing until it is switched on in the environment.
 """
