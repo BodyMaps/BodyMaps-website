@@ -266,6 +266,7 @@ class NiftiProcessor:
 
         return round(float(np.mean(hu_values)), Constants.DECIMAL_PRECISION_HU)
 
+    @staticmethod
     def clean_organ_name(filename: str) -> str:
         name = os.path.basename(filename)
 
