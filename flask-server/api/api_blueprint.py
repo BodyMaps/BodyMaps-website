@@ -51,6 +51,7 @@ from services.sample_staging import MARKER as SAMPLE_MARKER
 from api.rate_limit import Limiter
 from services.site_normalization import site_country_label, split_site_codes
 from services import cancerverse_catalog as cv_catalog
+from services import abdomenatlas_catalog as at_catalog
 from models.application_session import ApplicationSession
 from models.combined_labels import CombinedLabels
 from models.base import db
@@ -142,9 +143,11 @@ def _serve_dataset_volume(path):
         response = make_response(send_file(path, mimetype="application/gzip"))
 
     response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
-    if cv_catalog.is_under(path, Constants.CANCERVERSE_OVERLAY_PATH):
+    if (cv_catalog.is_under(path, Constants.CANCERVERSE_OVERLAY_PATH)
+            or at_catalog.is_under(path, Constants.ABDOMENATLAS_OVERLAY_PATH)):
         # Updated scans replace a file at the same URL, so browsers must revalidate
         # (ETag/Last-Modified make that a cheap 304) instead of trusting a 7-day copy.
+        # The AbdomenAtlas masks are rebuilt in place the same way.
         response.headers["Cache-Control"] = "public, no-cache"
     else:
         # Dataset volumes are content-addressed by case/version and never personalized.
@@ -463,6 +466,12 @@ def get_image_preview(clabel_id):
         path = cv_catalog.resolve_profile_path(
             get_cancerverse_id(safe_id), Constants.CANCERVERSE_PATH, Constants.CANCERVERSE_OVERLAY_PATH
         )
+    elif get_dataset_from_case_id(safe_id) == "AbdomenAtlas":
+        # AbdomenAtlas thumbnails are drawn by scripts/make_profile_previews.py into the overlay
+        # (<overlay>/profile_only/<BDMAP id>/profile.jpg); the dataset root is looked at as well.
+        path = at_catalog.resolve_profile_path(
+            get_abdomenatlas_id(safe_id), Constants.ABDOMENATLAS_PATH, Constants.ABDOMENATLAS_OVERLAY_PATH
+        )
     else:
         path = os.path.join(Constants.PANTS_PATH, "profile_only", get_panTS_id(safe_id), "profile.jpg")
     if not os.path.exists(path):
@@ -478,7 +487,8 @@ def get_image_preview(clabel_id):
     # so let the browser cache them hard — repeat visits / shuffle / back-nav then
     # render instantly with zero network instead of revalidating every card.
     # (Overlay thumbnails belong to updated scans and can be replaced: revalidate those.)
-    if cv_catalog.is_under(path, Constants.CANCERVERSE_OVERLAY_PATH):
+    if (cv_catalog.is_under(path, Constants.CANCERVERSE_OVERLAY_PATH)
+            or at_catalog.is_under(path, Constants.ABDOMENATLAS_OVERLAY_PATH)):
         resp.headers["Cache-Control"] = "public, no-cache"
     else:
         resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
@@ -565,6 +575,44 @@ def _cancerverse_mask(case_id):
     return folder, cv_catalog.resolve_mask_path(folder, Constants.CANCERVERSE_OVERLAY_PATH)
 
 
+def _abdomenatlas_mask(case_id):
+    """(folder id, viewer mask path or None) of an AbdomenAtlas case. Local disk, never the dataset mount."""
+    try:
+        folder = get_abdomenatlas_id(secure_filename(str(case_id)))
+    except ValueError:
+        return None, None
+    return folder, at_catalog.resolve_mask_path(folder, Constants.ABDOMENATLAS_OVERLAY_PATH)
+
+
+def _abdomenatlas_mesh_manifest(case_id):
+    """3D organ meshes of an AbdomenAtlas case, baked on first request from its viewer mask."""
+    folder, seg_path = _abdomenatlas_mask(case_id)
+    if not seg_path:
+        return jsonify({"error": "No segmentation for this case"}), 404
+    case_dir = os.path.join(Constants.MESH_PATH, folder)
+    manifest_path = os.path.join(case_dir, "manifest.json")
+
+    def fresh():
+        # A mask rebuilt after the meshes were baked must not keep serving the old meshes.
+        manifest = _read_manifest_or_none(manifest_path)
+        if manifest is not None and os.path.getmtime(manifest_path) >= os.path.getmtime(seg_path):
+            return manifest
+        return None
+
+    manifest = fresh()
+    if manifest is None:
+        with _mesh_bake_lock(folder):
+            manifest = fresh()
+            if manifest is None:
+                try:
+                    manifest = bake_case_meshes(folder, seg_path, case_dir, route_base="cases")
+                except Exception as error:
+                    # Log the cause here; the browser only gets a fixed message.
+                    print(f"[at-mesh] baking failed for {folder}: {type(error).__name__}: {error}", flush=True)
+                    return jsonify({"error": "Mesh generation failed"}), 500
+    return jsonify(_manifest_with_request_urls(manifest, folder))
+
+
 def _cancerverse_mesh_manifest(case_id):
     """3D meshes of a CancerVerse case's tumors, baked on first request from its tumor mask."""
     folder, seg_path = _cancerverse_mask(case_id)
@@ -617,6 +665,8 @@ def get_mesh_manifest(case_id):
         return jsonify({"error": "Invalid id"}), 400
     if get_dataset_from_case_id(case_id) == "CancerVerse":
         return _cancerverse_mesh_manifest(case_id)
+    if get_dataset_from_case_id(case_id) == "AbdomenAtlas":
+        return _abdomenatlas_mesh_manifest(case_id)
     try:
         pants_id = get_panTS_id(secure_filename(case_id))
     except ValueError:
@@ -660,7 +710,7 @@ def get_mesh_manifest(case_id):
 def get_mesh_file(display_id, filename):
     # Both segments come straight from the URL and are joined into a path;
     # apply the same id-guard + secure_filename barrier as the other routes.
-    if not _is_safe_id(display_id) or not re.fullmatch(r"(PanTS|CV)_\d{8}", display_id):
+    if not _is_safe_id(display_id) or not re.fullmatch(r"(PanTS|CV|BDMAP)_\d{8}", display_id):
         return jsonify({"error": "Invalid id"}), 400
     stem = filename[:-4] if filename.endswith(".glb") else ""
     if (
@@ -681,6 +731,8 @@ def get_mesh_file(display_id, filename):
         organ_key = safe_name[:-4] if safe_name.endswith(".glb") else safe_name
         if display_id.startswith("CV_"):
             seg_path = _cancerverse_mask(display_id)[1]      # local disk: no mount involved
+        elif display_id.startswith("BDMAP_"):
+            seg_path = _abdomenatlas_mask(display_id)[1]     # local disk: no mount involved
         else:
             down = mount_down_response()  # regenerating reads the labelmap from the dataset mount
             if down:
@@ -699,6 +751,12 @@ def get_mesh_file(display_id, filename):
             else:
                 glb_bytes = generate_organ_glb_bytes(organ_key, seg_path)
         except Exception as e:
+            if display_id.startswith("BDMAP_"):
+                # AbdomenAtlas: never send exception text to the browser, log it here instead.
+                if isinstance(e, ValueError):
+                    return jsonify({"error": "This scan has no such structure"}), 404
+                print(f"[at-mesh] GLB generation failed for {display_id}: {type(e).__name__}: {e}", flush=True)
+                return jsonify({"error": "Mesh generation failed"}), 500
             if display_id.startswith("CV_"):
                 # CancerVerse: never send exception text to the browser, log it here instead.
                 if isinstance(e, ValueError):
@@ -867,6 +925,19 @@ def get_main_nifti(clabel_id):
         paths = get_case_nifti_paths(safe_id)
         main_nifti_path = paths["image"]
         if want_low and os.path.exists(paths["lowres_image"]):
+            main_nifti_path = paths["lowres_image"]
+    elif get_dataset_from_case_id(safe_id) == "AbdomenAtlas":
+        # AbdomenAtlas: <ABDOMENATLAS_PATH>/image_only/<BDMAP id>/ct.nii.gz on the dataset mount, with an
+        # optional low-res copy in the overlay. Refuse first while the mount is down.
+        down = mount_down_response()
+        if down:
+            return down
+        try:
+            paths = get_case_nifti_paths(safe_id)
+        except ValueError:
+            return jsonify({"error": "Invalid id"}), 400
+        main_nifti_path = paths["image"]
+        if want_low and paths["lowres_image"] and os.path.exists(paths["lowres_image"]):
             main_nifti_path = paths["lowres_image"]
     else:
         case_dir = f"{Constants.PANTS_PATH}/image_only/{get_panTS_id(safe_id)}"
@@ -1052,7 +1123,7 @@ def _compute_report_measurements(inputs):
 
 def _build_report_data(id):
     """Preserve stored evidence independently of optional segmentation measurements."""
-    if get_dataset_from_case_id(secure_filename(str(id))) == "CancerVerse":
+    if get_dataset_from_case_id(secure_filename(str(id))) in ("CancerVerse", "AbdomenAtlas"):
         return report_payload(id, "")
     if id is None or not str(id).isdigit():
         return {"error": "Invalid id parameter"}
@@ -1429,7 +1500,7 @@ def generate_report_pdf(id):
 @api_blueprint.route('/get-specific-segmentations/<combined_labels_id>', methods=['POST'])
 @requires_dataset_mount
 async def get_specific_segmentations(combined_labels_id):
-    if get_dataset_from_case_id(combined_labels_id) == "CancerVerse":
+    if get_dataset_from_case_id(combined_labels_id) in ("CancerVerse", "AbdomenAtlas"):
         return jsonify({"masks_available": False}), 200
     combined_labels_id = combined_labels_id.replace("PanTS_", "")
     combined_labels_id = combined_labels_id.lstrip("0")
@@ -1468,6 +1539,13 @@ async def get_segmentations(combined_labels_id):
         _folder, tumor_mask = _cancerverse_mask(combined_labels_id)
         if tumor_mask:
             return _serve_dataset_volume(tumor_mask)
+        return jsonify({"masks_available": False}), 200
+    # AbdomenAtlas: the viewer mask built into the overlay by scripts/build_abdomenatlas_masks.py, served
+    # from local disk. A case whose mask is not built yet gets the same graceful "no masks" answer.
+    if get_dataset_from_case_id(secure_filename(combined_labels_id)) == "AbdomenAtlas":
+        _folder, atlas_mask = _abdomenatlas_mask(combined_labels_id)
+        if atlas_mask:
+            return _serve_dataset_volume(atlas_mask)
         return jsonify({"masks_available": False}), 200
     try:
         pants_id = get_panTS_id(secure_filename(combined_labels_id))
@@ -4025,6 +4103,7 @@ def api_facets():
         dataset_counts = {
             "PanTS": int(len(_search_tables.DF)),
             "CancerVerse": int(len(_search_tables.DF_CV)) if _search_tables.DF_CV is not None else 0,
+            "AbdomenAtlas": int(len(_search_tables.DF_AT)) if _search_tables.DF_AT is not None else 0,
         }
         return jsonify({
             "facets": facets,
@@ -4038,9 +4117,7 @@ def api_facets():
         return jsonify({"error": str(e)}), 400
     
 def _all_dataset_df() -> pd.DataFrame:
-    frames = [DF]
-    if DF_CV is not None:
-        frames.append(DF_CV)
+    frames = [DF] + [frame for frame in (DF_CV, DF_AT) if frame is not None]
     return pd.concat(frames, ignore_index=True) if len(frames) > 1 else DF
 
 
@@ -4052,9 +4129,7 @@ def _all_dataset_prepared() -> pd.DataFrame:
     """Concat + sort-cols for the full (scope=all) dataset. DF/DF_CV are loaded once
     at startup, so this is deterministic — cache it. /api/random was rebuilding it on
     every shuffle. Callers must .copy() before mutating (the cached frame is shared)."""
-    frames = [DF]
-    if DF_CV is not None:
-        frames.append(DF_CV)
+    frames = [DF] + [frame for frame in (DF_CV, DF_AT) if frame is not None]
     base = pd.concat(frames, ignore_index=True) if len(frames) > 1 else DF.copy()
     return ensure_sort_cols(base)
 
@@ -4704,7 +4779,7 @@ def _ai_case_allowed(case_id):
     identifier = str(case_id or "").strip()
     if not identifier or identifier.isdigit():
         return True
-    if get_dataset_from_case_id(identifier) == "CancerVerse" and _get_inference_job(identifier) is None:
+    if get_dataset_from_case_id(identifier) in ("CancerVerse", "AbdomenAtlas") and _get_inference_job(identifier) is None:
         return True
     _job, access_error = _job_for_current_user(identifier)
     return access_error is None

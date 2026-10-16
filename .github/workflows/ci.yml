@@ -130,6 +130,16 @@ jobs:
       - name: CancerVerse tumor-mask routes
         run: python -m pytest tests/functional/test_cancerverse_tumor_masks.py -v
 
+      # AbdomenAtlas, the third dataset: its catalog (metadata -> search columns, the viewer mask table), the
+      # mask builder (per-organ files -> one viewer mask per scan, checked against its CT) and the routes that
+      # serve its CT, mask, thumbnail, 3D meshes and library entries. Own step: api.api_blueprint is imported
+      # once per process.
+      - name: AbdomenAtlas catalog and mask builder
+        run: python -m pytest tests/unit/test_abdomenatlas_catalog.py tests/unit/test_abdomenatlas_masks.py -v
+
+      - name: AbdomenAtlas routes
+        run: python -m pytest tests/functional/test_abdomenatlas_routes.py -v
+
       - name: Dataset search ranking
         env:
           PYTHON_DOTENV_DISABLED: '1'

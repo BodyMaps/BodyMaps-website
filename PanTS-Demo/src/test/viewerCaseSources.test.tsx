@@ -102,7 +102,7 @@ const MIRROR = "https://huggingface.co/datasets/BodyMaps/iPanTSMini/resolve/main
 
 // labServer: the status the lab server gives the CT (0: the request never reaches it);
 // mirror: the status the mirror gives it.
-function stubApi({ labServer, mirror }: { labServer: number; mirror: number }) {
+function stubApi({ labServer, mirror, maskType = "application/gzip" }: { labServer: number; mirror: number; maskType?: string }) {
 	global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
 		if (init?.method === "HEAD") {
@@ -111,7 +111,7 @@ function stubApi({ labServer, mirror }: { labServer: number; mirror: number }) {
 				return { ok: labServer < 300, status: labServer, headers: { get: () => null } };
 			}
 			if (url.startsWith(MIRROR)) return { ok: mirror < 300, status: mirror, headers: { get: () => null } };
-			if (url.includes("/api/get-segmentations/")) return { ok: true, status: 200, headers: { get: () => "application/gzip" } };
+			if (url.includes("/api/get-segmentations/")) return { ok: true, status: 200, headers: { get: () => maskType } };
 		}
 		return {
 			ok: true, status: 200,
@@ -200,6 +200,47 @@ describe("dataset case sources", () => {
 		await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
 		expect(loadedUrls().seg).toMatch(/\/api\/get-segmentations\/CV_00000007\.nii\.gz\?res=low$/);
 		expect(screen.getByRole("button", { name: "Open report" })).toBeInTheDocument();
+		unmount();
+	});
+
+	it("loads an AbdomenAtlas case from the lab server, with its mask as stored, and never from the mirror", async () => {
+		stubApi({ labServer: 200, mirror: 404 });
+		const { unmount } = open("BDMAP_00000007");
+		await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
+		const { ct, seg } = loadedUrls();
+		expect(ct).toMatch(/\/api\/get-main-nifti\/BDMAP_00000007\.nii\.gz\?res=low$/);
+		expect(seg).toMatch(/\/api\/get-segmentations\/BDMAP_00000007\.nii\.gz\?res=low$/);
+		expect(String(ct) + String(seg)).not.toContain("huggingface");
+		expect(screen.getByRole("button", { name: "Open report" })).toBeInTheDocument();
+		unmount();
+	});
+
+	it("keeps an AbdomenAtlas case on the lab server even when its storage answers with an error", async () => {
+		stubApi({ labServer: 503, mirror: 200 });
+		const { unmount } = open("BDMAP_00000007");
+		await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
+		expect(screen.queryByRole("heading", { name: "This case isn't available" })).toBeNull();
+		expect(String(loadedUrls().ct)).toMatch(/\/api\/get-main-nifti\/BDMAP_00000007\.nii\.gz/);
+		expect(String(loadedUrls().ct)).not.toContain("huggingface");
+		unmount();
+	});
+
+	it("says an AbdomenAtlas case is not available when the lab server answers 404, without asking the mirror", async () => {
+		stubApi({ labServer: 404, mirror: 200 });
+		const { unmount } = open("BDMAP_00000007");
+		expect(await screen.findByRole("heading", { name: "This case isn't available" })).toBeInTheDocument();
+		expect(renderVisualization).not.toHaveBeenCalled();
+		const asked = vi.mocked(global.fetch).mock.calls.map(([u]) => String(u));
+		expect(asked.some((u) => u.startsWith(MIRROR))).toBe(false);
+		unmount();
+	});
+
+	it("opens an AbdomenAtlas case CT-only when the route answers that its mask is not built", async () => {
+		stubApi({ labServer: 200, mirror: 404, maskType: "application/json" });
+		const { unmount } = open("BDMAP_00000007");
+		await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
+		expect(loadedUrls().ct).toMatch(/\/api\/get-main-nifti\/BDMAP_00000007\.nii\.gz/);
+		expect(loadedUrls().seg).toBeFalsy();
 		unmount();
 	});
 });
