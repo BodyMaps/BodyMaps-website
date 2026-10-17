@@ -58,7 +58,7 @@ ACTION_NAMES = frozenset({
 # Route patterns, never raw URLs — "/case/:caseId", not "/case/BDMAP_00000123".
 # Mirrors the route table in PanTS-Demo/src/App.tsx.
 ROUTE_PATTERNS = frozenset({
-    "/", "/dashboard", "/case/:caseId", "/session/:sessionId",
+    "/", "/dashboard", "/statistics", "/case/:caseId", "/session/:sessionId",
     "/reconstruction/:reconstructionId", "/dicom", "/local-nifti",
     "/upload", "/compare", "/compare-viewer", "/team", "/contact", "/signup",
     "/reset-password",
