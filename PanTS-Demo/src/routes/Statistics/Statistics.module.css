@@ -235,6 +235,13 @@
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 20px;
 	transition: opacity 0.2s;
+	/* The charts are not text to edit: no I-beam over them, no blinking caret or selection left behind
+	   when a click re-draws a bar under the pointer (macOS). The buttons below keep their pointer. */
+	cursor: default;
+	caret-color: transparent;
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-tap-highlight-color: transparent;
 }
 .boardBusy {
 	opacity: 0.6;

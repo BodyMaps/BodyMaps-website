@@ -32,6 +32,15 @@ PUBLIC_ENDPOINT_METHODS = {
     # independent of browser sessions, including during a storage outage.
     "api.health": frozenset({"GET", "HEAD"}),
     "live_rooms.live_rooms_health": frozenset({"GET", "HEAD"}),
+    # The dataset library is open to visitors without an account: the list, its filters, the
+    # shuffle, the Statistics counts and each card's profile thumbnail. They return catalog
+    # metadata and one preview image per case, never a scan, a mask or a report. Opening a case
+    # (volumes, segmentations, reports, 3D meshes) and everything else stays behind a session.
+    "api.api_search": frozenset({"GET", "HEAD"}),
+    "api.api_facets": frozenset({"GET", "HEAD"}),
+    "api.api_random_topk_rotate_norand": frozenset({"GET", "HEAD"}),
+    "api.api_stats": frozenset({"GET", "HEAD"}),
+    "api.get_image_preview": frozenset({"GET", "HEAD"}),
 }
 
 # These are machine-to-machine routes, not public website features. An exact
