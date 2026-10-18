@@ -25,11 +25,6 @@
     <meta name="twitter:image" content="https://bodymaps.wse.jhu.edu/og-image-bodymaps-1200x630.png" />
     <meta name="twitter:image:alt" content="BodyMaps: The intelligence layer for medical imaging AI" />
     <script>
-      /* A browser that runs scripts never shows the static summary in #root (see the style below): visitors see the
-         same blank first frame as before, then the app. Only non-JavaScript readers get the summary. */
-      document.documentElement.classList.add("bm-js");
-    </script>
-    <script>
       /* Paint the first frame in the page's own colour: light by default, dark
          for the viewer-type routes. Same pattern as src/helpers/routeSurface.ts. */
       if (/\/(case|session|reconstruction|live)\/[^/]+\/*$|\/live\/challenge\/[^/]+\/*$|\/learn\/quiz\/[^/]+\/*$|\/(dicom|local-nifti|compare|compare-viewer)\/*$/i.test(location.pathname)) {
@@ -53,20 +48,22 @@
       }
     </script>
     <style>
-      /* The static summary below is what non-JavaScript readers (search crawlers, link previews, AI assistants) see.
-         Hidden whenever scripts run (bm-js, set above before first paint), and React replaces it on mount. */
-      .bm-static { max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem; font: 16px/1.6 "IBM Plex Sans", system-ui, sans-serif; color: #0f172a; }
+      /* The static summary below is what non-JavaScript readers (search crawlers, link previews, AI assistants) see:
+         they read the HTML and ignore CSS. Browsers never paint it: hidden by default, with no script involved, so no
+         frame can show it before the app mounts; only a browser with JavaScript off un-hides it (noscript below).
+         React replaces it on mount. */
+      .bm-static { display: none; max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem; font: 16px/1.6 "IBM Plex Sans", system-ui, sans-serif; color: #0f172a; }
       .bm-static h1 { font-size: 2rem; margin: 0 0 .25rem; }
       .bm-static h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
       .bm-static a { color: #1d4ed8; }
-      .bm-js .bm-static { display: none; }
     </style>
+    <noscript><style>.bm-static { display: block; }</style></noscript>
   </head>
   <body>
     <div id="root">
       <!-- Readable without JavaScript. main.tsx uses createRoot (not hydrateRoot), which replaces this on load.
            nginx answers every page path with this file, so it carries every public page: the build writes the Team,
-           Terms, Privacy, Contact, Dataset, Statistics and Workspace sections in at the bm-static:pages marker
+           Privacy, Contact, Dataset, Statistics and Workspace sections (not the Terms, by choice) in at the bm-static:pages marker
            (src/seo/staticSummary.ts). Keep it in step with src/helpers/copy.ts, public/llms.txt and public/sitemap.xml
            (src/test/crawler.test.ts checks). -->
       <main class="bm-static">
@@ -87,7 +84,7 @@
         </ul>
         <h2>About</h2>
         <p>BodyMaps is developed by a research team at Johns Hopkins University led by Zongwei Zhou, PhD, with Alan L. Yuille, PhD as scientific advisor.</p>
-        <p><a href="/team">Team</a> · <a href="/contact">Contact</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>
+        <p><a href="/team">Team</a> · <a href="/contact">Contact</a> · <a href="/privacy">Privacy</a></p>
         <h2>Pages</h2>
         <!-- bm-static:pages -->
         <p><strong>For nonclinical use only. Not medical advice or for patient care.</strong></p>

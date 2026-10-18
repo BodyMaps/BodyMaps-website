@@ -5,11 +5,11 @@
  * and robots.txt must never block one of them.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { LANDING_OVERVIEW, LANDING_SUBTITLE, NONCLINICAL_WARNING, SITE_DESCRIPTION } from "../helpers/copy";
-import { MARKER, injectPublicSections, renderPublicSections } from "../seo/staticSummary";
-import { LAST_UPDATED, PRIVACY, TERMS } from "../routes/legalText";
+import { MARKER, NOT_FOR_CRAWLERS, injectPublicSections, renderPublicSections } from "../seo/staticSummary";
+import { LAST_UPDATED, PRIVACY, TERMS, TERMS_INTRO } from "../routes/legalText";
 import { MEMBERS } from "../routes/TeamPage/members";
 
 // Normalized so a Windows checkout (CRLF) reads the same as the LF files in the repo.
@@ -43,12 +43,13 @@ describe("crawler-readable site", () => {
     expect(main).not.toContain("hydrateRoot");
   });
 
-  it("visitors never see the summary: it is hidden before first paint whenever scripts run", () => {
+  it("visitors never see the summary: hidden by default in <head>, shown only when JavaScript is off", () => {
     const html = read("index.html");
     const head = html.slice(0, html.indexOf("<body>"));
-    expect(head).toContain('document.documentElement.classList.add("bm-js");');
-    expect(head).toMatch(/\.bm-js \.bm-static \{ display: none; \}/);
-    expect(html.indexOf('classList.add("bm-js")')).toBeLessThan(html.indexOf('<link href="/src/index.css"'));
+    // hidden by the base rule itself, so no script has to run before the first paint
+    expect(head).toMatch(/\.bm-static \{ display: none;/);
+    expect(head).toContain("<noscript><style>.bm-static { display: block; }</style></noscript>");
+    expect(html).not.toContain("bm-js");
   });
 
   it("index.html has readable text for non-JavaScript readers, in the canonical copy", () => {
@@ -72,13 +73,30 @@ describe("crawler-readable site", () => {
       expect(inRoot).toContain(m.name.replace(/&/g, "&amp;"));
       expect(inRoot).toContain(m.role);
     }
-    for (const s of [...TERMS, ...PRIVACY]) expect(inRoot).toContain(`<h3>${s.heading.replace(/&/g, "&amp;")}</h3>`);
+    for (const s of PRIVACY) expect(inRoot).toContain(`<h3>${s.heading.replace(/&/g, "&amp;")}</h3>`);
     expect(inRoot).toContain(LAST_UPDATED);
-    for (const id of ["dashboard", "statistics", "upload", "team", "contact", "terms", "privacy"]) {
+    for (const id of ["dashboard", "statistics", "upload", "team", "contact", "privacy"]) {
       expect(inRoot).toContain(`<section id="${id}"><h2><a href="/${id}">`);
     }
     expect(() => injectPublicSections(html.replace(MARKER, ""))).toThrow();
     expect(() => injectPublicSections(html + MARKER)).toThrow();
+  });
+
+  it("the Terms of Service stay out: not in the summary, not linked, not listed, disallowed in robots.txt", () => {
+    expect(NOT_FOR_CRAWLERS).toEqual(["/terms"]);
+    const built = injectPublicSections(read("index.html"));
+    const inRoot = built.slice(built.indexOf('<div id="root">'), built.indexOf('<script type="module"'));
+    const privacyHeadings = new Set(PRIVACY.map((s) => s.heading));
+    for (const s of TERMS) {
+      if (!privacyHeadings.has(s.heading)) expect(inRoot).not.toContain(`<h3>${s.heading.replace(/&/g, "&amp;")}</h3>`);
+      expect(inRoot).not.toContain(s.body.slice(0, 80).replace(/&/g, "&amp;"));
+    }
+    expect(inRoot).not.toContain(TERMS_INTRO.slice(0, 60));
+    expect(inRoot).not.toContain('<section id="terms"');
+    expect(inRoot).not.toMatch(/href="\/terms"/);
+    expect(read("public/llms.txt")).not.toContain("/terms");
+    expect(sitemapPaths()).not.toContain("/terms");
+    expect(disallowed()).toContain("/terms");
   });
 
   it("the generated sections escape the source text and link legal [label](target) tokens", () => {
@@ -119,8 +137,15 @@ describe("crawler-readable site", () => {
   });
 
   it("the sitemap covers every guest page except auth flows and local-file viewers", () => {
-    const skip = new Set(["/upload", "/local-nifti", "/dicom", "/reset-password", "/verify-email", "/signup", "/login"]);
+    const skip = new Set(["/upload", "/local-nifti", "/dicom", "/reset-password", "/verify-email", "/signup", "/login", ...NOT_FOR_CRAWLERS]);
     expect(new Set(sitemapPaths())).toEqual(new Set(publicPages().filter((p) => !skip.has(p))));
+  });
+
+  it("ships exactly one IndexNow key file whose content is its own name", () => {
+    const keys = readdirSync(resolve(process.cwd(), "public")).filter((f) => /^[0-9a-f]{32}\.txt$/.test(f));
+    expect(keys).toHaveLength(1);
+    expect(read(`public/${keys[0]}`)).toBe(keys[0].slice(0, 32));
+    expect(read("scripts/indexnow-submit.mjs")).toContain("api.indexnow.org/indexnow");
   });
 
   it("llms.txt opens with the site description", () => {
