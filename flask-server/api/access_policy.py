@@ -41,6 +41,11 @@ PUBLIC_ENDPOINT_METHODS = {
     "api.api_random_topk_rotate_norand": frozenset({"GET", "HEAD"}),
     "api.api_stats": frozenset({"GET", "HEAD"}),
     "api.get_image_preview": frozenset({"GET", "HEAD"}),
+    # Usage analytics from signed-out visitors (helpers/analytics.ts). The handler is built for
+    # them: per-IP rate limit, fixed event/route vocabulary, batch cap, and the account, plan and
+    # location are read server-side, never from the body. Only the write is public; the dashboard
+    # reads (analytics.overview, analytics.meta) stay behind a session and the admin role.
+    "analytics.collect": frozenset({"POST"}),
 }
 
 # These are machine-to-machine routes, not public website features. An exact
