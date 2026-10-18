@@ -5,7 +5,7 @@
  * and robots.txt must never block one of them.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { LANDING_OVERVIEW, LANDING_SUBTITLE, NONCLINICAL_WARNING, SITE_DESCRIPTION } from "../helpers/copy";
 import { MARKER, injectPublicSections, renderPublicSections } from "../seo/staticSummary";
@@ -121,6 +121,13 @@ describe("crawler-readable site", () => {
   it("the sitemap covers every guest page except auth flows and local-file viewers", () => {
     const skip = new Set(["/upload", "/local-nifti", "/dicom", "/reset-password", "/verify-email", "/signup", "/login"]);
     expect(new Set(sitemapPaths())).toEqual(new Set(publicPages().filter((p) => !skip.has(p))));
+  });
+
+  it("ships exactly one IndexNow key file whose content is its own name", () => {
+    const keys = readdirSync(resolve(process.cwd(), "public")).filter((f) => /^[0-9a-f]{32}\.txt$/.test(f));
+    expect(keys).toHaveLength(1);
+    expect(read(`public/${keys[0]}`)).toBe(keys[0].slice(0, 32));
+    expect(read("scripts/indexnow-submit.mjs")).toContain("api.indexnow.org/indexnow");
   });
 
   it("llms.txt opens with the site description", () => {
