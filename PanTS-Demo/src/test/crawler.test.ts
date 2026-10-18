@@ -8,6 +8,9 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { LANDING_OVERVIEW, LANDING_SUBTITLE, NONCLINICAL_WARNING, SITE_DESCRIPTION } from "../helpers/copy";
+import { MARKER, injectPublicSections, renderPublicSections } from "../seo/staticSummary";
+import { LAST_UPDATED, PRIVACY, TERMS } from "../routes/legalText";
+import { MEMBERS } from "../routes/TeamPage/members";
 
 // Normalized so a Windows checkout (CRLF) reads the same as the LF files in the repo.
 const read = (rel: string) => readFileSync(resolve(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
@@ -57,10 +60,40 @@ describe("crawler-readable site", () => {
     expect(read("index.html")).toContain('"application/ld+json"');
   });
 
+  it("the build writes every public page into the summary, since nginx serves this one file for all of them", () => {
+    const html = read("index.html");
+    expect(html.split(MARKER).length).toBe(2);
+    expect(staticBlock()).toContain(MARKER);
+    expect(read("vite.config.ts")).toMatch(/plugins: \[[^\]]*staticSummaryPlugin\(\)/);
+    const built = injectPublicSections(html);
+    expect(built).not.toContain(MARKER);
+    const inRoot = built.slice(built.indexOf('<div id="root">'), built.indexOf('<script type="module"'));
+    for (const m of MEMBERS) {
+      expect(inRoot).toContain(m.name.replace(/&/g, "&amp;"));
+      expect(inRoot).toContain(m.role);
+    }
+    for (const s of [...TERMS, ...PRIVACY]) expect(inRoot).toContain(`<h3>${s.heading.replace(/&/g, "&amp;")}</h3>`);
+    expect(inRoot).toContain(LAST_UPDATED);
+    for (const id of ["dashboard", "statistics", "upload", "team", "contact", "terms", "privacy"]) {
+      expect(inRoot).toContain(`<section id="${id}"><h2><a href="/${id}">`);
+    }
+    expect(() => injectPublicSections(html.replace(MARKER, ""))).toThrow();
+    expect(() => injectPublicSections(html + MARKER)).toThrow();
+  });
+
+  it("the generated sections escape the source text and link legal [label](target) tokens", () => {
+    const out = renderPublicSections();
+    expect(out).not.toMatch(/\[[^\]]+\]\([^)]+\)/);             // every [label](target) became a link
+    expect(out).toContain('<a href="/contact">');
+    expect(out).not.toMatch(/<(?!\/?(section|h2|h3|p|a|ul|li)\b)/); // only the tags it writes
+    expect(out).not.toMatch(/—/);
+  });
+
   it("every link in the static summary, sitemap and llms.txt is a real, guest-accessible route", () => {
     const pub = new Set(publicPages());
     const links = [
       ...[...staticBlock().matchAll(/href="([^"]+)"/g)].map((x) => x[1]),
+      ...[...renderPublicSections().matchAll(/href="(\/[^"]*)"/g)].map((x) => x[1]),
       ...sitemapPaths(),
       ...[...read("public/llms.txt").matchAll(/\]\((https?:\/\/[^)]+)\)/g)].map((x) => x[1].replace(ORIGIN, "") || "/"),
     ];
