@@ -43,12 +43,13 @@ describe("crawler-readable site", () => {
     expect(main).not.toContain("hydrateRoot");
   });
 
-  it("visitors never see the summary: it is hidden before first paint whenever scripts run", () => {
+  it("visitors never see the summary: hidden by default in <head>, shown only when JavaScript is off", () => {
     const html = read("index.html");
     const head = html.slice(0, html.indexOf("<body>"));
-    expect(head).toContain('document.documentElement.classList.add("bm-js");');
-    expect(head).toMatch(/\.bm-js \.bm-static \{ display: none; \}/);
-    expect(html.indexOf('classList.add("bm-js")')).toBeLessThan(html.indexOf('<link href="/src/index.css"'));
+    // hidden by the base rule itself, so no script has to run before the first paint
+    expect(head).toMatch(/\.bm-static \{ display: none;/);
+    expect(head).toContain("<noscript><style>.bm-static { display: block; }</style></noscript>");
+    expect(html).not.toContain("bm-js");
   });
 
   it("index.html has readable text for non-JavaScript readers, in the canonical copy", () => {
