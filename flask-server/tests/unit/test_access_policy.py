@@ -127,6 +127,29 @@ def test_only_the_dataset_library_reads_are_open_to_guests_besides_account_and_h
         assert private not in PUBLIC_ENDPOINT_METHODS
 
 
+def test_signed_out_visitors_can_send_usage_analytics_but_not_read_them():
+    """Since the deny-by-default policy, signed-out analytics were refused with 401: zero
+    anonymous events from 2026-10-12 on. collect is built for anonymous visitors; the
+    dashboard endpoints are not."""
+    analytics = {e for e in PUBLIC_ENDPOINT_METHODS if e.startswith("analytics.")}
+    assert analytics == {"analytics.collect"}
+    assert PUBLIC_ENDPOINT_METHODS["analytics.collect"] == frozenset({"POST"})
+    for private in ("analytics.overview", "analytics.meta"):
+        assert private not in PUBLIC_ENDPOINT_METHODS
+
+
+def test_an_anonymous_collect_reaches_the_handler_and_a_dashboard_read_does_not(policy_app):
+    app, calls = policy_app
+    client = app.test_client()
+    assert client.post("/api/analytics/collect", json={"events": []}).status_code == 200
+    assert calls == ["executed"]
+    calls.clear()
+    assert client.get("/api/analytics/collect").status_code in (401, 405)
+    for path in ("/api/analytics/overview", "/api/analytics/meta"):
+        assert client.get(path).status_code == 401
+    assert calls == []
+
+
 def test_a_future_endpoint_is_private_and_preflight_never_executes_it(policy_app):
     app, calls = policy_app
     client = app.test_client()
