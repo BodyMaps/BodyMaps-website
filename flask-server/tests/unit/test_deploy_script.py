@@ -261,7 +261,7 @@ def test_full_deploy_checks_guest_denial_and_authenticated_dataset(rig):
     assert "authenticated segmentations ok" in res.stdout
     assert rig.live_log.read_text().splitlines() == ["check", "restart"]
     calls = rig.curl_log.read_text()
-    assert "GET 127.0.0.1:18999/api/search auth=0" in calls
+    assert "GET 127.0.0.1:18999/api/search?limit=1 auth=0" in calls
     assert "GET 127.0.0.1:18999/api/search?limit=1 auth=1" in calls
     assert "HEAD 127.0.0.1:18999/api/get-segmentations/17.nii.gz auth=1" in calls
     assert "POST 127.0.0.1:18999/api/auth/logout auth=1" in calls
