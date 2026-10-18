@@ -162,7 +162,7 @@ function ProtectedRoutes() {
 function AuthSurface() {
   const { isAuthenticated, loading } = useAuth();
   const { pathname } = useLocation();
-  const publicPage = ["", "/upload", "/team", "/contact", "/local-nifti", "/dicom", "/terms", "/privacy", "/reset-password", "/verify-email", "/signup", "/login"].includes(pathname.replace(/\/+$/, ""));
+  const publicPage = ["", "/upload", "/team", "/contact", "/dashboard", "/statistics", "/local-nifti", "/dicom", "/terms", "/privacy", "/reset-password", "/verify-email", "/signup", "/login"].includes(pathname.replace(/\/+$/, ""));
   return <AuthModal standalone={!publicPage && !loading && !isAuthenticated} />;
 }
 
@@ -199,13 +199,13 @@ function App() {
                     <Route path="/upload" element={<UploadPage />} />
                     <Route path="/team" element={<TeamPage />} />
                     <Route path="/contact" element={<ContactPage />} />
+                    <Route path="/dashboard" element={<Homepage />} />
+                    <Route path="/statistics" element={<StatisticsPage />} />
                   </Route>
                   <Route path="/dicom" element={<VisualizationPage />} />
                   <Route path="/local-nifti" element={<VisualizationPage />} />
                   <Route element={<ProtectedRoutes />}>
                     <Route element={<DesignShell />}>
-                      <Route path="/dashboard" element={<Homepage />} />
-                      <Route path="/statistics" element={<StatisticsPage />} />
                       <Route path="/account" element={<SettingsPage />}>
                         <Route index element={<ProfileSettings />} />
                         <Route path="plan" element={<PlanSettings />} />

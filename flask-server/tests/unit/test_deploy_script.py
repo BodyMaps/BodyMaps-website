@@ -54,7 +54,7 @@ case "$url" in
   */ws/live-rooms/*) code="${FAKE_WS_GUEST_CODE:-401}"; printf '%s\n' "$websocket_nonce" >> "$FAKE_WS_NONCE_LOG";;
   */api/ping) body='{"message":"pong"}';;
   */api/search*) if [ "$cookie" = 1 ]; then body='{"items":[]}'
-                else code="${FAKE_GUEST_SEARCH_CODE:-401}"; fi;;
+                else code="${FAKE_GUEST_SEARCH_CODE:-200}"; body='{"items":[]}'; fi;;
   */api/get-segmentations/*) if [ "$cookie" = 1 ]; then code="${FAKE_SEG_CODE:-200}"
                 else code=401; fi;;
   */api/upload-inference-chunk) code=401;;
@@ -278,7 +278,7 @@ def test_live_handshake_uses_a_fresh_valid_nonce_for_each_deploy(rig):
 
 
 @pytest.mark.parametrize("override", [
-    {"FAKE_WS_GUEST_CODE": "101"}, {"FAKE_GUEST_SEARCH_CODE": "200"},
+    {"FAKE_WS_GUEST_CODE": "101"}, {"FAKE_GUEST_SEARCH_CODE": "401"},
     {"FAKE_REGISTER_CODE": "500"}, {"FAKE_SEG_CODE": "401"},
     {"FAKE_LIVE_FAIL": "restart"},
 ])
