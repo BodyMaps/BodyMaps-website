@@ -24,5 +24,4 @@ BodyMaps is a web application developed by a research team at Johns Hopkins Univ
 
 ## Optional
 
-- [Terms](https://bodymaps.wse.jhu.edu/terms)
 - [Privacy](https://bodymaps.wse.jhu.edu/privacy)

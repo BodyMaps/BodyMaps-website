@@ -1,14 +1,19 @@
 // Static content of every public page, for readers that do not run JavaScript (AI assistants' fetch tools, link
 // previews, simple crawlers). nginx answers every page path with the same index.html, so a fetch of /team or
-// /terms gets index.html; the vite plugin below writes these sections into its hidden #root summary at build time.
+// /privacy gets index.html; the vite plugin below writes these sections into its hidden #root summary at build time.
+// The Terms of Service are deliberately left out (the maintainers do not want AI assistants reading them): no Terms
+// section, links to /terms render as plain text, and robots.txt disallows /terms.
 // Visitors never see it (index.html hides .bm-static whenever scripts run) and React replaces it on mount.
 // The text comes from the same modules the pages render, so it cannot drift from the site.
 import type { Plugin } from "vite";
 import { FOOTER_INQUIRY_LEAD } from "../helpers/copy";
-import { LAST_UPDATED, PRIVACY, PRIVACY_INTRO, TERMS, TERMS_INTRO, type Section } from "../routes/legalText";
+import { LAST_UPDATED, PRIVACY, PRIVACY_INTRO, type Section } from "../routes/legalText";
 import { MEMBERS } from "../routes/TeamPage/members";
 
 export const MARKER = "<!-- bm-static:pages -->";
+
+/** Pages kept out of the summary and out of crawlers' reach (see robots.txt). */
+export const NOT_FOR_CRAWLERS = ["/terms"];
 
 const escape = (text: string): string =>
 	text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -19,7 +24,8 @@ const withLinks = (text: string): string => {
 	let from = 0;
 	for (const m of text.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)) {
 		out += escape(text.slice(from, m.index));
-		out += `<a href="${escape(m[2] === "contact" ? "/contact" : m[2])}">${escape(m[1])}</a>`;
+		const href = m[2] === "contact" ? "/contact" : m[2];
+		out += NOT_FOR_CRAWLERS.includes(href) ? escape(m[1]) : `<a href="${escape(href)}">${escape(m[1])}</a>`;
 		from = (m.index ?? 0) + m[0].length;
 	}
 	return out + escape(text.slice(from));
@@ -54,7 +60,6 @@ export function renderPublicSections(): string {
 			`<p>${escape(FOOTER_INQUIRY_LEAD)} the <a href="/contact">contact form</a>. Describe your organization, the imaging ` +
 			"modalities and scale, and whether you are evaluating, piloting or ready to contract. Do not send protected health " +
 			"information.</p></section>",
-		legal("terms", "Terms of Service", TERMS_INTRO, TERMS),
 		legal("privacy", "Privacy Notice", PRIVACY_INTRO, PRIVACY),
 	].join("\n        ");
 }

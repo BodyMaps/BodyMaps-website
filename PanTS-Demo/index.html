@@ -66,7 +66,7 @@
     <div id="root">
       <!-- Readable without JavaScript. main.tsx uses createRoot (not hydrateRoot), which replaces this on load.
            nginx answers every page path with this file, so it carries every public page: the build writes the Team,
-           Terms, Privacy, Contact, Dataset, Statistics and Workspace sections in at the bm-static:pages marker
+           Privacy, Contact, Dataset, Statistics and Workspace sections (not the Terms, by choice) in at the bm-static:pages marker
            (src/seo/staticSummary.ts). Keep it in step with src/helpers/copy.ts, public/llms.txt and public/sitemap.xml
            (src/test/crawler.test.ts checks). -->
       <main class="bm-static">
@@ -87,7 +87,7 @@
         </ul>
         <h2>About</h2>
         <p>BodyMaps is developed by a research team at Johns Hopkins University led by Zongwei Zhou, PhD, with Alan L. Yuille, PhD as scientific advisor.</p>
-        <p><a href="/team">Team</a> · <a href="/contact">Contact</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>
+        <p><a href="/team">Team</a> · <a href="/contact">Contact</a> · <a href="/privacy">Privacy</a></p>
         <h2>Pages</h2>
         <!-- bm-static:pages -->
         <p><strong>For nonclinical use only. Not medical advice or for patient care.</strong></p>
