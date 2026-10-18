@@ -70,7 +70,7 @@ type TrackedEvent = {
 // Static routes, and the prefixes that stand in for a parameterised one. The
 // pattern is what gets sent: "/case/:caseId", never "/case/BDMAP_00000123".
 const STATIC_ROUTES = new Set([
-	"/", "/dashboard", "/dicom", "/local-nifti", "/upload", "/signup",
+	"/", "/dashboard", "/statistics", "/dicom", "/local-nifti", "/upload", "/signup",
 	"/reset-password",
 	"/account", "/account/plan", "/account/history", "/account/privacy",
 	"/account/analytics", "/account/people",

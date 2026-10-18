@@ -45,6 +45,8 @@ const VerifyEmail = lazyRoute(() => import("./routes/VerifyEmail"));
 const LegalPage = lazyRoute(() => import("./routes/LegalPage"));
 const ContactPage = lazyRoute(() => import("./routes/ContactPage"));
 const SharePatientCard = lazyRoute(() => import("./routes/SharePatientCard"));
+// Charts over the three datasets; split out so the library page does not carry them.
+const StatisticsPage = lazyRoute(() => import("./routes/Statistics"));
 
 const BASENAME = import.meta.env.VITE_BASENAME;
 
@@ -203,6 +205,7 @@ function App() {
                   <Route element={<ProtectedRoutes />}>
                     <Route element={<DesignShell />}>
                       <Route path="/dashboard" element={<Homepage />} />
+                      <Route path="/statistics" element={<StatisticsPage />} />
                       <Route path="/account" element={<SettingsPage />}>
                         <Route index element={<ProfileSettings />} />
                         <Route path="plan" element={<PlanSettings />} />
