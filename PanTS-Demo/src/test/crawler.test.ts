@@ -1,0 +1,99 @@
+/**
+ * Crawler-readable guard: search engines, link previews and AI assistants mostly do not run JavaScript, so
+ * index.html carries a static summary inside #root (React replaces it on mount), and public/ ships
+ * robots.txt, sitemap.xml and llms.txt. Every page those files point to must be a real guest-accessible route,
+ * and robots.txt must never block one of them.
+ */
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { LANDING_OVERVIEW, LANDING_SUBTITLE, NONCLINICAL_WARNING, SITE_DESCRIPTION } from "../helpers/copy";
+
+// Normalized so a Windows checkout (CRLF) reads the same as the LF files in the repo.
+const read = (rel: string) => readFileSync(resolve(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
+const ORIGIN = "https://bodymaps.wse.jhu.edu";
+
+const app = read("src/App.tsx");
+/** Paths in App.tsx's publicPage list ("" is the landing page). */
+const publicPages = (): string[] => {
+  const m = app.match(/const publicPage = \[([^\]]*)\]/);
+  if (!m) throw new Error("publicPage list not found in App.tsx");
+  return [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1] || "/");
+};
+const routePaths = new Set([...app.matchAll(/<Route path="([^"]+)"/g)].map((x) => x[1]));
+
+const staticBlock = (): string => {
+  const html = read("index.html");
+  const m = html.match(/<div id="root">([\s\S]*?)<\/div>\s*<script type="module"/);
+  if (!m) throw new Error("#root block not found");
+  return m[1];
+};
+const sitemapPaths = (): string[] =>
+  [...read("public/sitemap.xml").matchAll(/<loc>([^<]+)<\/loc>/g)].map((x) => x[1].replace(ORIGIN, "") || "/");
+const disallowed = (): string[] =>
+  read("public/robots.txt").split("\n").filter((l) => l.startsWith("Disallow:")).map((l) => l.slice(9).trim());
+
+describe("crawler-readable site", () => {
+  it("React replaces the static summary rather than hydrating it", () => {
+    const main = read("src/main.tsx");
+    expect(main).toContain("createRoot(document.getElementById('root')!)");
+    expect(main).not.toContain("hydrateRoot");
+  });
+
+  it("visitors never see the summary: it is hidden before first paint whenever scripts run", () => {
+    const html = read("index.html");
+    const head = html.slice(0, html.indexOf("<body>"));
+    expect(head).toContain('document.documentElement.classList.add("bm-js");');
+    expect(head).toMatch(/\.bm-js \.bm-static \{ display: none; \}/);
+    expect(html.indexOf('classList.add("bm-js")')).toBeLessThan(html.indexOf('<link href="/src/index.css"'));
+  });
+
+  it("index.html has readable text for non-JavaScript readers, in the canonical copy", () => {
+    const block = staticBlock();
+    for (const text of [LANDING_SUBTITLE, LANDING_OVERVIEW, NONCLINICAL_WARNING]) expect(block).toContain(text);
+    expect(block).toMatch(/<h1>BodyMaps<\/h1>/);
+    for (const model of ["ePAI", "Atlas-Net", "LesionSegmenter"]) expect(block).toContain(model);
+    expect(block).not.toMatch(/—/);
+    expect(read("index.html")).toContain('"application/ld+json"');
+  });
+
+  it("every link in the static summary, sitemap and llms.txt is a real, guest-accessible route", () => {
+    const pub = new Set(publicPages());
+    const links = [
+      ...[...staticBlock().matchAll(/href="([^"]+)"/g)].map((x) => x[1]),
+      ...sitemapPaths(),
+      ...[...read("public/llms.txt").matchAll(/\]\((https?:\/\/[^)]+)\)/g)].map((x) => x[1].replace(ORIGIN, "") || "/"),
+    ];
+    expect(links.length).toBeGreaterThan(10);
+    for (const link of links) {
+      expect(link.startsWith("/"), `${link} is not on this site`).toBe(true);
+      expect(routePaths.has(link), `${link} is not a route in App.tsx`).toBe(true);
+      expect(pub.has(link), `${link} is not in App.tsx's publicPage list`).toBe(true);
+    }
+  });
+
+  it("robots.txt allows crawling, points at the sitemap, and blocks none of the listed pages", () => {
+    const robots = read("public/robots.txt");
+    expect(robots).toMatch(/^User-agent: \*$/m);
+    expect(robots).toMatch(/^Allow: \/$/m);
+    expect(robots).toContain(`Sitemap: ${ORIGIN}/sitemap.xml`);
+    const blocked = disallowed();
+    expect(blocked).not.toContain("/");
+    expect(blocked).toContain("/api/");
+    for (const page of sitemapPaths()) {
+      for (const prefix of blocked) expect(page.startsWith(prefix), `${page} blocked by ${prefix}`).toBe(false);
+    }
+  });
+
+  it("the sitemap covers every guest page except auth flows and local-file viewers", () => {
+    const skip = new Set(["/upload", "/local-nifti", "/dicom", "/reset-password", "/verify-email", "/signup", "/login"]);
+    expect(new Set(sitemapPaths())).toEqual(new Set(publicPages().filter((p) => !skip.has(p))));
+  });
+
+  it("llms.txt opens with the site description", () => {
+    const llms = read("public/llms.txt");
+    expect(llms.startsWith("# BodyMaps\n")).toBe(true);
+    expect(llms).toContain(`> ${SITE_DESCRIPTION}`);
+    expect(llms).toContain(NONCLINICAL_WARNING);
+  });
+});

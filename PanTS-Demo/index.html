@@ -25,6 +25,11 @@
     <meta name="twitter:image" content="https://bodymaps.wse.jhu.edu/og-image-bodymaps-1200x630.png" />
     <meta name="twitter:image:alt" content="BodyMaps: The intelligence layer for medical imaging AI" />
     <script>
+      /* A browser that runs scripts never shows the static summary in #root (see the style below): visitors see the
+         same blank first frame as before, then the app. Only non-JavaScript readers get the summary. */
+      document.documentElement.classList.add("bm-js");
+    </script>
+    <script>
       /* Paint the first frame in the page's own colour: light by default, dark
          for the viewer-type routes. Same pattern as src/helpers/routeSurface.ts. */
       if (/\/(case|session|reconstruction|live)\/[^/]+\/*$|\/live\/challenge\/[^/]+\/*$|\/learn\/quiz\/[^/]+\/*$|\/(dicom|local-nifti|compare|compare-viewer)\/*$/i.test(location.pathname)) {
@@ -35,9 +40,55 @@
     <link rel="preload" href="/fonts/ibm-plex-sans-v23-latin-normal-400.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/ibm-plex-sans-v23-latin-normal-600.woff2" as="font" type="font/woff2" crossorigin />
     <title>BodyMaps: CT library, segmentation, and annotation</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "BodyMaps",
+        "url": "https://bodymaps.wse.jhu.edu/",
+        "description": "Browse body CT scans in 2D and 3D, upload CT for AI segmentation, and annotate results. For nonclinical use only.",
+        "operatingSystem": "Web browser",
+        "isAccessibleForFree": true,
+        "creator": { "@type": "CollegeOrUniversity", "name": "Johns Hopkins University" }
+      }
+    </script>
+    <style>
+      /* The static summary below is what non-JavaScript readers (search crawlers, link previews, AI assistants) see.
+         Hidden whenever scripts run (bm-js, set above before first paint), and React replaces it on mount. */
+      .bm-static { max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem; font: 16px/1.6 "IBM Plex Sans", system-ui, sans-serif; color: #0f172a; }
+      .bm-static h1 { font-size: 2rem; margin: 0 0 .25rem; }
+      .bm-static h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+      .bm-static a { color: #1d4ed8; }
+      .bm-js .bm-static { display: none; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Readable without JavaScript. main.tsx uses createRoot (not hydrateRoot), which replaces this on load.
+           Keep it in step with src/helpers/copy.ts, public/llms.txt and public/sitemap.xml (src/test/crawler.test.ts checks). -->
+      <main class="bm-static">
+        <h1>BodyMaps</h1>
+        <p>The intelligence layer for medical imaging AI</p>
+        <p>Browse the library in 2D and 3D, upload your own CT for AI segmentation, and annotate or refine the results.</p>
+        <h2>What you can do here</h2>
+        <ul>
+          <li><a href="/dashboard">CT library</a>: search body CT scans from public research datasets, including PanTS and CancerVerse, filter them, and open any scan in a 2D and 3D viewer with its organ and tumor labels.</li>
+          <li><a href="/statistics">Statistics</a>: interactive charts of the library (contrast phase, sex, age at scan, scanner make and model, tumor status, country) that follow your search filters.</li>
+          <li><a href="/upload">Upload a CT</a> (NIfTI or a DICOM series) and run AI segmentation, then review, annotate and refine the result in the browser.</li>
+        </ul>
+        <h2>Segmentation models</h2>
+        <ul>
+          <li><strong>ePAI</strong>: full abdominal organ segmentation, with detailed pancreas and tumor analysis. 25 structures in one pass, including the pancreas gland, duct and 3 tumor subtypes (PDAC, cyst, PNET).</li>
+          <li><strong>Atlas-Net</strong>: the same organ and tumor coverage as ePAI, with segmentations matched to a known anatomical atlas for anatomically consistent results.</li>
+          <li><strong>LesionSegmenter</strong>: fast pancreatic lesion detection, covering lesions in 4 organs in one pass.</li>
+        </ul>
+        <h2>About</h2>
+        <p>BodyMaps is developed by a research team at Johns Hopkins University led by Zongwei Zhou, PhD, with Alan L. Yuille, PhD as scientific advisor.</p>
+        <p><a href="/team">Team</a> · <a href="/contact">Contact</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>
+        <p><strong>For nonclinical use only. Not medical advice or for patient care.</strong></p>
+        <noscript><p>The viewer and segmentation tools need JavaScript.</p></noscript>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
     <!-- if development -->
     <!-- <script type="module" src="http://localhost:5173/@vite/client"></script>
