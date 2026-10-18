@@ -166,6 +166,10 @@ jobs:
       - name: Deploy and watchdog script tests
         run: python -m pytest tests/unit/test_deploy_script.py tests/unit/test_site_watchdog.py -v
 
+      # scripts/bake_dataset_meshes.py: bakes real meshes from tiny masks, resumes, stops on a full disk.
+      - name: Dataset mesh baker
+        run: python -m pytest tests/unit/test_bake_dataset_meshes.py -v
+
       - name: Processing pipeline, adapter and checkpoint tests
         run: python -m pytest tests/unit/test_inference_pipeline.py tests/unit/test_pipeline_adapters.py tests/unit/test_openvae_checkpoint.py tests/unit/test_verify_processing_pipeline.py -v
 
