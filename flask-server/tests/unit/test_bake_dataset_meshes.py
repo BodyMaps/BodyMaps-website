@@ -194,3 +194,102 @@ def test_a_dataset_without_a_configured_folder_asks_for_one(monkeypatch):
     monkeypatch.setattr(Constants, "ABDOMENATLAS_OVERLAY_PATH", "")
     with pytest.raises(SystemExit):
         B.mask_root("abdomenatlas", None)
+
+
+# ------------------------------------------------- AbdomenAtlas: the second map (liver segments, hepatic vessels)
+def save_parts(root: Path, case: str, data: np.ndarray, affine=None):
+    path = root / "mask_only" / case / B.PARTS_MASK
+    path.parent.mkdir(parents=True, exist_ok=True)
+    nib.save(nib.Nifti1Image(data, np.eye(4) if affine is None else affine), str(path))
+    return path
+
+
+def parts_labels():
+    data = np.zeros((12, 12, 12), dtype=np.uint8)
+    data[1:4, 6:10, 6:10] = 51      # liver segment 1
+    data[5:8, 6:10, 6:10] = 50      # hepatic vessel
+    return data
+
+
+def test_the_parts_meshes_join_the_manifest_on_the_same_centre(world):
+    save_parts(world["at"], "BDMAP_00000001", parts_labels())
+    assert run(world, "abdomenatlas", data="at") == 0
+    m = manifest(world, "BDMAP_00000001")
+    by_key = {o["key"]: o for o in m["organs"]}
+    assert {"liver", "liver_lesion", "liver_segment_1", "hepatic_vessel"} <= set(by_key)
+    assert by_key["liver_segment_1"]["id"] == 51 and by_key["hepatic_vessel"]["id"] == 50
+    assert [o["id"] for o in m["organs"]] == sorted(o["id"] for o in m["organs"])
+    assert m["partsBaked"] is True and m["labelScheme"] == SCHEME
+    for key in ("liver_segment_1", "hepatic_vessel"):
+        glb = world["mesh"] / "BDMAP_00000001" / os.path.basename(by_key[key]["url"])
+        assert glb.read_bytes()[:4] == b"glTF"
+        assert by_key[key]["url"].startswith("/api/cases/BDMAP_00000001/render_only/")
+    # the centre is the main map's, so the parts line up with the liver mesh
+    main_only = world["mesh"].parent / "main_only"
+    other = {"at": world["at"], "mesh": main_only}
+    (main_only / "BDMAP_00000001").mkdir(parents=True)
+    from services.mesh_generation import bake_case_meshes
+    ref = bake_case_meshes("BDMAP_00000001", str(world["at"] / "mask_only" / "BDMAP_00000001" / B.MASK_NAME),
+                           str(main_only / "BDMAP_00000001"))
+    assert m["center"] == ref["center"] and other
+
+
+def test_parts_are_added_to_a_case_that_is_already_baked_without_touching_its_other_meshes(world, capsys):
+    assert run(world, "abdomenatlas", data="at") == 0
+    liver_glb = world["mesh"] / "BDMAP_00000001" / "liver.glb"
+    before = liver_glb.stat().st_mtime_ns
+    assert "partsBaked" not in manifest(world, "BDMAP_00000001")
+    save_parts(world["at"], "BDMAP_00000001", parts_labels())
+    capsys.readouterr()
+    assert run(world, "abdomenatlas", data="at") == 0
+    assert "baked=1 skipped=0" in capsys.readouterr().out
+    assert liver_glb.stat().st_mtime_ns == before, "the main meshes are not rebaked for the parts"
+    assert {"liver_segment_1", "hepatic_vessel"} <= {o["key"] for o in manifest(world, "BDMAP_00000001")["organs"]}
+    capsys.readouterr()
+    assert run(world, "abdomenatlas", data="at") == 0
+    assert "baked=0 skipped=1" in capsys.readouterr().out, "and a third run has nothing left to do"
+
+
+def test_a_rebaked_main_map_gets_its_parts_again(world):
+    save_parts(world["at"], "BDMAP_00000001", parts_labels())
+    assert run(world, "abdomenatlas", data="at") == 0
+    assert run(world, "abdomenatlas", "--force", data="at") == 0
+    keys = {o["key"] for o in manifest(world, "BDMAP_00000001")["organs"]}
+    assert {"liver_segment_1", "hepatic_vessel"} <= keys
+
+
+def test_a_parts_map_on_another_grid_is_an_error_and_the_case_keeps_a_valid_manifest(world, capsys):
+    shifted = np.eye(4)
+    shifted[0, 3] = 3.0
+    save_parts(world["at"], "BDMAP_00000001", parts_labels(), affine=shifted)
+    capsys.readouterr()
+    assert run(world, "abdomenatlas", data="at") == 1
+    assert "[error] BDMAP_00000001" in capsys.readouterr().out
+    m = manifest(world, "BDMAP_00000001")                       # the main meshes were baked before the parts failed
+    assert {"liver", "liver_lesion"} <= {o["key"] for o in m["organs"]}
+    assert "partsBaked" not in m
+
+
+def test_other_datasets_never_look_for_a_parts_map(world):
+    save_parts(world["pants"], "PanTS_00000001", np.zeros((12, 12, 12), dtype=np.uint8) + 50)
+    assert run(world) == 0
+    assert "partsBaked" not in manifest(world, "PanTS_00000001")
+
+
+def test_the_parts_meshes_are_placed_with_the_main_meshes_centre(world):
+    """Not just the manifest: the vertices of a parts mesh must be those a main-map bake would give, i.e. measured from the same centre."""
+    import trimesh
+    from services import mesh_generation as M
+
+    data = parts_labels()
+    save_parts(world["at"], "BDMAP_00000001", data)
+    assert run(world, "abdomenatlas", data="at") == 0
+    m = manifest(world, "BDMAP_00000001")
+    by_key = {o["key"]: o for o in m["organs"]}
+    glb = world["mesh"] / "BDMAP_00000001" / os.path.basename(by_key["liver_segment_1"]["url"])
+    got = trimesh.load(str(glb), file_type="glb", force="mesh").bounds
+    want = M._build_organ_mesh(data.astype(np.int32), np.eye(4), 51, np.asarray(m["center"]), smooth=True).bounds
+    assert np.allclose(got, want, atol=1e-3)
+    own_centre = M.compute_global_center(data.astype(np.int32), np.eye(4))
+    other = M._build_organ_mesh(data.astype(np.int32), np.eye(4), 51, own_centre, smooth=True).bounds
+    assert not np.allclose(got, other, atol=1e-3), "the test must tell the main centre from the parts map's own"
