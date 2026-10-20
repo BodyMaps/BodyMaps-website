@@ -106,6 +106,23 @@ def manifest_state(case_dir: str, mask_path: str, refresh_legacy: bool) -> str:
     return "ok"
 
 
+PARTS_MASK = "parts_labels.nii.gz"
+
+
+def parts_pending(case_dir: str, parts_path: str) -> bool:
+    """True when a case has a second label map (AbdomenAtlas' liver segments and hepatic vessels) whose meshes are not in the
+    manifest yet: the flag is missing, or the map is newer than the manifest."""
+    if not os.path.isfile(parts_path):
+        return False
+    manifest_path = os.path.join(case_dir, "manifest.json")
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            baked = json.load(handle).get("partsBaked") is True
+    except (OSError, ValueError):
+        return True
+    return not baked or os.path.getmtime(parts_path) > os.path.getmtime(manifest_path)
+
+
 def _folder_bytes(path: str) -> int:
     return sum(os.path.getsize(os.path.join(path, name)) for name in os.listdir(path)
                if os.path.isfile(os.path.join(path, name)))
@@ -116,9 +133,16 @@ def bake_case(job: Tuple[str, str, str, str, bool, bool]) -> dict:
     dataset, case, root, mesh_root, force, refresh_legacy = job
     mask_path = os.path.join(root, "mask_only", case, MASK_NAME)
     case_dir = os.path.join(mesh_root, case)
+    parts_path = os.path.join(root, "mask_only", case, PARTS_MASK) if dataset == "abdomenatlas" else ""
     try:
         state = manifest_state(case_dir, mask_path, refresh_legacy)
         if state == "ok" and not force:
+            if parts_path and parts_pending(case_dir, parts_path):
+                from services.mesh_generation import bake_extra_meshes
+
+                manifest = bake_extra_meshes(case, parts_path, case_dir, route_base="cases", smooth=dataset not in UNSMOOTHED)
+                return {"case": case, "status": "baked", "was": "parts", "organs": len(manifest["organs"]),
+                        "bytes": _folder_bytes(case_dir)}
             return {"case": case, "status": "skipped"}
         from services.mesh_generation import bake_case_meshes
 
@@ -136,6 +160,10 @@ def bake_case(job: Tuple[str, str, str, str, bool, bool]) -> dict:
             nib.save(nib.Nifti1Image(to_viewer(np.asanyarray(raw.dataobj)).astype(np.uint8), raw.affine), source)
         try:
             manifest = bake_case_meshes(case, source, case_dir, route_base="cases", smooth=dataset not in UNSMOOTHED)
+            if parts_path and os.path.isfile(parts_path):
+                from services.mesh_generation import bake_extra_meshes
+
+                manifest = bake_extra_meshes(case, parts_path, case_dir, route_base="cases", smooth=dataset not in UNSMOOTHED)
         finally:
             if scratch:
                 shutil.rmtree(scratch, ignore_errors=True)
