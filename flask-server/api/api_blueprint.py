@@ -45,7 +45,7 @@ from services.report_evidence import (
     report_payload, report_limitations, render_report_html, measurement_display, report_assessment_scope, source_text,
 )
 from services.segmentation_metrics import calculate_session_metrics
-from services.search_ranking import rank_quality_results, rank_sample_results, select_balanced_tumor_results
+from services.search_ranking import rank_quality_results, rank_legacy_quality_results, rank_sample_results, select_balanced_tumor_results
 from services.sample_staging import SampleStager, SampleError, validate_session_id as validate_sample_session_id, TARGET as SAMPLE_TARGET
 from services.sample_staging import MARKER as SAMPLE_MARKER
 from api.rate_limit import Limiter
@@ -3896,6 +3896,8 @@ def api_search():
             df,
             balance_sex=not has_sex_filter,
             balance_age=not has_age_filter,
+            balance_tumor=not any(key in request.args for key in ("tumor", "tumor_is_null", "tumor_type", "tumor_type[]")),
+            balance_dataset=(request.args.get("dataset", "").strip().lower() in ("", "all", "both")),
         )
         by = []
         asc = []
@@ -4229,7 +4231,7 @@ def _ranked_all(n: int) -> pd.DataFrame:
     base_cap = _has_tumor_capacity(base, n)
     complete_cap = _has_tumor_capacity(complete, n)
     df_full = complete if (len(complete) >= n and (not base_cap or complete_cap)) else base
-    return rank_quality_results(df_full, balance_sex=True, balance_age=True)
+    return rank_legacy_quality_results(df_full, balance_sex=True, balance_age=True)
 
 
 def _has_both_tumor_cohorts(df: pd.DataFrame) -> bool:
@@ -4332,7 +4334,7 @@ def api_random_topk_rotate_norand():
             has_tumor_filter = any(
                 key in request.args for key in ("tumor", "tumor_is_null")
             )
-            df = rank_quality_results(
+            df = rank_legacy_quality_results(
                 df_full,
                 balance_sex=not has_sex_filter,
                 balance_age=not has_age_filter,
