@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Where the viewer reads a dataset case from, decided by a HEAD probe of the lab server's CT.
 // A case is only "not in the dataset" when the lab server answers 404 and the public mirror
 // does too. Any other answer that is not OK (unreachable, any 5xx such as the dataset storage
-// being down, a refused 401 or 403) loads the case from the mirror, mask included, because the
+// being down) loads the case from the mirror, mask included, because the
 // lab server will not read or convert the mask either. A case the lab server says it does not
 // store (404) still gets its mask from the backend, which reads the mirror and converts the
 // organ numbering. A CancerVerse case keeps its Report button.
@@ -148,6 +148,14 @@ beforeEach(() => {
 });
 
 describe("dataset case sources", () => {
+    it.each([401,403])("does not bypass a denied showcase/session grant through the mirror (%s)", async (labServer) => {
+        stubApi({labServer,mirror:200});
+        const {unmount}=open('1');
+        expect(await screen.findByRole('heading',{name:"This case isn't available"})).toBeInTheDocument();
+        expect(renderVisualization).not.toHaveBeenCalled();
+        expect(vi.mocked(fetch).mock.calls.some(([url])=>String(url).startsWith(MIRROR))).toBe(false);
+        unmount();
+    });
 	it("says the case is not available when the lab server and the mirror both answer 404", async () => {
 		stubApi({ labServer: 404, mirror: 404 });
 		const { unmount } = open("1");
@@ -171,8 +179,6 @@ describe("dataset case sources", () => {
 		["cannot be reached", 0],
 		["answers with a gateway error", 502],
 		["answers with a server error", 500],
-		["answers that the sign-in has ended", 401],
-		["refuses the request", 403],
 	])("loads the mirror's CT and mask when the lab server %s", async (_why, labServer) => {
 		stubApi({ labServer, mirror: 200 });
 		const { unmount } = open("1");

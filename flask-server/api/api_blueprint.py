@@ -883,6 +883,28 @@ def upload():
         print(f"❌ [Upload Error] {e}")
         return jsonify({"error": "Internal server error"}), 500
 
+@api_blueprint.route('/cases/<case_id>/organ-stats', methods=['GET'])
+def get_case_organ_stats(case_id):
+    # Read-only catalog counterpart to POST /mask-data; never a session lookup.
+    from services.showcase import canonical_showcase_id
+    canonical = canonical_showcase_id(case_id)
+    if canonical is None:
+        return jsonify({"error": "Invalid PanTS id"}), 400
+    down = mount_down_response()
+    if down:
+        return down
+    try:
+        result = _mask_data_for_case(str(int(canonical.split('_')[1])))
+    except Exception:
+        current_app.logger.exception('Catalog organ statistics failed')
+        result = None
+    if not isinstance(result, dict) or result.get('error'):
+        # Computation/fallback errors may contain private filesystem details.
+        # Keep diagnostics server-side, including for signed-in callers.
+        return jsonify({'error': 'Organ statistics are temporarily unavailable.'}), 503
+    return jsonify(result)
+
+
 @api_blueprint.route('/mask-data', methods=['POST'])
 def get_mask_data():
     session_key = request.form.get('sessionKey')
@@ -3842,6 +3864,14 @@ def health():
     resp.status_code = 200 if mount["ok"] else 503
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+@api_blueprint.route("/showcase", methods=["GET"])
+def api_showcase():
+    from services.showcase import showcase_rows
+    rows = showcase_rows()
+    items = clean_json_list([row_to_item(r) for _, r in rows.iterrows()])
+    return jsonify({"items": items})
+
 
 @api_blueprint.route("/search", methods=["GET"])
 def api_search():
