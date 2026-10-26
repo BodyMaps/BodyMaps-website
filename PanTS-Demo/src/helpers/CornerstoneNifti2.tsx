@@ -16,6 +16,7 @@ import { SeatedEllipticalROITool, SeatedRectangleROITool } from "./viewer/measur
 import { addLabelmapActors } from "./viewer/labelmapActors";
 import { addVolumeLabelmap } from "./viewer/addVolumeLabelmap";
 import { createNiftiImageIdsAndCacheMetadata } from "./viewer/loadNiftiImageIds";
+import { parallelPair } from './viewer/parallelVolumes';
 import { applyOrganVisibility } from "./viewer/organVisibility";
 import { applyVolume3DBlend, VOLUME_3D_PRESETS, VOLUME_3D_PRESETS_MR } from "./volume3DPresets";
 type viewportIdTypes = 'CT_NIFTI_AXIAL' | 'CT_NIFTI_SAGITTAL' | 'CT_NIFTI_CORONAL';
@@ -669,16 +670,20 @@ export async function renderVisualization(ref1: HTMLDivElement, ref2: HTMLDivEle
     imageLoader.registerImageLoader("nifti", cornerstoneNiftiImageLoader);
     // The CT stack either streams from a NIfTI URL (dataset cases / sessions) or is a
     // set of already-registered DICOM imageIds (local "open DICOM folder" flow).
-    const imageIds = opts?.ctImageIds ?? (await _awaitWithAbort(
-        createNiftiImageIdsAndCacheMetadata({ url: mainNiftiURL }),
-        opts?.signal
-    ));
-    _claimVolumeImages(context, ctVolumeId, imageIds);
-    _throwIfViewerLoadStale(context, opts?.signal);
-    const segmentationImageIds = segmentationURL
-    ? await _awaitWithAbort(createNiftiImageIdsAndCacheMetadata({ url: segmentationURL }), opts?.signal)
-    : [];
-    _claimVolumeImages(context, segmentationVolumeId, segmentationImageIds);
+    const [imageIds, segmentationImageIds] = await _awaitWithAbort(parallelPair(
+        async () => {
+            const ids = opts?.ctImageIds ?? await createNiftiImageIdsAndCacheMetadata({ url: mainNiftiURL });
+            _claimVolumeImages(context, ctVolumeId, ids);
+            _throwIfViewerLoadStale(context, opts?.signal);
+            return ids;
+        },
+        async () => {
+            const ids = segmentationURL ? await createNiftiImageIdsAndCacheMetadata({ url: segmentationURL }) : [];
+            _claimVolumeImages(context, segmentationVolumeId, ids);
+            _throwIfViewerLoadStale(context, opts?.signal);
+            return ids;
+        }
+    ), opts?.signal);
     _throwIfViewerLoadStale(context, opts?.signal);
 
     const viewportInputArray = [
@@ -729,10 +734,24 @@ export async function renderVisualization(ref1: HTMLDivElement, ref2: HTMLDivEle
 
     renderingEngine.setViewports(viewportInputArray);
 
-    const volume = await volumeLoader.createAndCacheVolume(ctVolumeId, { imageIds });
+    const [volume, segmentationVolume] = await parallelPair(
+        async () => {
+            const loaded = await volumeLoader.createAndCacheVolume(ctVolumeId, { imageIds });
+            if (context.disposed) _releaseContextVolume(context, ctVolumeId);
+            _throwIfViewerLoadStale(context, opts?.signal);
+            return loaded;
+        },
+        async () => {
+            if (!segmentationURL || !segmentationImageIds.length) return null;
+            const loaded = await volumeLoader.createAndCacheVolume(segmentationVolumeId, { imageIds: segmentationImageIds });
+            if (context.disposed) _releaseContextVolume(context, segmentationVolumeId);
+            _throwIfViewerLoadStale(context, opts?.signal);
+            return loaded;
+        }
+    );
     if (!opts?.ctImageIds) _tagNiftiVolumeAsCt(volume);
     _throwIfViewerLoadStale(context, opts?.signal);
-    await volume.load();
+    await parallelPair(async () => { await volume.load(); }, async () => { await segmentationVolume?.load(); });
     _throwIfViewerLoadStale(context, opts?.signal);
     await setVolumesForViewports(
         renderingEngine,
@@ -743,12 +762,7 @@ export async function renderVisualization(ref1: HTMLDivElement, ref2: HTMLDivEle
 
     renderingEngine.renderViewports(viewportInputArray.map((viewport) => viewport.viewportId));
 
-    if (segmentationURL && segmentationImageIds.length > 0 && segmentation) {
-        const segmentationVolume = await volumeLoader.createAndCacheVolume(segmentationVolumeId, {
-            imageIds: segmentationImageIds
-        });
-        _throwIfViewerLoadStale(context, opts?.signal);
-        await segmentationVolume.load();
+    if (segmentationVolume && segmentation) {
         _throwIfViewerLoadStale(context, opts?.signal);
 
         segmentation.segmentationStyle.setStyle({ type: SegmentationRepresentations.Labelmap, segmentationId: segmentationVolumeId }, DEFAULT_SEGMENTATION_CONFIG);

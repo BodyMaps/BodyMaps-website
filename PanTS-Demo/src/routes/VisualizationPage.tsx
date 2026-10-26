@@ -49,6 +49,7 @@ import { formatCaseMetaValue } from "../helpers/demographics";
 import { buildViewerActions } from "../components/AIAssistant/assistantActions";
 import MeasurementPanel from "../components/MeasurementPanel/MeasurementPanel";
 import { SegmentationMeshViewer } from "../components/viewer/MeshViewer";
+import { probeSessionVolume } from '../helpers/viewer/sessionProbe';
 import { captureMeshCanvas } from "../helpers/viewer/meshCapture";
 import OrganCheckbox from "../components/OrganCheckbox";
 import PercentileBar from "../components/PercentileBar";
@@ -689,6 +690,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	// Scans with no organ segmentation (local files and reconstructions) hide the organ UI.
 	const noSeg = isLocal || isReconstruction;
 	const [dicomError, setDicomError] = useState<string | null>(null);
+	const [loading, setLoading] = useState(true);
 	// What names the opened local DICOM series (its description), shown in the toolbar after "Local DICOM".
 	const [dicomSeriesDescription, setDicomSeriesDescription] = useState("");
 	// The scan's session is missing, or belongs to someone else: the server
@@ -749,6 +751,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 
 	useEffect(() => {
 		let cancelled = false;
+		const sourceController = new AbortController();
 		const resolveSources = async () => {
 			if (isLocal) return; // local files, not URLs — the setup effect handles them
 			// A case/reveal replacement must first invalidate the currently displayed
@@ -759,15 +762,22 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			setCaseError(false);
 			if (sessionId) {
 				// The volume loader never reports an HTTP status, so a session the
-				// reader cannot open would spin forever. Ask first; only a definite
-				// refusal counts (a network failure still falls through to the
-				// loader, which retries).
+				// reader cannot open would spin forever. Bound this preliminary
+				// check too: it precedes the volume loader's five-minute deadline.
 				const ctPath = isReconstruction ? "session-reconstruction" : "session-ct";
-				const refused = await fetch(`${API_BASE}/api/${ctPath}/${sessionId}`, { method: "HEAD", credentials: "include" })
-					.then((r) => r.status === 401 || r.status === 403 || r.status === 404)
-					.catch(() => false);
+				setDicomError(null);
+				setLoading(true);
+				let admitted: boolean;
+				try {
+					admitted = await probeSessionVolume(`${API_BASE}/api/${ctPath}/${sessionId}`, sourceController.signal);
+				} catch (error) {
+					if (cancelled) return;
+					setDicomError(error instanceof Error ? error.message : 'The scan service could not be reached. Please try again.');
+					setLoading(false);
+					return;
+				}
 				if (cancelled) return;
-				if (refused) {
+				if (!admitted) {
 					setSessionError(true);
 					return;
 				}
@@ -856,7 +866,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			}
 		};
 		resolveSources();
-		return () => { cancelled = true; };
+		return () => { cancelled = true; sourceController.abort(); };
 	}, [pantsCase, sessionId, isReconstruction, probeAttempt, isHd, isLocal, isLiveRoom, isQuizPractice, isSoloChallenge, liveRoomMaskUrl, quizPracticeMaskUrl, soloChallengeMaskUrl]);
 
 	// The query that reproduces the current view (shared by Share and the HD reload).
@@ -1080,7 +1090,6 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	}, [sessionError, caseError]);
 	const stageRef = useRef<HTMLDivElement>(null);
 	const [showOrganDetails, setShowOrganDetails] = useState(false);
-	const [loading, setLoading] = useState(true);
 	// Set after mount, so "Preparing scan" is a change to the live region and is spoken.
 	// The region also reads loading and dicomError directly, so it empties in the same
 	// render that shows an error or the scan instead of one effect later.
