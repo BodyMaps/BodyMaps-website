@@ -790,6 +790,11 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			// status 0 = the request itself failed (network, cold backend).
 			const localStatus = await fetch(localCt, { method: "HEAD" }).then((r) => r.status).catch(() => 0);
 			if (cancelled) return;
+			// Never bypass a withdrawn showcase/session grant through the public mirror.
+			if (localStatus === 401 || localStatus === 403) {
+				setCaseError(true);
+				return;
+			}
 			const localOk = localStatus >= 200 && localStatus < 300;
 			if (!localOk && localStatus === 404) {
 				// The volume loader never reports an HTTP status either, so a case id that
@@ -4327,7 +4332,9 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 		try {
 			const fd = new FormData();
 			fd.append("sessionKey", String(caseId));
-			const res = await fetch(`${API_BASE}/api/mask-data`, { method: "POST", body: fd });
+			const res = pantsCase && !isServerOnlyCase && !sessionId && !isLocal
+				? await fetch(`${API_BASE}/api/cases/${encodeURIComponent(pantsCase)}/organ-stats`)
+				: await fetch(`${API_BASE}/api/mask-data`, { method: "POST", body: fd });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data = await res.json();
 			// The endpoint returns its errors with HTTP 200 + an `error` field: that is the
