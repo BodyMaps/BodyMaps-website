@@ -2,6 +2,7 @@ from flask import Blueprint, send_file, make_response, request, jsonify, Respons
 from werkzeug.utils import secure_filename
 from services.session_manager import generate_uuid
 from services.atomic_write import atomic_destination
+from services.session_mesh_manifest import cached_manifest as cached_session_mesh_manifest
 from services.auto_segmentor import run_auto_segmentation, cancel_session, cancel_all_inference, max_parallel_jobs, pop_run_info
 from services import job_run_log, job_store, inference_pipeline
 from functools import wraps
@@ -1793,15 +1794,17 @@ def _set_inference_job(session_id, **kwargs):
         if current.get("cancel_requested") and kwargs.get("status") in {"running", "completed"}:
             return False  # cancellation wins atomically; publish nothing
         current.update(kwargs)
-        snapshot = dict(current)
         # New runs are durable SQL jobs as well as legacy job.json snapshots.
         # update_job is deliberately a no-op for old, ownerless disk-only jobs.
-        job_store.update_job(session_id, **{
+        persisted = job_store.update_job(session_id, **{
             key: value for key, value in kwargs.items()
             if key in {"user_id", "status", "model", "error", "ct_path", "session_path",
                        "zip_path", "output_mask_dir", "reconstruction_path", "pipeline",
                        "pipeline_stages", "cancel_requested"}
         })
+        if persisted is not None:
+            current["updated_at"] = persisted["updated_at"]
+        snapshot = dict(current)
         # Publish memory only after the durable write succeeds.
         inference_jobs[session_id] = current
         # Track queue membership here, not per call site, so every path that
@@ -2622,7 +2625,7 @@ def get_inference_status(session_id):
     if job is None:
         return jsonify({"status": "not_found", "session_id": session_id}), 404
     # Never expose server paths or ownership metadata to the browser.
-    public_fields = ("status", "model", "error", "queue_position", "pipeline", "pipeline_stages")
+    public_fields = ("status", "model", "error", "queue_position", "pipeline", "pipeline_stages", "updated_at")
     resp = {"session_id": session_id, **{key: job[key] for key in public_fields if key in job}}
     # 1-based: "queue_position": 1 means next in line for the GPU slot.
     if (job.get("status") or "").lower() == "queued":
@@ -3087,7 +3090,10 @@ def get_session_mesh_manifest(session_id):
     seg_path = _session_seg_path(safe_session_id)
     if not seg_path:
         return jsonify({"error": "Segmentation not ready for session"}), 404
-    manifest = generate_mesh_manifest(safe_session_id, seg_path, route_base="sessions")
+    # The original route scanned the full labelmap on every reopen. Cache only
+    # derived metadata; ownership and source availability are still checked above.
+    with _mesh_bake_lock('session:' + safe_session_id):
+        manifest = cached_session_mesh_manifest(safe_session_id, seg_path, generate_mesh_manifest, LABEL_SCHEME)
     return jsonify(manifest)
 
 

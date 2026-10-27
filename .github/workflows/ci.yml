@@ -157,6 +157,15 @@ jobs:
       - name: Malformed case ids
         run: python -m pytest tests/functional/test_invalid_case_ids.py -v
 
+      - name: Owned session mesh metadata cache
+        env:
+          PYTHON_DOTENV_DISABLED: '1'
+          DATABASE_URL: 'sqlite:///:memory:'
+          PANTS_PATH: ''
+          CANCERVERSE_PATH: ''
+          PERMISSIONS_DIR: ${{ runner.temp }}/bodymaps-session-cache-tests
+        run: python -m pytest tests/unit/test_session_mesh_manifest.py -v
+
       - name: Dataset search ranking
         env:
           PYTHON_DOTENV_DISABLED: '1'
