@@ -39,7 +39,7 @@ python-dotenv==1.2.4
 requests==2.34.2
 reportlab==4.4.1
 scikit-image>=0.26.0
-scipy>=1.13.0
+scipy>=1.18.1
 setuptools==84.0.0
 SimpleITK>=2.4.0
 SQLAlchemy==2.1.1
