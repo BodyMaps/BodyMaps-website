@@ -57,8 +57,8 @@ describe('report dialog', () => {
     const next = screen.getByRole('button', { name: 'Continue' });
     next.focus();
     fireEvent.click(next);
-    expect(screen.getByRole('heading', { level: 1, name: 'Measurement summary' })).toHaveFocus();
-    expect(screen.getByText('Measurement summary', { selector: '[role="status"]' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Bring this to your doctor' })).toHaveFocus();
+    expect(screen.getByText('What to do next', { selector: '[role="status"]' })).toBeInTheDocument();
   });
 
   it('moves focus to Close when the report cannot be loaded', async () => {
