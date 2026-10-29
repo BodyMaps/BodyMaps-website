@@ -811,7 +811,14 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
     );
     return <div key={step} ref={stepRef} style={{ animation: `${anim} 0.38s ease both` }}>
       <div style={{ ...SECTION_LABEL, marginBottom: 10 }}>What to do next</div>
-      <h1 tabIndex={-1} style={{ color: '#fff', fontSize: 32, margin: '0 0 12px' }}>Bring this to your doctor</h1>
+      <p style={{ color: '#fff', fontSize: 34, fontWeight: 800, lineHeight: 1.15, margin: '0 0 14px' }}>
+        {lesions.length === 0
+          ? (all.length ? 'No high-risk area was marked' : 'No measurements available')
+          : lang === 'patient'
+            ? `${lesions.map(f => tumorName(f.organ)).join(', ')} flagged for review`
+            : lesions.map(f => `${tumorName(f.organ)}: ${formatMeasurement(f.lesion.volume, 'cc')}, mean ${formatMeasurement(f.lesion.mean_hu, 'HU')}`).join(' · ')}
+      </p>
+      <h1 tabIndex={-1} style={{ color: lang === 'patient' ? '#fbbf24' : 'rgba(255,255,255,0.7)', fontSize: 18, margin: '0 0 12px' }}>Bring this to your doctor</h1>
       <p style={body}>
         {lesions.length > 0
           ? `BodyMaps marked ${lesions.length === 1 ? 'an area' : `${lesions.length} areas`} as high risk (${lesions.map(f => tumorName(f.organ)).join(', ')}) for a doctor to review.`
