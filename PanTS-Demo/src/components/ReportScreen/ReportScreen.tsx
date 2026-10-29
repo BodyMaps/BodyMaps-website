@@ -815,8 +815,8 @@ export default function ReportScreen({ id, onClose, onViewChange, onOrganHighlig
         {lesions.length === 0
           ? (all.length ? 'No high-risk area was marked' : 'No measurements available')
           : lang === 'patient'
-            ? `${lesions.map(f => tumorName(f.organ)).join(', ')} flagged for review`
-            : lesions.map(f => `${tumorName(f.organ)}: ${formatMeasurement(f.lesion.volume, 'cc')}, mean ${formatMeasurement(f.lesion.mean_hu, 'HU')}`).join(' · ')}
+            ? `High risk: ${lesions.map(f => tumorName(f.organ)).join(', ')}`
+            : 'High risk: ' + lesions.map(f => `${tumorName(f.organ)}: ${formatMeasurement(f.lesion.volume, 'cc')}, mean ${formatMeasurement(f.lesion.mean_hu, 'HU')}`).join(' · ')}
       </p>
       <h1 tabIndex={-1} style={{ color: lang === 'patient' ? '#fbbf24' : 'rgba(255,255,255,0.7)', fontSize: 18, margin: '0 0 12px' }}>Bring this to your doctor</h1>
       <p style={body}>
