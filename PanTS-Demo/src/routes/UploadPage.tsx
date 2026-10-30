@@ -3408,7 +3408,7 @@ const UploadPage: React.FC = () => {
                             : uploadStatus === "done" ? "Uploaded to the server. Inference starts when you select Run."
                             : uploadStatus === "uploading" ? "Transferring the selected scan to the server. Inference has not started."
                             : "Selected in this browser. Inference has not started."}>
-                          <span className={uploadStatus === "uploading" ? "file-chip-spinner" : "file-chip-status-dot"} aria-hidden="true" />
+                          {uploadStatus !== "uploading" && <span className="file-chip-status-dot" aria-hidden="true" />}
                           {item.kind === "sample" ? "On server" : uploadStatus === "uploading" ? `Uploading ${uploadPct}%` : uploadStatus === "failed" ? "Upload failed" : uploadStatus === "done" ? "Uploaded" : "Ready"}
                         </span>
                         <button type="button"
