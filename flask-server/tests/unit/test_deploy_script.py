@@ -224,10 +224,32 @@ def test_degraded_health_still_blocks_restart_over_active_jobs(rig):
     assert not rig.start_log.exists()
 
 
-def test_missing_live_hook_stops_before_deploy_changes(rig):
-    res = rig.run(BODYMAPS_LIVE_ROOMS_RESTART_HOOK="")
+def test_without_a_live_hook_the_deploy_skips_live_rooms_and_still_succeeds(rig):
+    # bdmap1 does not run Live Rooms, so the one-paste deploy must not depend on its restart hook.
+    res = rig.run(BODYMAPS_LIVE_ROOMS_RESTART_HOOK="", BODYMAPS_LIVE_ROOMS_URL="http://127.0.0.1:1")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "DEPLOY OK" in res.stdout and "Live Rooms: no BODYMAPS_LIVE_ROOMS_RESTART_HOOK" in res.stdout
+    assert "skipped: BODYMAPS_LIVE_ROOMS_RESTART_HOOK is not set" in res.stdout
+    assert "WARNING: something is listening" not in res.stdout
+    assert not rig.live_log.exists() and not rig.ws_nonce_log.exists()
+    assert rig.start_log.exists()
+
+
+def test_without_a_live_hook_a_listening_live_rooms_is_warned_about_not_restarted(rig):
+    import socket
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0)); listener.listen(1)
+        port = listener.getsockname()[1]
+        res = rig.run(BODYMAPS_LIVE_ROOMS_RESTART_HOOK="", BODYMAPS_LIVE_ROOMS_URL=f"http://127.0.0.1:{port}")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "WARNING: something is listening" in res.stdout and "will NOT be restarted" in res.stdout
+    assert not rig.live_log.exists()
+
+
+def test_a_live_hook_that_is_not_executable_stops_before_deploy_changes(rig):
+    res = rig.run(BODYMAPS_LIVE_ROOMS_RESTART_HOOK=str(rig.tmp / "no-such-hook"))
     assert res.returncode == 1
-    assert "BODYMAPS_LIVE_ROOMS_RESTART_HOOK" in res.stdout
+    assert "is not an executable file" in res.stdout
     assert not rig.start_log.exists()
     assert sh("git rev-parse --short HEAD", rig.repo).stdout.strip() == rig.old_sha
 
