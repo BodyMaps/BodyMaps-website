@@ -125,6 +125,22 @@ const MODEL_OPTIONS: {
       "Optimized for speed over broader organ coverage",
     ],
   },
+  {
+    id: "SuPreM",
+    label: "SuPreM",
+    desc: "Open pre-trained U-Net for abdominal, pelvic and lung organ segmentation (organs only, no tumors)",
+    quickFacts: [
+      { value: "20", label: "Structures segmented" },
+      { value: "Organs", label: "Output" },
+      { value: "Free", label: "Plan" },
+    ],
+    details: [
+      "20 structures in one pass: liver, spleen, kidneys, pancreas, stomach, gallbladder, adrenal glands, duodenum, colon, bladder and prostate",
+      "Also the aorta, inferior vena cava, celiac artery, lungs and femurs",
+      "Organs only: no tumor or lesion classes",
+      "Included in every plan, including Free",
+    ],
+  },
 ];
 import { useLocation, useNavigate } from "react-router-dom";
 import "./UploadPage.css";
@@ -370,6 +386,9 @@ const ETA_PROFILES: Record<string, EtaProfile> = {
   // No measured anchor for these yet - same shape (fixed cost + linear-ish
   // scaling), scaled down from ePAI's rate as a placeholder, not a measurement.
   LesionSegmenter: { floorSeconds: 45, secondsPerMb: 0.35 },
+  // One run: a 9.7 MB abdominal CT took 213 s end to end on a GPU shared with another user.
+  // A placeholder until real history replaces it, like the profile above.
+  SuPreM: { floorSeconds: 90, secondsPerMb: 8 },
 };
 const DEFAULT_ETA_PROFILE: EtaProfile = { floorSeconds: 60, secondsPerMb: 0.45 };
 
