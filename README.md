@@ -38,9 +38,10 @@ ssh visitor@bdmap1.wse.jhu.edu
 cd /home/visitor/PanTS-Viewer && git fetch && git checkout main && git pull --ff-only && bash flask-server/deploy/deploy.sh
 ```
 
-The script backs up the database, rebuilds the frontend, refreshes Python packages, runs migrations, waits for running inference jobs to finish (default 15 minutes, `BODYMAPS_WAIT_FOR_JOBS` seconds), restarts the backend and checks the site. It takes a lock so two people cannot deploy at once, and it stops at the first failure and **names the step**; rerun the same line (every step is safe to repeat) or continue by hand from that step in [docs/operations-reference.md](docs/operations-reference.md#manual-deploy-steps-fallback). If the restart fails it prints the command that goes back to the previous version.
+The script backs up the database, builds the new frontend aside (a failed build never touches the live site), refreshes Python packages, runs migrations, waits for running inference jobs to finish (default 15 minutes, `BODYMAPS_WAIT_FOR_JOBS` seconds), swaps the new frontend in (the previous build is kept as `PanTS-Demo/dist.prev-*`), restarts the backend and checks the site. It takes a lock so two people cannot deploy at once, and it stops at the first failure and **names the step**; rerun the same line (every step is safe to repeat) or continue by hand from that step in [docs/operations-reference.md](docs/operations-reference.md#manual-deploy-steps-fallback). If the restart fails it prints the command that goes back to the previous version.
 
 - `bash flask-server/deploy/deploy.sh check` runs the preflight only and changes nothing.
+- On a flaky VPN, run the deploy detached so a dropped connection cannot stop it halfway: `cd /home/visitor/PanTS-Viewer && git fetch && git checkout main && git pull --ff-only && setsid nohup bash flask-server/deploy/deploy.sh > ~/deploy.log 2>&1 < /dev/null &`, then `tail -f ~/deploy.log` (Ctrl-C leaves it running).
 - Live Rooms is optional. If it runs on the machine, set `BODYMAPS_LIVE_ROOMS_RESTART_HOOK` to a script that supports `check` and `restart`; otherwise the script skips it (and warns if something is listening on port 8001).
 - Never restart the backend by hand with `pkill` while jobs may be running.
 

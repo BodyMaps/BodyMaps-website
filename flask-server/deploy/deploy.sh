@@ -27,6 +27,7 @@ LIVE_ROOMS_HOOK="${BODYMAPS_LIVE_ROOMS_RESTART_HOOK:-}"
 LIVE_ROOMS_URL="${BODYMAPS_LIVE_ROOMS_URL:-http://127.0.0.1:8001}"
 
 step=""
+fe_prev=""   # previous frontend build kept by step 4c, for the rollback message
 say() { printf '\n== %s ==\n' "$*"; }
 die() {
   printf '\nDEPLOY FAILED at: %s\n' "$step"
@@ -36,7 +37,8 @@ die() {
     5.*|5b.*|6.*)
       if [ -n "${old_sha:-}" ] && [ "${old_sha:-}" != "${new_sha:-}" ]; then
         printf 'To go back to the previous version (%s) and restart on it:\n  cd %s && git checkout --detach %s && bash flask-server/deploy/start_backend.sh\n  (then, once fixed: git checkout main)\n' "$old_sha" "$REPO" "$old_sha"
-        printf 'This is only the backend rollback step. Restore the matching frontend and restart Live Rooms with the same revision before reopening the site; see deploy/REDESIGN_RELEASE.md.\n'
+        [ -n "$fe_prev" ] && printf 'To put the previous frontend back as well:\n  cd %s/PanTS-Demo && mv dist dist.bad && mv %s dist\n' "$REPO" "$fe_prev"
+        printf 'If Live Rooms runs on this machine, restart it on the same revision too; see deploy/REDESIGN_RELEASE.md.\n'
       fi;;
   esac
   exit 1
@@ -137,10 +139,18 @@ echo "main: $old_sha -> $new_sha"
 step="3. rebuild frontend and backend deps (manual step 3)"
 say "$step"
 cd "$REPO/PanTS-Demo" || die
-npm ci || die "npm ci failed"
-npm run build || die "frontend build failed. nginx keeps serving the old site and the backend was NOT restarted - fix the build error and rerun."
+npm ci || die "npm ci failed. The live site is untouched (npm ci does not touch dist/)."
+# Build into dist.new, never into the live dist/: nginx serves dist/ directly and a build empties its output folder
+# first, so a failed or slow in-place build would leave the site empty. dist.new goes live in step 4c, after the job wait.
+# Keep these commands in sync with the "build" script in PanTS-Demo/package.json.
+rm -rf dist.new
+npx tsc -b || die "typecheck failed. The live site is untouched and the backend was NOT restarted - fix the error and rerun."
+npx vite build --outDir dist.new --emptyOutDir || die "frontend build failed. The live site is untouched and the backend was NOT restarted - fix the build error and rerun."
+cp dist.new/index.html dist.new/home.html || die "could not create dist.new/home.html. The live site is untouched."
+new_js=$(grep -o 'assets/index-[A-Za-z0-9_-]*\.js' dist.new/index.html | head -1)
+[ -n "$new_js" ] && [ -s "dist.new/$new_js" ] || die "the new build is incomplete (its entry script is missing). The live site is untouched."
 "$PY/pip" install -r "$REPO/flask-server/requirements.txt" || die "pip install failed"
-echo "frontend built; backend deps refreshed"
+echo "frontend built into dist.new (not live yet); backend deps refreshed"
 
 step="4. database migrations (manual step 4)"
 say "$step"
@@ -175,6 +185,19 @@ while :; do
   echo "$n inference job(s) running; waiting (${waited}s of ${WAIT_FOR_JOBS}s)"
   sleep 15; waited=$((waited + 15))
 done
+
+step="4c. put the new frontend live"
+say "$step"
+cd "$REPO/PanTS-Demo" || die
+[ -s dist.new/index.html ] || die "dist.new is missing or empty; nothing was swapped"
+if [ -d dist ]; then
+  # Keep the old build's hashed files so a browser tab that is still open does not 404 on them.
+  cp -n dist/assets/* dist.new/assets/ 2>/dev/null || true
+  fe_prev="dist.prev-$ts"
+  mv dist "$fe_prev" || die "could not move the old build aside; nothing was swapped"
+fi
+mv dist.new dist || die "swap failed. Put the old build back with:  cd $REPO/PanTS-Demo && mv ${fe_prev:-dist.prev-missing} dist"
+echo "new frontend is live; previous build kept at PanTS-Demo/${fe_prev:-(none)}"
 
 step="5. restart the backend (manual step 5)"
 say "$step"
@@ -261,4 +284,6 @@ else
   echo "mail: no 'SMTP is not configured' lines in the log"
 fi
 
+# Keep the three newest previous builds; older ones are only disk use.
+(cd "$REPO/PanTS-Demo" && ls -dt dist.prev-[0-9]* 2>/dev/null | tail -n +4 | xargs -r rm -rf) || true
 printf '\nDEPLOY OK  main %s -> %s\n' "$old_sha" "$new_sha"
