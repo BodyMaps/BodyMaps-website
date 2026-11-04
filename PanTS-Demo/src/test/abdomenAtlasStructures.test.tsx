@@ -7,6 +7,7 @@ import {
   AtlasOrganSystems,
   CANCERVERSE_TUMOR_IDS,
   HIDDEN_BY_DEFAULT_IDS,
+  LIBRARY_CLASS_COUNT,
   ORGAN_CLASS_COUNT,
   OrganSystems,
   segmentation_categories,
@@ -49,6 +50,8 @@ describe("AbdomenAtlas structure ids", () => {
 
   it("do not count as PanTS organ classes or as CancerVerse tumor types", () => {
     expect(ORGAN_CLASS_COUNT).toBe(35);
+    // The landing page quotes the whole library: the 35 plus the 9 CancerVerse tumor types and 14 Atlas-only structures.
+    expect(LIBRARY_CLASS_COUNT).toBe(58);
     for (const key of NEW_KEYS) expect(CANCERVERSE_TUMOR_IDS.has(segmentation_categories.indexOf(key) + 1)).toBe(false);
   });
 });

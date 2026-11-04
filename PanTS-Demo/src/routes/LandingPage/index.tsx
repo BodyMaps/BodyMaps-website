@@ -1,15 +1,20 @@
 import { useEffect, useState } from "react";
-import { ORGAN_CLASS_COUNT, API_BASE } from "../../helpers/constants";
+import { LIBRARY_CLASS_COUNT, API_BASE } from "../../helpers/constants";
 import { useAuth } from "../../contexts/authContext";
 import { LANDING_OVERVIEW, LANDING_SUBTITLE } from "../../helpers/copy";
 import styles from "./LandingPage.module.css";
 
+// Signed-out visitors only ever see these (the live volume count needs an account), so keep them current.
 const TARGETS = {
-  // Fallback only (the live count is fetched from /api/search?dataset=all).
-  ctVolumes: 34_323,
+  // Fallback only (the live count is fetched from /api/search?dataset=all): PanTS 9,901 + CancerVerse 24,422
+  // + AbdomenAtlas 9,262.
+  ctVolumes: 43_585,
+  // The published PanTS figure. Not re-derived: only PanTS names its institutions (76 in the site's
+  // metadata); CancerVerse and AbdomenAtlas carry no center field.
   medicalCenters: 145,
+  // Segmentation mask files on disk, 2026-11-03: PanTS 277,227 + CancerVerse 317,460 + AbdomenAtlas 398,449 = 993,136.
   annotatedStructures: 993_000,
-  organClasses: ORGAN_CLASS_COUNT,
+  organClasses: LIBRARY_CLASS_COUNT,
 } as const;
 
 const ANIMATION_DURATION = 2_200;

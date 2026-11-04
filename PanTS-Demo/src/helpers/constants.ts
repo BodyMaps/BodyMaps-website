@@ -234,6 +234,10 @@ export const HIDDEN_BY_DEFAULT_IDS: ReadonlySet<number> = new Set(
 // CancerVerse uses and the fourteen structures that only AbdomenAtlas has. The landing page quotes this number.
 export const ORGAN_CLASS_COUNT = segmentation_categories.length - 9 - ATLAS_ONLY_KEYS.length;
 
+// Every class the library's label scheme has, across PanTS, CancerVerse and AbdomenAtlas. The landing page quotes
+// this one now that all three datasets are in the library.
+export const LIBRARY_CLASS_COUNT = segmentation_categories.length;
+
 export const OrganSystemsArray: Systems[] = [
 	"Vascular System",
 	"Digestive System",
