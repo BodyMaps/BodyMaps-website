@@ -5059,7 +5059,6 @@ const aiAvailableOrgans = useMemo(() => {
 
 				{loading ? (
 					<div className="vp-loading">
-						<div className="vp-spinner" />
 						<div className="vp-loading__text">{sessionId || isLocal ? "Preparing scan…" : <>Preparing case <span className="vp-loading__id">{caseId}</span>…</>}</div>
 						{isLocal || sessionId
 							? <Link className="vp-loading__back" to="/upload">Back to upload</Link>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { IconLayoutSidebar, IconLayoutGrid, IconFocusCentered, IconUsers, IconPlus, IconMenu2, IconX } from "@tabler/icons-react";
+import { IconLayoutSidebar, IconLayoutGrid, IconFocusCentered, IconUsers, IconChartBar, IconPlus, IconMenu2, IconX } from "@tabler/icons-react";
 import AuthButton from "./AuthButton";
 import SiteFooter from "./SiteFooter";
 import WorkspaceTour from "./WorkspaceTour";
@@ -25,7 +25,7 @@ export default function DesignShell() {
   const mobileButton = useRef<HTMLButtonElement>(null);
   const previousPath = useRef(location.pathname);
   const isWorkspace = location.pathname === "/" || location.pathname === "/upload";
-  const navIndex = location.pathname === "/team" ? 2 : location.pathname === "/dashboard" ? 1 : isWorkspace ? 0 : -1;
+  const navIndex = location.pathname === "/statistics" ? 3 : location.pathname === "/team" ? 2 : location.pathname === "/dashboard" ? 1 : isWorkspace ? 0 : -1;
 
   useEffect(() => {
     if (!isWorkspace || !location.state?.replayWorkspaceTour) return;
@@ -137,6 +137,7 @@ export default function DesignShell() {
           <NavLink to="/" end className={({ isActive }) => isActive || location.pathname === "/upload" ? "active" : ""} title="Workspace"><IconFocusCentered size={19} /><span className="sidebar-label">Workspace</span></NavLink>
           <NavLink to="/dashboard" title="Dataset"><IconLayoutGrid size={19} /><span className="sidebar-label">Dataset</span></NavLink>
           <NavLink to="/team" title="Team"><IconUsers size={19} /><span className="sidebar-label">Team</span></NavLink>
+          <NavLink to="/statistics" title="Statistics"><IconChartBar size={19} /><span className="sidebar-label">Statistics</span></NavLink>
         </nav>
         <section className="design-recent sidebar-label" aria-label="Recent runs" data-tour="recent">
           <h2 className="design-nav-caption">Recent runs</h2>
