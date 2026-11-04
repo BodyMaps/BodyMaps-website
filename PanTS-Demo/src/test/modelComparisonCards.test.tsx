@@ -37,7 +37,7 @@ describe("Additional info model details", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Additional info/ }));
     const dialog = screen.getByRole("dialog", { name: "ePAI" });
-    expect(within(dialog).getByText(/Full abdominal organ segmentation/)).toBeInTheDocument();
+    expect(within(dialog).getByText("Full organ segmentation with pancreas tumor detail")).toBeInTheDocument();
     expect(within(dialog).getByText("25 structures in one pass")).toBeInTheDocument();
     expect(within(dialog).getByText("Pancreas gland, duct, and 3 tumor subtypes (PDAC, cyst, PNET)")).toBeInTheDocument();
     expect(within(dialog).getByText("Abdominal")).toBeInTheDocument();
