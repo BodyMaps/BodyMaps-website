@@ -37,6 +37,7 @@ const ProfileSettings = lazyRoute(() => import("./routes/Settings/ProfileSetting
 const PlanSettings = lazyRoute(() => import("./routes/Settings/PlanSettings"));
 const HistorySettings = lazyRoute(() => import("./routes/Settings/HistorySettings"));
 const PrivacySettings = lazyRoute(() => import("./routes/Settings/PrivacySettings"));
+const DiagnosticsSettings = lazyRoute(() => import("./routes/Settings/DiagnosticsSettings"));
 // Admin-only sections: split out so the charts and the account list stay out of
 // everyone else's bundle.
 const AnalyticsSettings = lazyRoute(() => import("./routes/Settings/AnalyticsSettings"));
@@ -215,6 +216,7 @@ function App() {
                         <Route path="plan" element={<PlanSettings />} />
                         <Route path="history" element={<HistorySettings />} />
                         <Route path="privacy" element={<PrivacySettings />} />
+                        <Route path="diagnostics" element={<DiagnosticsSettings />} />
                         <Route path="analytics" element={<AnalyticsSettings />} />
                         <Route path="people" element={<PeopleSettings />} />
                       </Route>

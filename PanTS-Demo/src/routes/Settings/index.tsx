@@ -1,5 +1,5 @@
 import {
-	IconChartBar, IconHeart, IconHistory, IconShieldLock, IconUser, IconUsers,
+	IconActivity, IconChartBar, IconHeart, IconHistory, IconShieldLock, IconUser, IconUsers,
 } from "@tabler/icons-react";
 import React, { Suspense, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -37,6 +37,7 @@ const SECTIONS: Section[] = [
 	{ to: "/account/plan", label: "Plan", icon: IconHeart },
 	{ to: "/account/history", label: "History", icon: IconHistory },
 	{ to: "/account/privacy", label: "Privacy", icon: IconShieldLock },
+	{ to: "/account/diagnostics", label: "Diagnostics", icon: IconActivity },
 ];
 
 // Admin-only sections, appended below the rest so the rail's ordinary shape
