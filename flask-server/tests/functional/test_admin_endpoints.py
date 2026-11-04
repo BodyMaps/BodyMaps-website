@@ -28,6 +28,9 @@ def client(tmp_path, monkeypatch):
     import services.plan_store  # noqa: F401
     import services.role_store as role_store
     importlib.reload(role_store)
+    import models.job  # noqa: F401
+    import services.model_health as model_health
+    importlib.reload(model_health)
     import api.auth as auth_mod
     importlib.reload(auth_mod)
     import api.auth_blueprint as auth_bp
@@ -93,6 +96,31 @@ def test_writes_are_gated_too(client):
         f"/api/admin/people/{target}/roles", json={"role": "admin"}
     ).status_code == 403
     assert client.delete(f"/api/admin/people/{target}/roles/admin").status_code == 403
+
+
+# ---- model health -----------------------------------------------------------
+
+def test_model_health_is_admin_only(client):
+    assert client.get("/api/admin/models/health").status_code == 401
+    sign_up(client, "nobody@b.com")
+    assert client.get("/api/admin/models/health").status_code == 403
+
+
+def test_an_admin_sees_a_failing_model_and_the_idle_ones(client):
+    from models.engine import session_scope
+    from models.job import Job
+    from models.user import SYSTEM_USER_ID
+
+    with session_scope() as s:
+        s.add(Job(session_id="s1", user_id=SYSTEM_USER_ID, model="Atlas-Net", status="failed",
+                  error="Expected Atlas-Net output not found"))
+    make_admin(client)
+    r = client.get("/api/admin/models/health")
+    assert r.status_code == 200
+    assert r.headers["Cache-Control"] == "no-store"
+    models = r.get_json()["models"]
+    assert models[0]["model"] == "Atlas-Net" and models[0]["status"] == "failing"
+    assert {m["model"]: m["status"] for m in models}["SuPreM"] == "no_runs"
 
 
 # ---- the list ---------------------------------------------------------------

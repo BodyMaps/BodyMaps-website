@@ -106,6 +106,10 @@ jobs:
       - name: Job-store unit tests
         run: python -m pytest tests/unit/test_job_store.py -v
 
+      # Per-model health for the admin Diagnostics page, from the job table.
+      - name: Model health unit tests
+        run: python -m pytest tests/unit/test_model_health.py -v
+
       # Accounts: argon2 hashing, sessions (create/resolve/expire/revoke), and the
       # register -> cookie -> me -> logout endpoint flow + require_auth guard.
       - name: Auth unit + endpoint tests
