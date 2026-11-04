@@ -888,10 +888,16 @@ def _resample_seg_to_ct_grid(seg_path: str, ct_path: str) -> None:
     print(f"[resample] Resampled seg saved: {out_nii.shape}, unique labels: {np.unique(inverted_tensor)}")
 
 def _stage_nifti_gz(input_path: str, dest_path: str) -> None:
-    """Point dest_path (always *_0000.nii.gz or ct.nii.gz) at input_path.
+    """Make dest_path (always *_0000.nii.gz or ct.nii.gz) hold input_path's CT.
 
-    input_path is usually already gzip-compressed, so a symlink is enough --
-    cheap, no copy of a multi-hundred-MB CT. But uploads that arrive as a
+    input_path is usually already gzip-compressed, so it is hard-linked --
+    cheap, no copy of a multi-hundred-MB CT. It is not symlinked: the session
+    folder is copied to a GPU worker (services/gpu_workers.py), and a symlink
+    to a scan that lives outside that folder (the pipeline layout keeps the
+    scan one level up) is dangling there, so nnU-Net reports "0 cases to
+    predict", exits 0 and the job fails with "output not found". rsync ships a
+    hard link's bytes. A copy is the fallback (scan on another filesystem, or
+    a link the OS refuses). But uploads that arrive as a
     bare .nii (e.g. the local-NIfTI picker) are NOT gzipped; symlinking one
     of those under a .gz-suffixed name promises gzip bytes that aren't
     there, and every reader (nibabel, SimpleITK) fails with "not a gzip
@@ -901,16 +907,11 @@ def _stage_nifti_gz(input_path: str, dest_path: str) -> None:
     if os.path.lexists(dest_path):
         os.remove(dest_path)
     if input_path.endswith(".gz"):
+        src = os.path.abspath(input_path)
         try:
-            os.symlink(os.path.abspath(input_path), dest_path)
-        except OSError as e:
-            # Windows without symlink privilege (WinError 1314) -> copy
-            import shutil
-            # errno 1314 or WinError 1314
-            if getattr(e, "winerror", None) == 1314 or "1314" in str(e):
-                shutil.copy2(input_path, dest_path)
-            else:
-                raise
+            os.link(src, dest_path)
+        except OSError:
+            shutil.copy2(src, dest_path)
     else:
         import nibabel as nib
         nib.save(nib.load(input_path), dest_path)
