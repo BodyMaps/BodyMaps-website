@@ -56,8 +56,9 @@ describe("landing hero copy", () => {
     vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
     const requestFrame = vi.spyOn(window, "requestAnimationFrame");
     render(<AuthProvider><MemoryRouter><LandingPage /></MemoryRouter></AuthProvider>);
-    expect(screen.getByText("34,323")).toBeInTheDocument();
+    expect(screen.getByText("43,585")).toBeInTheDocument();
     expect(screen.getByText("993K+")).toBeInTheDocument();
+    expect(screen.getByText("58")).toBeInTheDocument();
     expect(requestFrame).not.toHaveBeenCalled();
   });
 
@@ -70,7 +71,7 @@ describe("landing hero copy", () => {
     const onChange = preference.addEventListener.mock.calls[0][1];
     act(() => { preference.matches = true; onChange(); });
     expect(cancelFrame).toHaveBeenCalledWith(77);
-    expect(screen.getByText("34,323")).toBeInTheDocument();
+    expect(screen.getByText("43,585")).toBeInTheDocument();
     expect(screen.getByText("993K+")).toBeInTheDocument();
     unmount();
     expect(preference.removeEventListener).toHaveBeenCalledWith("change", onChange);

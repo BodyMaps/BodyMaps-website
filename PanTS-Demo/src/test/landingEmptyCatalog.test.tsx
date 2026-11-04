@@ -38,7 +38,7 @@ describe("landing hero CT-volume figure", () => {
     renderHero();
     await vi.waitFor(() => expect(vi.mocked(global.fetch).mock.calls.some(([u]) => String(u).includes("/api/search"))).toBe(true));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(screen.getByText("34,323")).toBeInTheDocument();
+    expect(screen.getByText("43,585")).toBeInTheDocument();
     expect(screen.queryByText(/^0$/)).toBeNull();
   });
 });
