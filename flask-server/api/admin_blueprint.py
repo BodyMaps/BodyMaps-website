@@ -6,6 +6,7 @@ Routes (registered under <BASE_PATH>/api), all admin-only:
   DELETE /admin/people/<user_id>/roles/<role>     -> revoke
   DELETE /admin/people/<user_id>                  -> schedule for deletion
   POST   /admin/people/<user_id>/restore          -> undo a scheduled deletion
+  GET    /admin/models/health                     -> per-model run health (Diagnostics page)
 
 Deliberately NOT behind ANALYTICS_DASHBOARD. That flag exists because the usage
 endpoints report on how every account behaves and it should take a deliberate
@@ -21,7 +22,7 @@ to — but it is why the only way in is require_role("admin").
 from flask import Blueprint, jsonify, request
 
 from api.auth import current_user, require_role
-from services import auth_store, role_store
+from services import auth_store, model_health, role_store
 
 admin_blueprint = Blueprint("admin", __name__)
 
@@ -109,3 +110,12 @@ def restore_account(user_id: str):
             "error": "That account is gone, or its 30-day window has already closed."
         }), 404
     return jsonify({"user_id": user_id, "deletion_requested_at": None}), 200
+
+
+@admin_blueprint.route("/admin/models/health", methods=["GET"])
+@require_role(role_store.ROLE_ADMIN)
+def models_health():
+    """How each model's recent runs ended, newest decides (services/model_health.py)."""
+    resp = jsonify({"window_days": model_health.WINDOW_DAYS, "models": model_health.model_health()})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp, 200
