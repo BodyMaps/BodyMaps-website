@@ -12,6 +12,7 @@ import { track } from "../../helpers/analytics";
 import { scrollBehavior } from "../../helpers/motion";
 import { msUntil } from "../../helpers/resetTime";
 import { useSettings } from "./context";
+import PermissionsOverview from "./PermissionsOverview";
 
 /** "in 6 hrs" / "in 24 min" from an ISO timestamp, or null once it's passed. */
 const untilLabel = (iso: string | null): string | null => {
@@ -306,6 +307,7 @@ const PlanSettings: React.FC = () => {
 					})}
 				</div>
 			</div>
+			<PermissionsOverview />
 		</>
 	);
 };
