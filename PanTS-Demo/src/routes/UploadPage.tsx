@@ -67,7 +67,7 @@ const MODEL_OPTIONS: {
   {
     id: "None",
     label: "None",
-    desc: "View a scan without running inference.",
+    desc: "View a scan without a model",
     quickFacts: [
       { value: "In your browser", label: "Where it runs" },
       { value: "None", label: "Inference" },
@@ -80,7 +80,7 @@ const MODEL_OPTIONS: {
   {
     id: "ePAI",
     label: "ePAI",
-    desc: "Full abdominal organ segmentation, with detailed pancreas and tumor analysis",
+    desc: "Full organ segmentation with pancreas tumor detail",
     quickFacts: [
       { value: "25", label: "Structures segmented" },
       { value: "3", label: "Pancreas tumor subtypes" },
@@ -96,7 +96,7 @@ const MODEL_OPTIONS: {
   {
     id: "Atlas-Net",
     label: "Atlas-Net",
-    desc: "For anatomically consistent results, with the same organ and tumor coverage as ePAI",
+    desc: "Consistent organs and tumors, like ePAI",
     quickFacts: [
       { value: "25", label: "Structures segmented" },
       { value: "3", label: "Pancreas tumor subtypes" },
@@ -112,7 +112,7 @@ const MODEL_OPTIONS: {
   {
     id: "LesionSegmenter",
     label: "LesionSegmenter",
-    desc: "For fast pancreatic lesion detection",
+    desc: "Fast pancreatic lesion detection",
     quickFacts: [
       { value: "4", label: "Organs covered" },
       { value: "Pancreatic", label: "Validated lesion type" },
@@ -128,7 +128,7 @@ const MODEL_OPTIONS: {
   {
     id: "SuPreM",
     label: "SuPreM",
-    desc: "Open pre-trained U-Net for abdominal, pelvic and lung organ segmentation (organs only, no tumors)",
+    desc: "Organs only, no tumors",
     quickFacts: [
       { value: "20", label: "Structures segmented" },
       { value: "Organs", label: "Output" },
@@ -144,7 +144,7 @@ const MODEL_OPTIONS: {
   {
     id: "R-Super-Pancreas-Kidney",
     label: "R-Super (Pancreas & Kidney)",
-    desc: "Finds pancreatic, kidney and liver tumors, trained from radiology reports as well as masks",
+    desc: "Pancreas, kidney and liver tumors",
     quickFacts: [
       { value: "3", label: "Tumor types" },
       { value: "Reports", label: "Trained with" },
@@ -160,7 +160,7 @@ const MODEL_OPTIONS: {
   {
     id: "R-Super-Merlin",
     label: "R-Super (Merlin)",
-    desc: "Finds tumors in nine other organs: bladder, gallbladder, spleen, esophagus, stomach, duodenum, prostate, uterus and adrenal glands",
+    desc: "Tumors in nine other organs",
     quickFacts: [
       { value: "9", label: "Organs with tumors" },
       { value: "Reports", label: "Trained with" },

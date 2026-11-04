@@ -37,7 +37,6 @@ const SECTIONS: Section[] = [
 	{ to: "/account/plan", label: "Plan", icon: IconHeart },
 	{ to: "/account/history", label: "History", icon: IconHistory },
 	{ to: "/account/privacy", label: "Privacy", icon: IconShieldLock },
-	{ to: "/account/diagnostics", label: "Diagnostics", icon: IconActivity },
 ];
 
 // Admin-only sections, appended below the rest so the rail's ordinary shape
@@ -46,6 +45,7 @@ const SECTIONS: Section[] = [
 const ADMIN_SECTIONS: Section[] = [
 	{ to: "/account/analytics", label: "Usage", icon: IconChartBar },
 	{ to: "/account/people", label: "People", icon: IconUsers },
+	{ to: "/account/diagnostics", label: "Diagnostics", icon: IconActivity },
 ];
 
 const SettingsPage: React.FC = () => {
