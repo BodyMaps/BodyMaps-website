@@ -1113,3 +1113,54 @@ def test_direct_suprem_queues_only_inference_and_records_local_host(
         assert notes == [("direct-suprem", "web-host")]
     finally:
         auto_segmentor._thread_session.sid = None
+
+
+# -- staged model input must survive the copy to a GPU worker ------------------
+
+def _copied_like_rsync_a(src_dir, dst_dir):
+    """What `rsync -a` does to a folder: symlinks stay symlinks, files are copied."""
+    import shutil
+    shutil.copytree(src_dir, dst_dir, symlinks=True)
+
+
+def test_staged_scan_outside_the_session_folder_reaches_the_worker(tmp_path):
+    # Pipeline layout: the scan sits one level above the folder that is synced.
+    scan = tmp_path / "ct.nii.gz"
+    scan.write_bytes(b"gzip-bytes")
+    stage = tmp_path / "pipeline" / "abc" / "segmentation" / "atlasnet" / "eval"
+    stage.mkdir(parents=True)
+    auto_segmentor._stage_nifti_gz(str(scan), str(stage / "CASE_ct_0000.nii.gz"))
+
+    worker_copy = tmp_path / "worker"
+    _copied_like_rsync_a(tmp_path / "pipeline" / "abc" / "segmentation", worker_copy)
+    scan.unlink()  # the worker has no access to the original scan either
+
+    staged = worker_copy / "atlasnet" / "eval" / "CASE_ct_0000.nii.gz"
+    assert not (stage / "CASE_ct_0000.nii.gz").is_symlink()
+    assert staged.read_bytes() == b"gzip-bytes"
+
+
+def test_staging_copies_when_the_scan_cannot_be_hard_linked(tmp_path, monkeypatch):
+    scan = tmp_path / "ct.nii.gz"
+    scan.write_bytes(b"gzip-bytes")
+    dest = tmp_path / "stage" / "CASE_ct_0000.nii.gz"
+    dest.parent.mkdir()
+
+    def _refuse(*_a, **_k):
+        raise OSError("Invalid cross-device link")
+
+    monkeypatch.setattr(auto_segmentor.os, "link", _refuse)
+    auto_segmentor._stage_nifti_gz(str(scan), str(dest))
+
+    assert not dest.is_symlink()
+    assert dest.read_bytes() == b"gzip-bytes"
+
+
+def test_restaging_replaces_an_existing_staged_file(tmp_path):
+    scan = tmp_path / "ct.nii.gz"
+    scan.write_bytes(b"new")
+    dest = tmp_path / "CASE_ct_0000.nii.gz"
+    dest.write_bytes(b"old")
+    auto_segmentor._stage_nifti_gz(str(scan), str(dest))
+    assert dest.read_bytes() == b"new"
+    assert scan.read_bytes() == b"new"
