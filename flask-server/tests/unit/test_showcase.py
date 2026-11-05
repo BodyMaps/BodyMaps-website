@@ -86,7 +86,16 @@ RULES = {
     "api.get_mesh_file": "/cases/<display_id>/render_only/liver.glb",
     "api.get_report_data": "/get-report-data/<id>",
     "api.get_case_organ_stats": "/cases/<case_id>/organ-stats",
+    "api.segmentation_metadata": "/segmentation-metadata/<case_id>",
 }
+
+
+def test_showcase_reads_name_real_viewer_routes():
+    # A typo here would silently fall back to deny-by-default and break the signed-out viewer.
+    import api.api_blueprint as routes
+    assert set(RULES) == set(SHOWCASE_READ_ENDPOINTS)
+    for endpoint in SHOWCASE_READ_ENDPOINTS:
+        assert callable(getattr(routes, endpoint.split('.', 1)[1], None)), endpoint
 
 
 @pytest.fixture

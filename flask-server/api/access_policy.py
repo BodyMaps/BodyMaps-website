@@ -75,6 +75,8 @@ SHOWCASE_READ_ENDPOINTS = {
     "api.get_mesh_file": "display_id",
     "api.get_report_data": "id",
     "api.get_case_organ_stats": "case_id",
+    # The viewer reads saved label names/colours before it loads any volume.
+    "api.segmentation_metadata": "case_id",
 }
 # report_html remains session-only, as on upstream/main. The React viewer reads
 # get_report_data instead; do not expose the older standalone HTML report.
