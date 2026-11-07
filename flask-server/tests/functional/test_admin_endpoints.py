@@ -293,7 +293,9 @@ def test_the_code_is_not_stored_in_the_clear(client):
 @pytest.mark.parametrize("hours", [0, -1, 24 * 15, 1.5, "24", True, None])
 def test_a_code_needs_a_sensible_lifetime(client, hours):
     _become_admin(client)
-    assert client.post("/api/admin/annotator-invites", json={"hours": hours}).status_code == 400
+    response = client.post("/api/admin/annotator-invites", json={"hours": hours})
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "hours must be a whole number from 1 to 336"}  # fixed text, never the exception's
 
 
 def test_a_code_defaults_to_one_day(client):

@@ -85,8 +85,9 @@ def create_annotator_invite():
     body = raw_body if isinstance(raw_body, dict) else {}
     try:
         invite = annotator_invites.create(current_user()["id"], body.get("hours", 24))
-    except ValueError as error:
-        return jsonify({"error": str(error)}), 400
+    except ValueError:
+        # A fixed message: nothing from the exception goes back to the caller.
+        return jsonify({"error": f"hours must be a whole number from 1 to {annotator_invites.MAX_HOURS}"}), 400
     # The only time the code is ever shown: the database keeps just its digest.
     return jsonify({"id": invite["id"], "code": invite["code"], "expires_at": invite["expires_at"].isoformat() + "Z"}), 201
 
