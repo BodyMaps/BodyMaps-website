@@ -29,8 +29,25 @@ function percentile(sorted: Float32Array, q: number): number {
 	return sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(q * (sorted.length - 1))))];
 }
 
-/** Classifies a loaded volume from a strided sample of its voxels. Pure: no viewer state. */
-export function analyzeScan(data: ArrayLike<number>): ScanAnalysis {
+const MR_NAME_TOKENS = new Set(["mri", "mr", "t1", "t1c", "t1ce", "t1w", "t2", "t2w", "flair", "dwi", "adc", "swi", "pd", "pdw", "mprage", "stir"]);
+const CT_NAME_TOKENS = new Set(["ct", "ncct", "cta", "hu"]);
+
+/** CT or MRI from a file name such as "brats_t1ce.nii.gz" or "ct_axial_soft_tissue.nii", or null if it says neither. */
+export function modalityFromName(name: string | undefined): ScanModality | null {
+	if (!name) return null;
+	const tokens = name.toLowerCase().replace(/\.(nii|gz|dcm)/g, " ").split(/[^a-z0-9]+/).filter(Boolean);
+	const mr = tokens.some((t) => MR_NAME_TOKENS.has(t));
+	const ct = tokens.some((t) => CT_NAME_TOKENS.has(t));
+	if (mr === ct) return null;
+	return mr ? "MR" : "CT";
+}
+
+/**
+ * Classifies a loaded volume from a strided sample of its voxels. Pure: no viewer state.
+ * Voxel statistics decide; the file name only breaks ties the statistics cannot (a CT stored with an offset
+ * has no air band, a bias-corrected MRI can go slightly negative).
+ */
+export function analyzeScan(data: ArrayLike<number>, name?: string): ScanAnalysis {
 	const stride = Math.max(1, Math.floor(data.length / SAMPLE_TARGET));
 	const sample = new Float32Array(Math.ceil(data.length / stride));
 	let n = 0;
@@ -49,9 +66,16 @@ export function analyzeScan(data: ArrayLike<number>): ScanAnalysis {
 
 	let modality: ScanModality;
 	let reason: string;
+	const hint = modalityFromName(name);
 	if (airFraction >= 0.01) {
 		modality = "CT";
 		reason = "air band near -1000 HU";
+	} else if (hint === "MR") {
+		modality = "MR";
+		reason = "file name names an MRI sequence";
+	} else if (hint === "CT" && max <= 4200 && min >= AIR_LOW) {
+		modality = "CT";
+		reason = "file name says CT and the values fit the HU range";
 	} else if (min >= -50) {
 		modality = "MR";
 		reason = "no negative intensities";
@@ -98,4 +122,23 @@ export function mrWindowPresets(a: Pick<ScanAnalysis, "min" | "max" | "p2" | "p9
 /** Unit text for intensity readouts: Hounsfield units only mean something on CT. */
 export function intensityUnit(modality: string | undefined): string {
 	return modality === "MR" ? "" : " HU";
+}
+
+/**
+ * volume.load() resolves before the slices have arrived (framesLoaded is still 0), so the scalar array is
+ * empty until the loader finishes. Classification needs the voxel values, hence this wait. `onTick` runs
+ * every poll (the viewer uses it to bail out of a stale load); false means it gave up after `timeoutMs`.
+ */
+export async function waitForFrames(
+	volume: { framesLoaded?: number; numFrames?: number },
+	onTick: () => void = () => {},
+	timeoutMs = 120_000,
+): Promise<boolean> {
+	const start = Date.now();
+	while ((volume.framesLoaded ?? 0) < (volume.numFrames ?? 0)) {
+		if (Date.now() - start > timeoutMs) return false;
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		onTick();
+	}
+	return true;
 }
