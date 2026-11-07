@@ -25,7 +25,7 @@ export default function DesignShell() {
   const mobileButton = useRef<HTMLButtonElement>(null);
   const previousPath = useRef(location.pathname);
   const isWorkspace = location.pathname === "/" || location.pathname === "/upload";
-  const navIndex = location.pathname === "/statistics" ? 3 : location.pathname === "/team" ? 2 : location.pathname === "/dashboard" ? 1 : isWorkspace ? 0 : -1;
+  const navIndex = location.pathname === "/team" ? 3 : location.pathname === "/statistics" ? 2 : location.pathname === "/dashboard" ? 1 : isWorkspace ? 0 : -1;
 
   useEffect(() => {
     if (!isWorkspace || !location.state?.replayWorkspaceTour) return;
@@ -136,8 +136,8 @@ export default function DesignShell() {
           <span className="design-nav-indicator" aria-hidden="true" style={{ opacity: navIndex < 0 ? 0 : 1, transform: `translateY(${Math.max(0, navIndex) * 44}px)` }} />
           <NavLink to="/" end className={({ isActive }) => isActive || location.pathname === "/upload" ? "active" : ""} title="Workspace"><IconFocusCentered size={19} /><span className="sidebar-label">Workspace</span></NavLink>
           <NavLink to="/dashboard" title="Dataset"><IconLayoutGrid size={19} /><span className="sidebar-label">Dataset</span></NavLink>
-          <NavLink to="/team" title="Team"><IconUsers size={19} /><span className="sidebar-label">Team</span></NavLink>
           <NavLink to="/statistics" title="Statistics"><IconChartBar size={19} /><span className="sidebar-label">Statistics</span></NavLink>
+          <NavLink to="/team" title="Team"><IconUsers size={19} /><span className="sidebar-label">Team</span></NavLink>
         </nav>
         <section className="design-recent sidebar-label" aria-label="Recent runs" data-tour="recent">
           <h2 className="design-nav-caption">Recent runs</h2>
