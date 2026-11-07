@@ -395,3 +395,68 @@ def test_the_server_script_can_still_give_and_take_the_manager_role(client):
     user_id = sign_up(client, "pi@example.com")
     assert role_store.ROLE_ANNOTATION_MANAGER in role_store.grant(user_id, role_store.ROLE_ANNOTATION_MANAGER)
     assert role_store.revoke(user_id, role_store.ROLE_ANNOTATION_MANAGER, acting_user_id="someone-else") == []
+
+
+# ---- permanent codes: never expire, still work once, can still be withdrawn --------------------------------
+
+def test_a_permanent_code_has_no_expiry_and_is_listed_as_open(client):
+    _become_admin(client)
+    created = client.post("/api/admin/annotator-invites", json={"permanent": True})
+    assert created.status_code == 201
+    body = created.get_json()
+    assert body["expires_at"] is None and body["permanent"] is True
+    listed = client.get("/api/admin/annotator-invites").get_json()["invites"]
+    assert [(row["status"], row["expires_at"], row["permanent"]) for row in listed] == [("open", None, True)]
+
+
+def test_a_permanent_code_works_exactly_once(client):
+    _become_admin(client)
+    code = client.post("/api/admin/annotator-invites", json={"permanent": True}).get_json()["code"]
+    client.post("/api/auth/logout")
+    sign_up(client, "first@example.com")
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": code}).status_code == 200
+    client.post("/api/auth/logout")
+    sign_up(client, "second@example.com")
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": code}).status_code == 403
+
+
+def test_a_permanent_code_still_works_long_after_a_temporary_one_would_have_expired(client):
+    from datetime import timedelta
+    from models.annotator_invite import AnnotatorInvite
+    from models.engine import session_scope
+    from models.job import utcnow
+    _become_admin(client)
+    permanent = client.post("/api/admin/annotator-invites", json={"permanent": True}).get_json()["code"]
+    temporary = client.post("/api/admin/annotator-invites", json={"hours": 1}).get_json()["code"]
+    with session_scope() as s:
+        # every code is stored as of a year ago, so a one-hour code is long expired
+        for row in s.query(AnnotatorInvite).filter(AnnotatorInvite.expires_at < utcnow() + timedelta(days=1)).all():
+            row.expires_at = utcnow() - timedelta(days=365)
+    client.post("/api/auth/logout")
+    sign_up(client, "late@example.com")
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": temporary}).status_code == 403
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": permanent}).status_code == 200
+
+
+def test_a_permanent_code_can_be_withdrawn(client):
+    _become_admin(client)
+    made = client.post("/api/admin/annotator-invites", json={"permanent": True}).get_json()
+    assert client.delete(f"/api/admin/annotator-invites/{made['id']}").status_code == 200
+    client.post("/api/auth/logout")
+    sign_up(client, "late@example.com")
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": made["code"]}).status_code == 403
+
+
+@pytest.mark.parametrize("value", ["yes", 1, "true", None, [True]])
+def test_permanent_must_be_a_real_true_or_false(client, value):
+    _become_admin(client)
+    response = client.post("/api/admin/annotator-invites", json={"permanent": value})
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "permanent must be true or false"}
+    assert client.get("/api/admin/annotator-invites").get_json()["invites"] == []
+
+
+def test_permanent_false_is_an_ordinary_timed_code(client):
+    _become_admin(client)
+    body = client.post("/api/admin/annotator-invites", json={"permanent": False, "hours": 2}).get_json()
+    assert body["permanent"] is False and body["expires_at"].endswith("Z")

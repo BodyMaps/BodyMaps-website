@@ -107,13 +107,14 @@ const MEASUREMENT_ANNOTATION_STYLE = {
 	shadow: true,
 };
 
+// Same fixed look as the main viewer: 60% fill and a solid 1px border in each structure's colour.
 const SEG_CONFIG = {
 	fillAlpha: 0.6,
 	fillAlphaInactive: 0.6,
 	outlineOpacity: 1,
 	outlineWidth: 1,
-	renderOutline: false,
-	outlineOpacityInactive: 0,
+	renderOutline: true,
+	outlineOpacityInactive: 1,
 };
 
 // Reference-line colours for each pane's crosshair (axial/sag/cor → red/green/blue).

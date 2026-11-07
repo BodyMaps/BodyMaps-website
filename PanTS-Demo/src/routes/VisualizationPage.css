@@ -972,6 +972,15 @@
   flex: 1 1 auto;
 }
 
+/* Full words ("Brightness", "Contrast") and real numbers ("L 40 HU"): give every row the same two columns. */
+.vp-flyout--adjust .vp-tb-slider__label {
+  min-width: 68px;
+}
+
+.vp-flyout--adjust .vp-tb-slider__val {
+  min-width: 62px;
+}
+
 .vp-flyout--adjust__actions {
   display: flex;
   gap: 6px;

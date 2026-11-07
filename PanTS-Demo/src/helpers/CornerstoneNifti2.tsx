@@ -138,13 +138,15 @@ const MEASUREMENT_ANNOTATION_STYLE = {
 
 const renderingEngineId = "rendering_engine";
 const toolGroupId = "myToolGroup";
-const DEFAULT_SEGMENTATION_CONFIG = {
+// The border is a fixed part of the look, not a setting: a solid 1px line in each structure's colour keeps its
+// edge readable under the 60% fill, which people can still change.
+export const DEFAULT_SEGMENTATION_CONFIG = {
     fillAlpha: 0.6,
     fillAlphaInactive: 0.6,
     outlineOpacity: 1,
     outlineWidth: 1,
-    renderOutline: false,
-    outlineOpacityInactive: 0
+    renderOutline: true,
+    outlineOpacityInactive: 1
 };
 
 
@@ -947,15 +949,9 @@ export function setVisibilities(checkState: boolean[]) {
 };
 
 
-// Fill (the solid organ color wash) and outline (the border traced around each segment)
-// are independently controllable — both 0–1. Previously a single "opacity" divided
-// whatever value it was given by 2.4 before applying it, so even 100% only ever reached
-// ~42% actual alpha; that division is gone. renderOutline defaults to false in
-// DEFAULT_SEGMENTATION_CONFIG (no border at all, regardless of outlineOpacity), so this
-// also flips it on/off based on whether the outline slider is above zero.
-// SegmentationStyle.setStyle merges onto the existing style by default (its `merge`
-// param defaults to true), so fill and outline can each be set independently without
-// either call needing to know the other's current value.
+// The fill (the solid organ colour wash) is adjustable, 0–1; the border traced around each segment is fixed
+// (DEFAULT_SEGMENTATION_CONFIG). SegmentationStyle.setStyle merges onto the existing style by default (its
+// `merge` param defaults to true), so changing the fill leaves the border as it is.
 function _setSegmentationStyle(style: Record<string, unknown>) {
     segmentation.config.style.setStyle(
         { type: csToolsEnums.SegmentationRepresentations.Labelmap, segmentationId },
@@ -976,18 +972,6 @@ export function setFillOpacity(fillOpacity: number) {
         renderFillInactive: true,
         fillAlpha: fillOpacity,
         fillAlphaInactive: fillOpacity,
-    });
-}
-
-// renderOutline defaults to false in DEFAULT_SEGMENTATION_CONFIG (no border at all,
-// regardless of outlineOpacity), so this flips it on/off based on whether the slider
-// is above zero.
-export function setOutlineOpacity(outlineOpacity: number) {
-    _setSegmentationStyle({
-        renderOutline: outlineOpacity > 0,
-        outlineOpacity: outlineOpacity,
-        outlineOpacityInactive: outlineOpacity,
-        outlineWidth: DEFAULT_SEGMENTATION_CONFIG.outlineWidth,
     });
 }
 

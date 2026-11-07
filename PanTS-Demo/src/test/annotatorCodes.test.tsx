@@ -16,7 +16,7 @@ const PERSON = {
 	created_at: "2026-01-04T00:00:00", deletion_requested_at: null as string | null, roles: [] as string[],
 };
 
-type Invite = { id: string; status: "open" | "redeemed" | "expired"; created_at: string; expires_at: string; redeemed_at: string | null; redeemed_by: string | null };
+type Invite = { id: string; status: "open" | "redeemed" | "expired"; created_at: string; expires_at: string | null; redeemed_at: string | null; redeemed_by: string | null };
 let calls: { method: string; url: string; body?: unknown }[] = [];
 let invites: Invite[] = [];
 let createStatus = 201;
@@ -41,8 +41,10 @@ beforeEach(() => {
 		if (u.includes("/api/admin/annotator-invites")) {
 			if (method === "POST") {
 				if (createStatus !== 201) return json({ error: "nope" }, false, createStatus);
-				invites = [{ id: "i1", status: "open", created_at: "2026-11-06T20:00:00", expires_at: "2026-11-07T20:00:00", redeemed_at: null, redeemed_by: null }, ...invites];
-				return json({ id: "i1", code: "ABCD-EFGH-JKMN", expires_at: "2026-11-07T20:00:00Z" }, true, 201);
+				const permanent = (JSON.parse(String(init?.body)) as { permanent?: boolean }).permanent === true;
+				const expires = permanent ? null : "2026-11-07T20:00:00";
+				invites = [{ id: "i1", status: "open", created_at: "2026-11-06T20:00:00", expires_at: expires, redeemed_at: null, redeemed_by: null }, ...invites];
+				return json({ id: "i1", code: "ABCD-EFGH-JKMN", expires_at: expires ? `${expires}Z` : null, permanent }, true, 201);
 			}
 			if (method === "DELETE") {
 				invites = invites.map((invite) => ({ ...invite, status: "expired" as const }));
@@ -96,6 +98,21 @@ describe("temporary editing codes", () => {
 		expect(created).toHaveTextContent(/shown once/i);
 		const post = calls.find((call) => call.method === "POST" && call.url.includes("/annotator-invites"));
 		expect(post?.body).toEqual({ hours: 168 });
+	});
+
+	it("offers Permanent after 7 days and creates a code that never expires", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const panel = await screen.findByTestId("annotator-codes");
+		const select = within(panel).getByLabelText("Works for") as HTMLSelectElement;
+		expect(Array.from(select.options).map((option) => option.textContent)).toEqual(["1 hour", "1 day", "7 days", "Permanent"]);
+		await user.selectOptions(select, "permanent");
+		await user.click(within(panel).getByRole("button", { name: "Create code" }));
+		const created = await screen.findByTestId("annotator-code-created");
+		expect(created).toHaveTextContent("ABCD-EFGH-JKMN");
+		expect(created).toHaveTextContent(/never expires, but works only once/i);
+		expect(calls.find((call) => call.method === "POST" && call.url.includes("/annotator-invites"))?.body).toEqual({ permanent: true });
+		expect(await screen.findByRole("list", { name: "Recent codes" })).toHaveTextContent("Open, never expires");
 	});
 
 	it("defaults to one day", async () => {

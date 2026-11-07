@@ -12,17 +12,21 @@ type Invite = {
 	id: string;
 	status: "open" | "redeemed" | "expired";
 	created_at: string | null;
+	/** Null for a permanent code. */
 	expires_at: string | null;
+	permanent?: boolean;
 	redeemed_at: string | null;
 	redeemed_by: string | null;
 };
 
-type Created = { id: string; code: string; expires_at: string };
+type Created = { id: string; code: string; expires_at: string | null; permanent?: boolean };
 
-const LIFETIMES = [
-	{ hours: 1, label: "1 hour" },
-	{ hours: 24, label: "1 day" },
-	{ hours: 24 * 7, label: "7 days" },
+const PERMANENT = "permanent";
+const LIFETIMES: { value: number | typeof PERMANENT; label: string }[] = [
+	{ value: 1, label: "1 hour" },
+	{ value: 24, label: "1 day" },
+	{ value: 24 * 7, label: "7 days" },
+	{ value: PERMANENT, label: "Permanent" },
 ];
 
 const when = (iso: string | null) => {
@@ -34,7 +38,7 @@ const when = (iso: string | null) => {
 };
 
 const AnnotatorCodes: React.FC = () => {
-	const [hours, setHours] = useState(24);
+	const [lifetime, setLifetime] = useState<number | typeof PERMANENT>(24);
 	const [invites, setInvites] = useState<Invite[]>([]);
 	const [created, setCreated] = useState<Created | null>(null);
 	const [copied, setCopied] = useState(false);
@@ -62,7 +66,7 @@ const AnnotatorCodes: React.FC = () => {
 				method: "POST",
 				credentials: "include",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ hours }),
+				body: JSON.stringify(lifetime === PERMANENT ? { permanent: true } : { hours: lifetime }),
 			});
 			if (!res.ok) throw new Error();
 			setCreated(await res.json());
@@ -106,7 +110,7 @@ const AnnotatorCodes: React.FC = () => {
 		<div className="set-group" data-testid="annotator-codes">
 			<h2 className="set-heading">Annotator access code</h2>
 			<p className="set-sub">
-				A one-time code that lets someone save corrected scans for everyone. It expires after the time you choose.
+				A one-time code that lets someone save corrected scans for everyone. It expires after the time you choose, or never if permanent.
 			</p>
 
 			<div className="set-picture-actions">
@@ -114,11 +118,11 @@ const AnnotatorCodes: React.FC = () => {
 				<select
 					id="annotator-code-lifetime"
 					className="set-input"
-					value={hours}
+					value={lifetime}
 					disabled={busy}
-					onChange={(e) => setHours(Number(e.target.value))}
+					onChange={(e) => setLifetime(e.target.value === PERMANENT ? PERMANENT : Number(e.target.value))}
 				>
-					{LIFETIMES.map((option) => <option key={option.hours} value={option.hours}>{option.label}</option>)}
+					{LIFETIMES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
 				</select>
 				<button className="set-btn" type="button" disabled={busy} onClick={() => void create()}>
 					Create code
@@ -131,7 +135,7 @@ const AnnotatorCodes: React.FC = () => {
 						<strong style={{ fontSize: "1.25em", letterSpacing: "0.08em", userSelect: "all" }}>{created.code}</strong>
 					</p>
 					<p className="set-row-note">
-						Shown once. Valid until {when(created.expires_at)}.
+						Shown once. {created.expires_at ? `Valid until ${when(created.expires_at)}.` : "Never expires, but works only once."}
 					</p>
 					<button className="set-btn" type="button" onClick={() => void copy()}>
 						{copied ? "Copied" : "Copy"}
@@ -146,7 +150,7 @@ const AnnotatorCodes: React.FC = () => {
 					{invites.map((invite) => (
 						<li key={invite.id} className="set-row">
 							<span className="set-row-label">
-								{invite.status === "open" && `Open until ${when(invite.expires_at)}`}
+								{invite.status === "open" && (invite.expires_at ? `Open until ${when(invite.expires_at)}` : "Open, never expires")}
 								{invite.status === "redeemed" && `Used by ${invite.redeemed_by ?? "a deleted account"}, ${when(invite.redeemed_at)}`}
 								{invite.status === "expired" && `Expired ${when(invite.expires_at)}`}
 								<span className="set-row-note">Created {when(invite.created_at)}</span>
