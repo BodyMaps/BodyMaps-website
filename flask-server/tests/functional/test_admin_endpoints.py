@@ -129,7 +129,8 @@ def test_the_list_carries_roles_and_the_vocabulary(client):
     make_admin(client)
     body = client.get("/api/admin/people").get_json()
     assert body["people"][0]["roles"] == ["admin"]
-    assert body["roles"] == ["admin", "annotator"]
+    # An admin who is not an annotation manager is not offered the annotator role.
+    assert body["roles"] == ["admin"]
 
 
 def test_search_narrows_the_list(client):
@@ -242,13 +243,15 @@ def test_roles_survive_a_profile_update(client):
 # ---- temporary annotator codes: only an admin makes them -----------------------------------------------
 
 def _become_admin(client, email="boss@example.com"):
+    """An admin who is also an annotation manager (the role only the server can give)."""
     import services.role_store as role_store
     user_id = sign_up(client, email)
     role_store.grant(user_id, role_store.ROLE_ADMIN)
+    role_store.grant(user_id, role_store.ROLE_ANNOTATION_MANAGER)
     return user_id
 
 
-def test_only_an_admin_can_create_list_or_withdraw_codes(client):
+def test_only_an_annotation_manager_can_create_list_or_withdraw_codes(client):
     assert client.post("/api/admin/annotator-invites", json={"hours": 1}).status_code == 401
     sign_up(client, "plain@example.com")
     assert client.post("/api/admin/annotator-invites", json={"hours": 1}).status_code == 403
@@ -334,3 +337,61 @@ def test_the_accounts_tab_offers_the_annotator_role_to_grant_by_email(client):
     assert "annotator" in people["roles"] and [p["email"] for p in people["people"]] == ["target@example.com"]
     assert client.post(f"/api/admin/people/{target}/roles", json={"role": "annotator"}).get_json()["roles"] == ["annotator"]
     assert client.delete(f"/api/admin/people/{target}/roles/annotator").get_json()["roles"] == []
+
+
+# ---- admin is not enough: only an annotation manager decides who may edit for everyone ---------------------
+
+def test_an_admin_who_is_not_a_manager_cannot_make_codes(client):
+    make_admin(client, "just-admin@example.com")
+    assert client.post("/api/admin/annotator-invites", json={"hours": 1}).status_code == 403
+    assert client.get("/api/admin/annotator-invites").status_code == 403
+    assert client.delete("/api/admin/annotator-invites/anything").status_code == 403
+
+
+def test_an_admin_who_is_not_a_manager_cannot_grant_or_remove_annotator(client):
+    make_admin(client, "just-admin@example.com")
+    client.post("/api/auth/logout")
+    target = sign_up(client, "target@example.com")
+    client.post("/api/auth/logout")
+    sign_in(client, "just-admin@example.com")
+    assert client.post(f"/api/admin/people/{target}/roles", json={"role": "annotator"}).status_code == 403
+    import services.role_store as role_store
+    role_store.grant(target, role_store.ROLE_ANNOTATOR)
+    assert client.delete(f"/api/admin/people/{target}/roles/annotator").status_code == 403
+    assert role_store.roles_for(target) == ["annotator"]  # nothing changed
+
+
+def test_such_an_admin_can_still_grant_admin_as_before(client):
+    make_admin(client, "just-admin@example.com")
+    client.post("/api/auth/logout")
+    target = sign_up(client, "target@example.com")
+    client.post("/api/auth/logout")
+    sign_in(client, "just-admin@example.com")
+    assert client.post(f"/api/admin/people/{target}/roles", json={"role": "admin"}).get_json()["roles"] == ["admin"]
+
+
+def test_nobody_can_grant_or_remove_the_manager_role_over_the_website(client):
+    import services.role_store as role_store
+    manager = _become_admin(client)
+    client.post("/api/auth/logout")
+    target = sign_up(client, "target@example.com")
+    client.post("/api/auth/logout")
+    sign_in(client, "boss@example.com")
+    # not even a manager can hand it out, and nobody can take it away (the server script does both)
+    assert client.post(f"/api/admin/people/{target}/roles", json={"role": "annotation_manager"}).status_code == 403
+    assert client.delete(f"/api/admin/people/{manager}/roles/annotation_manager").status_code == 403
+    assert role_store.roles_for(target) == []
+    assert role_store.ROLE_ANNOTATION_MANAGER in role_store.roles_for(manager)
+
+
+def test_a_manager_is_offered_the_annotator_role_but_never_the_manager_role(client):
+    _become_admin(client)
+    body = client.get("/api/admin/people").get_json()
+    assert body["roles"] == ["admin", "annotator"]
+
+
+def test_the_server_script_can_still_give_and_take_the_manager_role(client):
+    import services.role_store as role_store
+    user_id = sign_up(client, "pi@example.com")
+    assert role_store.ROLE_ANNOTATION_MANAGER in role_store.grant(user_id, role_store.ROLE_ANNOTATION_MANAGER)
+    assert role_store.revoke(user_id, role_store.ROLE_ANNOTATION_MANAGER, acting_user_id="someone-else") == []

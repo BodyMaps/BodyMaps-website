@@ -9,6 +9,10 @@ Routes (registered under <BASE_PATH>/api), all admin-only:
   POST   /admin/annotator-invites {hours}         -> a temporary single-use code that makes its redeemer an annotator
   GET    /admin/annotator-invites                 -> recent codes: open, redeemed (by whom) or expired
   DELETE /admin/annotator-invites/<id>            -> withdraw a code nobody has used yet
+
+Who may change what every visitor sees is narrower than admin: the three annotator-invite routes, and granting or
+removing ``annotator``, need ``annotation_manager``. ``annotation_manager`` itself cannot be granted or removed
+here at all (``scripts/grant_role.py`` on the server), so an admin cannot hand the power to themselves or anyone.
   GET    /admin/models/health                     -> per-model run health (Diagnostics page)
 
 Deliberately NOT behind ANALYTICS_DASHBOARD. That flag exists because the usage
@@ -24,10 +28,31 @@ to — but it is why the only way in is require_role("admin").
 
 from flask import Blueprint, jsonify, request
 
-from api.auth import current_user, require_role
+from api.auth import current_roles, current_user, require_role
 from services import annotator_invites, auth_store, model_health, role_store
 
 admin_blueprint = Blueprint("admin", __name__)
+
+
+def _is_annotation_manager() -> bool:
+    return role_store.ROLE_ANNOTATION_MANAGER in current_roles()
+
+
+def _grantable_roles() -> list[str]:
+    """The roles this caller can hand out or withdraw from the Accounts tab."""
+    roles = [role_store.ROLE_ADMIN]
+    if _is_annotation_manager():
+        roles.append(role_store.ROLE_ANNOTATOR)
+    return sorted(roles)
+
+
+def _refuse_role_change(role: str):
+    """None when the caller may grant or withdraw ``role``, else the response to return."""
+    if role == role_store.ROLE_ANNOTATION_MANAGER:
+        return jsonify({"error": "This role can only be changed on the server."}), 403
+    if role == role_store.ROLE_ANNOTATOR and not _is_annotation_manager():
+        return jsonify({"error": "Only an annotation manager can change who may edit scans."}), 403
+    return None
 
 
 @admin_blueprint.route("/admin/people", methods=["GET"])
@@ -45,7 +70,7 @@ def people():
     )
     # So the UI can render the toggles from the server's vocabulary rather than
     # keeping a second copy of the role list.
-    result["roles"] = sorted(role_store.ROLES)
+    result["roles"] = _grantable_roles()
     return jsonify(result), 200
 
 
@@ -55,6 +80,9 @@ def grant_role(user_id: str):
     raw_body = request.get_json(silent=True)
     body = raw_body if isinstance(raw_body, dict) else {}
     role = body.get("role") or ""
+    refused = _refuse_role_change(role)
+    if refused:
+        return refused
     try:
         roles = role_store.grant(user_id, role, granted_by=current_user()["id"])
     except LookupError:
@@ -67,6 +95,9 @@ def grant_role(user_id: str):
 @admin_blueprint.route("/admin/people/<user_id>/roles/<role>", methods=["DELETE"])
 @require_role(role_store.ROLE_ADMIN)
 def revoke_role(user_id: str, role: str):
+    refused = _refuse_role_change(role)
+    if refused:
+        return refused
     try:
         roles = role_store.revoke(user_id, role, acting_user_id=current_user()["id"])
     except role_store.RoleError as e:
@@ -79,7 +110,7 @@ def revoke_role(user_id: str, role: str):
 
 
 @admin_blueprint.route("/admin/annotator-invites", methods=["POST"])
-@require_role(role_store.ROLE_ADMIN)
+@require_role(role_store.ROLE_ANNOTATION_MANAGER)
 def create_annotator_invite():
     raw_body = request.get_json(silent=True)
     body = raw_body if isinstance(raw_body, dict) else {}
@@ -93,13 +124,13 @@ def create_annotator_invite():
 
 
 @admin_blueprint.route("/admin/annotator-invites", methods=["GET"])
-@require_role(role_store.ROLE_ADMIN)
+@require_role(role_store.ROLE_ANNOTATION_MANAGER)
 def list_annotator_invites():
     return jsonify({"invites": annotator_invites.recent()}), 200
 
 
 @admin_blueprint.route("/admin/annotator-invites/<invite_id>", methods=["DELETE"])
-@require_role(role_store.ROLE_ADMIN)
+@require_role(role_store.ROLE_ANNOTATION_MANAGER)
 def revoke_annotator_invite(invite_id: str):
     if not annotator_invites.revoke(invite_id):
         return jsonify({"error": "No unused code with that id"}), 404

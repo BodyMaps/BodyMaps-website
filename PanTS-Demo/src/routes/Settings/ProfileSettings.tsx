@@ -16,7 +16,7 @@ const AnnotatorAccessRow: React.FC = () => {
 	const [busy, setBusy] = useState(false);
 	const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
 	const roles = user?.roles ?? [];
-	const approved = roles.includes("annotator") || roles.includes("admin");
+	const approved = roles.includes("annotator") || roles.includes("annotation_manager");
 	const redeem = async () => {
 		if (!code.trim() || busy) return;
 		setBusy(true);

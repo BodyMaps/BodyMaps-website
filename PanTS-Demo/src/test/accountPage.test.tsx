@@ -1078,7 +1078,7 @@ describe("annotator access", () => {
 		expect(screen.getByLabelText(/Invitation code/)).toHaveValue("nope");
 	});
 
-	it.each(["annotator", "admin"])("an existing %s sees the approved state, not the code field", async (role) => {
+	it.each(["annotator", "annotation_manager"])("an existing %s sees the approved state, not the code field", async (role) => {
 		USER.roles = [role];
 		renderAt();
 		expect(await screen.findByTestId("annotator-access")).toHaveTextContent(/Annotator access/);
