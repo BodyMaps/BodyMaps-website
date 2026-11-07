@@ -9623,7 +9623,8 @@ def _write_shared_meta(case_id, revision):
 
 def _can_override_annotations():
     roles = current_roles()
-    return role_store.ROLE_ANNOTATOR in roles or role_store.ROLE_ADMIN in roles
+    # Admin alone is not enough: changing what every visitor sees is limited to annotators and managers.
+    return bool(set(roles) & role_store.ANNOTATING_ROLES)
 
 
 def _refuse_unless_annotator():

@@ -15,8 +15,8 @@ import "./analytics/dashboard.css";
 //
 // The roles are admin and annotator (an annotator can save a corrected scan for everyone, and nothing
 // else). The vocabulary comes from the server (body.roles) rather than a list here, so the menu follows
-// whatever the server is actually willing to grant. Above the list, the admin can also make a temporary
-// code that grants the annotator role (AnnotatorCodes).
+// whatever this caller is actually allowed to grant: only an annotation manager is offered "annotator",
+// and only a manager sees the temporary codes above the list (AnnotatorCodes).
 //
 // Every row's actions sit behind one Edit button, and every action behind a
 // confirmation. The toggles this replaced were a single click from making a
@@ -317,7 +317,7 @@ const PeopleSettings: React.FC = () => {
 				/>
 			</div>
 
-			<AnnotatorCodes />
+			{user?.roles.includes("annotation_manager") && <AnnotatorCodes />}
 
 			{error && (
 				<div className="set-banner set-banner--error dash-banner" role="alert">

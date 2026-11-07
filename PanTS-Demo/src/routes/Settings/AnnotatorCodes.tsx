@@ -104,11 +104,9 @@ const AnnotatorCodes: React.FC = () => {
 
 	return (
 		<div className="set-group" data-testid="annotator-codes">
-			<h2 className="set-heading">Editing access</h2>
+			<h2 className="set-heading">Annotator access code</h2>
 			<p className="set-sub">
-				Someone with editing access can save a corrected scan for everyone (the annotation and the 3D model
-				both change). They can't manage accounts or give the access to anyone else. Give them a code, or use
-				Edit &gt; Make annotator on their account below. A code works once and expires.
+				A one-time code that lets someone save corrected scans for everyone. It expires after the time you choose.
 			</p>
 
 			<div className="set-picture-actions">
@@ -133,7 +131,7 @@ const AnnotatorCodes: React.FC = () => {
 						<strong style={{ fontSize: "1.25em", letterSpacing: "0.08em", userSelect: "all" }}>{created.code}</strong>
 					</p>
 					<p className="set-row-note">
-						Shown once. Valid until {when(created.expires_at)}. They enter it under Settings &gt; Profile &gt; Invitation code.
+						Shown once. Valid until {when(created.expires_at)}.
 					</p>
 					<button className="set-btn" type="button" onClick={() => void copy()}>
 						{copied ? "Copied" : "Copy"}

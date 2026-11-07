@@ -986,3 +986,24 @@ def test_annotator_invite_attempts_are_rate_limited(client):
     assert statuses[5:] == [429] * 3
     # Even the right code is refused while the account is locked out.
     assert client.post("/api/auth/redeem-annotator-invite", json={"code": code}).status_code == 429
+
+
+def test_an_admin_who_cannot_yet_edit_scans_can_redeem_a_code(client):
+    from services import role_store
+    code = _new_code()
+    user = _sign_up(client, "just-admin@example.com")
+    role_store.grant(user["id"], role_store.ROLE_ADMIN)
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": code}).status_code == 200
+    assert sorted(_roles(client)) == ["admin", "annotator"]  # admin alone did not count as already allowed
+
+
+def test_a_manager_does_not_use_up_a_code(client):
+    from services import role_store
+    code = _new_code()
+    user = _sign_up(client, "manager@example.com")
+    role_store.grant(user["id"], role_store.ROLE_ANNOTATION_MANAGER)
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": code}).status_code == 200
+    assert _roles(client) == ["annotation_manager"]  # no annotator row added, and the code is kept
+    client.post("/api/auth/logout")
+    _sign_up(client, "next@example.com")
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": code}).status_code == 200

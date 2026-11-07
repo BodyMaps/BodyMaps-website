@@ -1,9 +1,10 @@
 """Temporary, single-use codes that make an account an annotator.
 
-Two people (the admins) decide who may change what every viewer sees. They can grant the ``annotator`` role
-straight from the Accounts tab, or create a code here and hand it over; the person redeems it from their
-own account. A code works once and expires, so a code that is forwarded or left in a chat is worth nothing
-afterwards. Redeeming only ever grants ``annotator``: never ``admin``, and never the power to create codes.
+Two people (the annotation managers) decide who may change what every viewer sees. They can grant the
+``annotator`` role straight from the Accounts tab, or create a code here and hand it over; the person
+redeems it from their own account. A code works once and expires, so a code that is forwarded or left in a chat is worth nothing
+afterwards. Redeeming only ever grants ``annotator``: never ``admin`` or ``annotation_manager``, and never
+the power to create codes.
 """
 
 import hashlib
@@ -73,7 +74,7 @@ def redeem(user_id: str, code: str) -> str | None:
         if invite is None:
             return None
         held = set(s.execute(select(UserRole.role).where(UserRole.user_id == user_id)).scalars())
-        if held & {role_store.ROLE_ANNOTATOR, role_store.ROLE_ADMIN}:
+        if held & role_store.ANNOTATING_ROLES:
             return ALREADY
         # The WHERE clause is what makes it single-use when two people redeem at the same moment.
         claimed = s.execute(

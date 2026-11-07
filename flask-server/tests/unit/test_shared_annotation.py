@@ -109,13 +109,22 @@ def test_plain_account_cannot_save_shared_and_nothing_is_written(env):
     assert not os.path.exists(routes._pants_shared_edit_path(CASE))
 
 
-@pytest.mark.parametrize("role", ["annotator", "admin"])
-def test_annotator_and_admin_can_save_shared(env, role):
+@pytest.mark.parametrize("roles", [["annotator"], ["annotation_manager"], ["admin", "annotator"], ["admin", "annotation_manager"]])
+def test_annotators_and_managers_can_save_shared(env, roles):
     client, original, who, _ = env
-    who.sign_in("approved", [role])
+    who.sign_in("approved", roles)
     response = _save_shared(client, _corrected(original))
     assert response.status_code == 200, response.get_json()
     assert os.path.isfile(routes._pants_shared_edit_path(CASE))
+
+
+def test_being_an_admin_is_not_enough_to_change_what_everyone_sees(env):
+    client, original, who, _ = env
+    who.sign_in("just-an-admin", ["admin"])
+    assert _save_shared(client, _corrected(original)).status_code == 403
+    assert not os.path.exists(routes._pants_shared_edit_path(CASE))
+    assert _shared_status(client)["can_override"] is False
+    assert client.delete(f"/api/shared-annotation/{CASE}").status_code == 403
 
 
 def test_signed_out_and_plain_cannot_revert(env):

@@ -8,10 +8,17 @@ mask: the 2D masks, the 3D meshes, the organ statistics and PDAC staging all fol
 
 ## Who is approved
 
-The `annotator` role (admins can also save). **Only admins can grant it** (today: the two people in `ADMIN_EMAILS`).
-An annotator cannot grant it to anyone or see other accounts. Two ways:
+The `annotator` role, or `annotation_manager`. **Being an admin is not enough.** Only an **annotation manager**
+(today: the owner and the PI) can grant or remove `annotator` and create codes; an annotator cannot grant it to
+anyone or see other accounts. `annotation_manager` itself is never granted through the website, only on the server:
 
-1. **A temporary code.** Settings > People > *Editing access* > pick how long it works (1 hour, 1 day, 7 days) >
+```bash
+cd /home/visitor/PanTS-Viewer/flask-server && /home/visitor/.conda/envs/PanTS_backend/bin/python scripts/grant_role.py --email <address> --role annotation_manager   # add --revoke to take it away
+```
+
+A manager sees two ways to give someone the annotator role:
+
+1. **A temporary code.** Settings > People > *Annotator access code* > pick how long it works (1 hour, 1 day, 7 days) >
    **Create code**. The code (`XXXX-XXXX-XXXX`) is shown once; give it to the person. They enter it under
    Settings > Profile > *Invitation code*. A code works **once** and then expires, can be withdrawn from the same
    list, and the list shows who used each one. Only a SHA-256 digest is stored.

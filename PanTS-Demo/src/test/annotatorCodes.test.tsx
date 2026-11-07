@@ -10,7 +10,7 @@ import { SettingsContext } from "../routes/Settings/context";
 // (made here, shown once, works once) and Edit > Make annotator on the person's account. Both are
 // admin-only on the server; this page only has to make them easy and say what they do.
 
-const ME = { id: "me", email: "admin@example.com", name: "Admin", plan: "free", account_type: null, roles: ["admin"] };
+let ME = { id: "me", email: "admin@example.com", name: "Admin", plan: "free", account_type: null, roles: ["admin", "annotation_manager"] };
 const PERSON = {
 	id: "u2", email: "radiologist@example.com", name: "Rad", plan: "free", account_type: null,
 	created_at: "2026-01-04T00:00:00", deletion_requested_at: null as string | null, roles: [] as string[],
@@ -26,6 +26,7 @@ const json = (body: unknown, ok = true, status = 200) => ({
 });
 
 beforeEach(() => {
+	ME = { ...ME, roles: ["admin", "annotation_manager"] };
 	calls = [];
 	invites = [];
 	createStatus = 201;
@@ -67,6 +68,21 @@ const renderPage = () =>
 			</MemoryRouter>
 		</AuthProvider>,
 	);
+
+describe("who sees the code panel", () => {
+	it("is shown to an annotation manager", async () => {
+		renderPage();
+		expect(await screen.findByRole("heading", { name: "Annotator access code" })).toBeInTheDocument();
+	});
+
+	it("is hidden from an admin who is not one, and no code request is made", async () => {
+		ME = { ...ME, roles: ["admin"] };
+		renderPage();
+		await screen.findByRole("button", { name: /Edit radiologist@example.com/ });
+		expect(screen.queryByTestId("annotator-codes")).not.toBeInTheDocument();
+		expect(calls.some((call) => call.url.includes("/annotator-invites"))).toBe(false);
+	});
+});
 
 describe("temporary editing codes", () => {
 	it("creates a code for the chosen lifetime and shows it once", async () => {

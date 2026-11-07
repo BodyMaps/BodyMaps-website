@@ -4,8 +4,13 @@ UI searches.
 ``admin`` gates the usage dashboard, this module's own grant/revoke endpoints,
 and — through ``plan_store`` — every plan limit. ``annotator`` lets an account
 replace the shared version of a dataset scan's segmentation (see
-``api_blueprint.save_segmentation_shared``); it is handed out by an admin or by
-redeeming an invitation code, and carries none of admin's powers.
+``api_blueprint.save_segmentation_shared``); it carries none of admin's powers.
+
+Changing what every visitor sees is deliberately narrower than being an admin. Only
+``annotation_manager`` may hand out or withdraw ``annotator`` (from the Accounts tab or
+with a temporary code), and a manager can save for everyone too. An admin who is not
+also an annotator or manager cannot. ``annotation_manager`` itself is never granted
+through the website: only on the server, with ``scripts/grant_role.py``.
 
 An unknown role name is refused rather than stored: the set of roles is a fixed
 vocabulary, and a typo'd "adminn" that stores cleanly is a grant that silently
@@ -30,8 +35,12 @@ from models.user_role import UserRole
 
 ROLE_ADMIN = "admin"
 ROLE_ANNOTATOR = "annotator"
+ROLE_ANNOTATION_MANAGER = "annotation_manager"
 
-ROLES = frozenset({ROLE_ADMIN, ROLE_ANNOTATOR})
+ROLES = frozenset({ROLE_ADMIN, ROLE_ANNOTATOR, ROLE_ANNOTATION_MANAGER})
+
+# Who may save a dataset scan for everyone.
+ANNOTATING_ROLES = frozenset({ROLE_ANNOTATOR, ROLE_ANNOTATION_MANAGER})
 
 # Guardrails on revoke. Both exist to stop the system reaching a state with no
 # admin left, which nothing short of shell access can undo.
