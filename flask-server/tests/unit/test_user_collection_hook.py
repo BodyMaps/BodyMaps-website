@@ -90,3 +90,24 @@ def test_every_inference_entry_point_goes_through_that_worker(tree):
         and n.name != "_start_auto_segmentation"
     }
     assert callers == {"auto_segment", "run_epai_inference"}, callers
+
+
+# ---- the MRI gatekeeper is offered every accepted upload, on the request thread ---------------------------------
+
+def test_the_mri_gatekeeper_is_offered_the_upload_when_the_job_is_accepted(tree):
+    start = _function(tree, "_start_auto_segmentation")
+    calls = _calls(start, "collect_user_mri_async")
+    assert len(calls) == 1, "the job start must call collect_user_mri_async exactly once"
+    assert {k.arg for k in calls[0].keywords} >= {"user_id", "ip", "session_id"}
+    worker = _function(tree, "do_segmentation_and_zip", start)
+    assert not _calls(worker, "collect_user_mri_async"), "it must not wait for the segmentation job"
+    imports = [n for n in ast.walk(start) if isinstance(n, ast.ImportFrom) and n.module == "services.user_mri_dataset"]
+    assert any(a.name == "collect_user_mri_async" for imp in imports for a in imp.names)
+
+
+def test_the_mri_hook_cannot_break_the_request(tree):
+    start = _function(tree, "_start_auto_segmentation")
+    call = _calls(start, "collect_user_mri_async")[0]
+    guarded = [n for n in ast.walk(start) if isinstance(n, ast.Try) and any(c is call for c in ast.walk(n))]
+    assert guarded, "the call must sit inside try/except so a collection error never fails the request"
+    assert any(h.type is not None and getattr(h.type, "id", "") == "Exception" for t in guarded for h in t.handlers)
