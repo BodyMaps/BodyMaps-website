@@ -8,6 +8,11 @@ interface Props {
 	onOperationChange: (op: LevelTraceOperation) => void;
 	toleranceHu: number;
 	onToleranceChange: (hu: number) => void;
+	/** MRI is not in Hounsfield units: the page passes the scan's own unit text and range. */
+	unit?: string;
+	min?: number;
+	max?: number;
+	step?: number;
 	/** Closes just this settings flyout — level tracing stays equipped
 	 *  (it's a live-commit "equip and use" tool, same family as the brush),
 	 *  so picking a mode should collapse the settings panel and drop the
@@ -36,7 +41,7 @@ const MAX_SENSITIVITY_HU = 300;
 // settings flyout collapses immediately after, the same way every other
 // one-shot Apply does, except level tracing stays equipped so the very
 // next click on the canvas traces with the picked mode.
-export default function LevelTracingFlyout({ operation, onOperationChange, toleranceHu, onToleranceChange, onCloseSettings }: Props) {
+export default function LevelTracingFlyout({ operation, onOperationChange, toleranceHu, onToleranceChange, onCloseSettings, unit = "HU", min = MIN_SENSITIVITY_HU, max = MAX_SENSITIVITY_HU, step = 5 }: Props) {
 	const closeTimerRef = useRef<number | null>(null);
 	useEffect(() => () => {
 		if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
@@ -60,10 +65,10 @@ export default function LevelTracingFlyout({ operation, onOperationChange, toler
 				label="Sensitivity"
 				value={toleranceHu}
 				onChange={onToleranceChange}
-				min={MIN_SENSITIVITY_HU}
-				max={MAX_SENSITIVITY_HU}
-				step={5}
-				unit="HU"
+				min={min}
+				max={max}
+				step={step}
+				unit={unit}
 				ariaLabel="Level tracing sensitivity: higher values trace a wider range of intensities around the cursor"
 			/>
 			<MenuDivider />
