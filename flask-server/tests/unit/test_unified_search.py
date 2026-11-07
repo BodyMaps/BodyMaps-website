@@ -326,6 +326,32 @@ def test_search_disables_only_filtered_balancing_dimensions(monkeypatch,query,ex
     assert seen==[expected]
 
 
+def test_best_sort_uses_the_best_first_ranking_and_never_the_rotating_one(monkeypatch):
+    """sort_by=best is the library list: best first in one plain order, whatever filters are applied."""
+    called = []
+    def best(df):
+        called.append(len(df))
+        return df
+    monkeypatch.setattr(api_routes, 'rank_best_first', best)
+    monkeypatch.setattr(api_routes, 'rank_quality_results', lambda *_a, **_k: pytest.fail('best must not rotate cohorts'))
+    for query in ('', '&dataset=all', '&tumor=1', '&sex[]=M&age_from=40'):
+        with APP.test_request_context('/api/search?sort_by=best' + query):
+            assert api_routes.api_search().status_code == 200
+    assert len(called) == 4
+
+
+def test_best_sort_pages_continue_one_ranking():
+    from services import search_ranking as sr
+    with APP.test_request_context('/api/search'):
+        expected = sr.rank_best_first(u.ensure_sort_cols(u.apply_filters(u.select_dataset_df()).copy()))["__case_str"].tolist()
+    def page(n, per):
+        with APP.test_request_context(f'/api/search?sort_by=best&page={n}&per_page={per}'):
+            return [i['case_id'] for i in api_routes.api_search().get_json()['items']]
+    everything = page(1, 100)
+    assert everything == expected[:len(everything)]
+    assert page(1, 3) + page(2, 3) + page(3, 3) == everything[:9]
+
+
 @pytest.mark.parametrize('sort_by',['id','id_desc','age_asc','age_desc','shape','spacing','sample'])
 def test_explicit_sorts_never_use_diverse_quality_ranking(monkeypatch,sort_by):
     monkeypatch.setattr(api_routes,'rank_quality_results',lambda *_a,**_k: pytest.fail('explicit sort changed'))

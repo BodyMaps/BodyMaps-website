@@ -3,7 +3,7 @@ from random import Random
 
 import pandas as pd
 
-from services.search_ranking import SAMPLE_MAX_CT_BYTES, rank_sample_results, rank_quality_results, select_balanced_tumor_results
+from services.search_ranking import SAMPLE_MAX_CT_BYTES, rank_best_first, rank_sample_results, rank_quality_results, select_balanced_tumor_results
 
 
 def _frame(rows):
@@ -226,6 +226,46 @@ def test_quality_ranking_has_no_pants_quality_bonus_inside_a_thumbnail_tier():
     big_cv["__dataset"], pants["__dataset"], distorted["__dataset"] = "CancerVerse", "PanTS", "PanTS"
     ranked = rank_quality_results(_frame([big_cv, distorted, pants]), balance_sex=False, balance_age=False)
     assert ranked["id"].tolist() == ["cv-big", "pants", "pants-distorted"]
+
+
+def _scan(case_id, dataset, *, voxels, order, spacing=1.0, tumor=0, sex="F", age=40, thumbnail_rank=0):
+    row = _row(case_id, tumor=tumor, voxels=voxels, spacing=spacing, sex=sex, age=age, order=order,
+               thumbnail_rank=thumbnail_rank, ct_bytes=voxels)
+    row["__dataset"] = dataset
+    return row
+
+
+def test_best_first_puts_thumbnail_tier_then_annotated_datasets_then_detail():
+    """Thumbnail tier first, then PanTS, AbdomenAtlas, CancerVerse, then detail inside each group.
+    Without the dataset step the biggest CancerVerse scan would lead (see the quality test above)."""
+    df = _frame([
+        _scan("cv-big", "CancerVerse", voxels=9000, spacing=0.1, order=1),
+        _scan("cv-small", "CancerVerse", voxels=500, spacing=1.0, order=2),
+        _scan("aa", "AbdomenAtlas", voxels=800, order=3),
+        _scan("pants-small", "PanTS", voxels=100, spacing=2.0, order=4),
+        _scan("pants-big", "PanTS", voxels=700, spacing=0.5, order=5),
+        _scan("pants-distorted", "PanTS", voxels=9999, spacing=0.1, order=6, thumbnail_rank=2),
+    ])
+    assert best_ids(df) == ["pants-big", "pants-small", "aa", "cv-big", "cv-small", "pants-distorted"]
+
+
+def test_best_first_never_rotates_between_tumor_sex_or_age():
+    """sort_by=quality alternates cohorts; the library list must be one plain order by detail."""
+    rows = [_scan(f"p{i}", "PanTS", voxels=1000 - i, order=i, tumor=int(i < 5), sex="F" if i % 2 else "M", age=20 + 10 * (i % 4))
+            for i in range(10)]
+    assert best_ids(_frame(rows)) == [f"p{i}" for i in range(10)]
+    assert best_ids(_frame(rows[::-1])) == [f"p{i}" for i in range(10)]
+
+
+def test_best_first_breaks_exact_ties_by_case_order_and_handles_edge_frames():
+    df = _frame([_scan("b", "PanTS", voxels=100, order=2), _scan("a", "PanTS", voxels=100, order=1)])
+    assert best_ids(df) == ["a", "b"]
+    assert best_ids(df.drop(columns=["__dataset"])) == ["a", "b"]                 # no dataset column
+    assert rank_best_first(df.iloc[:0]).empty and len(rank_best_first(df.iloc[:1])) == 1
+
+
+def best_ids(df):
+    return rank_best_first(df)["id"].tolist()
 
 
 def test_quality_ranking_without_a_dataset_column_uses_detail_score():

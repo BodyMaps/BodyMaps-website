@@ -45,7 +45,7 @@ from services.report_evidence import (
     report_payload, report_limitations, render_report_html, measurement_display, report_assessment_scope, source_text,
 )
 from services.segmentation_metrics import calculate_session_metrics
-from services.search_ranking import rank_quality_results, rank_legacy_quality_results, rank_sample_results, select_balanced_tumor_results
+from services.search_ranking import rank_best_first, rank_quality_results, rank_legacy_quality_results, rank_sample_results, select_balanced_tumor_results
 from services.sample_staging import SampleStager, SampleError, validate_session_id as validate_sample_session_id, TARGET as SAMPLE_TARGET
 from services.sample_staging import MARKER as SAMPLE_MARKER
 from api.rate_limit import Limiter
@@ -4029,6 +4029,13 @@ def api_search():
             balance_tumor=not any(key in request.args for key in ("tumor", "tumor_is_null", "tumor_type", "tumor_type[]")),
             balance_dataset=(request.args.get("dataset", "").strip().lower() in ("", "all", "both")),
         )
+        by = []
+        asc = []
+    elif sort_by == "best":
+        # The library list: best scans first, in one plain order (services/search_ranking.py). No
+        # rotation between datasets, tumor status, sex or age (that is sort_by=quality), so the
+        # first page is the top of the ranking and the next page continues it.
+        df = rank_best_first(df)
         by = []
         asc = []
     elif sort_by == "sample":
