@@ -129,7 +129,7 @@ def test_the_list_carries_roles_and_the_vocabulary(client):
     make_admin(client)
     body = client.get("/api/admin/people").get_json()
     assert body["people"][0]["roles"] == ["admin"]
-    assert body["roles"] == ["admin"]
+    assert body["roles"] == ["admin", "annotator"]
 
 
 def test_search_narrows_the_list(client):
@@ -237,3 +237,100 @@ def test_roles_survive_a_profile_update(client):
     make_admin(client)
     body = client.patch("/api/auth/me", json={"name": "Boss"}).get_json()
     assert body["user"]["roles"] == ["admin"]
+
+
+# ---- temporary annotator codes: only an admin makes them -----------------------------------------------
+
+def _become_admin(client, email="boss@example.com"):
+    import services.role_store as role_store
+    user_id = sign_up(client, email)
+    role_store.grant(user_id, role_store.ROLE_ADMIN)
+    return user_id
+
+
+def test_only_an_admin_can_create_list_or_withdraw_codes(client):
+    assert client.post("/api/admin/annotator-invites", json={"hours": 1}).status_code == 401
+    sign_up(client, "plain@example.com")
+    assert client.post("/api/admin/annotator-invites", json={"hours": 1}).status_code == 403
+    assert client.get("/api/admin/annotator-invites").status_code == 403
+    assert client.delete("/api/admin/annotator-invites/anything").status_code == 403
+    import services.role_store as role_store
+    from services import auth_store
+    # an annotator is still not an admin
+    role_store.grant(client.get("/api/auth/me").get_json()["user"]["id"], role_store.ROLE_ANNOTATOR)
+    assert client.post("/api/admin/annotator-invites", json={"hours": 1}).status_code == 403
+
+
+def test_an_admin_creates_a_code_that_makes_someone_an_annotator_once(client):
+    _become_admin(client)
+    created = client.post("/api/admin/annotator-invites", json={"hours": 48})
+    assert created.status_code == 201
+    body = created.get_json()
+    assert len(body["code"].replace("-", "")) == 12 and body["expires_at"].endswith("Z")
+
+    client.post("/api/auth/logout")
+    sign_up(client, "radiologist@example.com")
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": body["code"]}).status_code == 200
+    assert client.get("/api/auth/me").get_json()["user"]["roles"] == ["annotator"]
+
+    client.post("/api/auth/logout")
+    sign_in(client, "boss@example.com")
+    listed = client.get("/api/admin/annotator-invites").get_json()["invites"]
+    assert [(row["status"], row["redeemed_by"]) for row in listed] == [("redeemed", "radiologist@example.com")]
+    assert "code" not in listed[0]  # the code itself is never readable again
+
+
+def test_the_code_is_not_stored_in_the_clear(client):
+    _become_admin(client)
+    code = client.post("/api/admin/annotator-invites", json={"hours": 1}).get_json()["code"]
+    from models.annotator_invite import AnnotatorInvite
+    from models.engine import session_scope
+    with session_scope() as s:
+        stored = [row.code_hash for row in s.query(AnnotatorInvite).all()]
+    assert len(stored) == 1 and code.replace("-", "") not in stored[0] and len(stored[0]) == 64
+
+
+@pytest.mark.parametrize("hours", [0, -1, 24 * 15, 1.5, "24", True, None])
+def test_a_code_needs_a_sensible_lifetime(client, hours):
+    _become_admin(client)
+    response = client.post("/api/admin/annotator-invites", json={"hours": hours})
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "hours must be a whole number from 1 to 336"}  # fixed text, never the exception's
+
+
+def test_a_code_defaults_to_one_day(client):
+    from datetime import datetime, timedelta
+    _become_admin(client)
+    body = client.post("/api/admin/annotator-invites", json={}).get_json()
+    left = datetime.fromisoformat(body["expires_at"].rstrip("Z")) - datetime.utcnow()
+    assert timedelta(hours=23) < left <= timedelta(hours=24)
+
+
+def test_a_withdrawn_code_no_longer_works_and_a_used_one_cannot_be_withdrawn(client):
+    _become_admin(client)
+    withdrawn = client.post("/api/admin/annotator-invites", json={"hours": 24}).get_json()
+    used = client.post("/api/admin/annotator-invites", json={"hours": 24}).get_json()
+    assert client.delete(f"/api/admin/annotator-invites/{withdrawn['id']}").status_code == 200
+    assert client.delete(f"/api/admin/annotator-invites/{withdrawn['id']}").status_code in (200, 404)
+    client.post("/api/auth/logout")
+    sign_up(client, "person@example.com")
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": withdrawn["code"]}).status_code == 403
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": used["code"]}).status_code == 200
+    client.post("/api/auth/logout")
+    sign_in(client, "boss@example.com")
+    assert client.delete(f"/api/admin/annotator-invites/{used['id']}").status_code == 404
+    statuses = {row["id"]: row["status"] for row in client.get("/api/admin/annotator-invites").get_json()["invites"]}
+    assert statuses == {withdrawn["id"]: "expired", used["id"]: "redeemed"}
+
+
+def test_the_accounts_tab_offers_the_annotator_role_to_grant_by_email(client):
+    boss = _become_admin(client)
+    sign_up_id = None
+    client.post("/api/auth/logout")
+    target = sign_up(client, "target@example.com")
+    client.post("/api/auth/logout")
+    sign_in(client, "boss@example.com")
+    people = client.get("/api/admin/people?q=target@example.com").get_json()
+    assert "annotator" in people["roles"] and [p["email"] for p in people["people"]] == ["target@example.com"]
+    assert client.post(f"/api/admin/people/{target}/roles", json={"role": "annotator"}).get_json()["roles"] == ["annotator"]
+    assert client.delete(f"/api/admin/people/{target}/roles/annotator").get_json()["roles"] == []

@@ -41,7 +41,7 @@ from api.auth import (
     COOKIE_NAME, clear_session_cookie, current_user, require_auth, set_session_cookie,
 )
 from api.rate_limit import Limiter
-from services import auth_store, avatar_store, job_store, mailer, plan_store, role_store
+from services import annotator_invites, auth_store, avatar_store, job_store, mailer, plan_store, role_store
 
 auth_blueprint = Blueprint("auth", __name__)
 
@@ -155,6 +155,9 @@ _ADMIN_COUPON_ENV = "BODYMAPS_ADMIN_COUPON_SHA256"
 _COUPON_WINDOW_S = 3600
 _COUPON_MAX_ATTEMPTS = 5
 _coupon_limiter = Limiter(_COUPON_WINDOW_S)
+# Redeeming a temporary invitation code (created by an admin, see services.annotator_invites) grants
+# the ``annotator`` role. Attempts are limited per account and per address.
+_invite_limiter = Limiter(_COUPON_WINDOW_S)
 _avatar_limiter = Limiter(3600)
 
 
@@ -296,6 +299,34 @@ def redeem_admin_coupon():
         "access": "admin_coupon",
         "user": _with_roles(user),
     }), 200
+
+
+@auth_blueprint.route("/auth/redeem-annotator-invite", methods=["POST"])
+@require_auth
+def redeem_annotator_invite():
+    """Redeem an invitation code for the ``annotator`` role.
+
+    The role lets the account save a dataset scan's segmentation as the version everyone sees. It is a
+    separate role from ``admin`` on purpose: a code that leaks must never reach account management or
+    analytics, and it cannot create further codes. A code works once and expires. Attempts are limited per
+    account and per address.
+    """
+    user = current_user()
+    ip = request.remote_addr or "unknown"
+    if _invite_limiter.over("ip:" + ip, _COUPON_MAX_ATTEMPTS * 4) or _invite_limiter.over("user:" + user["id"], _COUPON_MAX_ATTEMPTS):
+        return jsonify({"error": "Too many invitation attempts. Try again later."}), 429
+
+    code = _json().get("code")
+    if not isinstance(code, str) or not code.strip() or len(code) > 256:
+        return jsonify({"error": "Enter a valid invitation code."}), 400
+
+    try:
+        outcome = annotator_invites.redeem(user["id"], code)
+    except LookupError:
+        return jsonify({"error": "Account not found"}), 404
+    if outcome is None:
+        return jsonify({"error": "Invalid, expired or already used invitation code."}), 403
+    return jsonify({"ok": True, "user": _with_roles(user)}), 200
 
 
 @auth_blueprint.route("/auth/logout", methods=["POST"])

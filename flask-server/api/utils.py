@@ -12,6 +12,7 @@ from models.combined_labels import CombinedLabels
 from models.base import db
 from constants import Constants
 from services.label_scheme import PANTS_LABELS, VIEWER_IDS, viewer_labelmap_path
+from services import shared_annotations
 
 
 from io import BytesIO
@@ -180,7 +181,10 @@ def get_mask_data_internal(id, fallback=False):
         # is never used, because its ids followed the order of the segmentations/
         # directory listing, not the mask's own numbering.
         organ_intensities = {key: VIEWER_IDS[key] for key in PANTS_LABELS.values()}
-        nifti_processor = NiftiProcessor(main_nifti_path, viewer_labelmap_path(combined_labels_path))
+        # An annotator's shared correction (already in viewer ids) replaces the original for every reader,
+        # so the organ statistics must be measured from it too.
+        shared_mask = shared_annotations.existing_shared_mask(pants_id)
+        nifti_processor = NiftiProcessor(main_nifti_path, shared_mask or viewer_labelmap_path(combined_labels_path))
         nifti_processor.set_organ_intensities(organ_intensities)
         organ_metadata = nifti_processor.calculate_metrics()
         organ_metadata = clean_nan(organ_metadata)
@@ -535,6 +539,8 @@ def get_pdac_staging(clabel_id):
         main_nifti_path = f"{Constants.PANTS_PATH}/image_only/{get_panTS_id(clabel_id)}/{Constants.MAIN_NIFTI_FILENAME}"
         combined_labels_path = f"{Constants.PANTS_PATH}/mask_only/{get_panTS_id(clabel_id)}/{Constants.COMBINED_LABELS_NIFTI_FILENAME}"
         
+        # The shared correction, when an annotator saved one, is the mask everyone is shown.
+        combined_labels_path = shared_annotations.existing_shared_mask(get_panTS_id(clabel_id)) or combined_labels_path
         nifti_processor = NiftiProcessor(main_nifti_path, combined_labels_path)
         staging_result = nifti_processor.calculate_pdac_sma_staging()
 

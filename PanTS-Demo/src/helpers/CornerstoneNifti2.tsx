@@ -2499,13 +2499,16 @@ export async function saveSegmentation(
   caseId: string | number,
   res: "low" | "full" = "low",
   ownerId?: string | number,
+  /** Save as the version every viewer sees (annotators only). `revision` is the shared revision the
+   *  caller last read from /shared-annotation ("none" when the scan still shows the original). */
+  shared?: { revision: string },
 ): Promise<{ labelled_voxels: number }> {
   const exported = getSegmentationExport();
   if (!exported) throw new Error("No segmentation volume loaded or scalar data is unavailable.");
 
   const [nx, ny, nz] = exported.dimensions;
   const metadata = structureMetadataHeader(getCustomSegmentLabelsForExport());
-  const revision = savedRevision(apiBase, caseId, ownerId);
+  const revision = shared ? shared.revision : savedRevision(apiBase, caseId, ownerId);
   // The helper copies and validates the live scalar values before its first
   // asynchronous compression step, so edits made while saving cannot alter it.
   const compressed = await encodeSegmentationSavePayload(exported.data, [nx, ny, nz]);
@@ -2513,7 +2516,7 @@ export async function saveSegmentation(
   const timeoutId = setTimeout(() => controller.abort(), 120_000);
   try {
     const resp = await fetch(
-      `${apiBase}/api/save-segmentation/${caseId}?res=${res}&nx=${nx}&ny=${ny}&nz=${nz}`,
+      `${apiBase}/api/${shared ? "save-segmentation-shared" : "save-segmentation"}/${caseId}?res=${res}&nx=${nx}&ny=${ny}&nz=${nz}`,
       {
         method: "POST",
         headers: {
@@ -2551,6 +2554,51 @@ export async function saveSegmentation(
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+export type SharedAnnotationStatus = {
+  supported: boolean;
+  exists?: boolean;
+  /** The shared mask's revision, "none" while the scan still shows the original. */
+  revision?: string;
+  version?: number | null;
+  saved_by?: string | null;
+  saved_at?: string | null;
+  can_override: boolean;
+};
+
+/** Whether this scan has a shared override, who saved it, and whether the signed-in account may replace it. */
+export async function fetchSharedAnnotationStatus(apiBase: string, caseId: string | number, signal?: AbortSignal): Promise<SharedAnnotationStatus> {
+  const resp = await fetch(`${apiBase}/api/shared-annotation/${encodeURIComponent(String(caseId))}`, {
+    credentials: "include", cache: "no-store", signal,
+  });
+  if (!resp.ok) throw new Error(`Couldn't read the shared annotation status (HTTP ${resp.status}).`);
+  return await resp.json() as SharedAnnotationStatus;
+}
+
+/** The shared revision a save is checked against: the one the person opened the scan at when known. */
+export const revisionForSharedSave = (openedRevision: string | undefined, current: SharedAnnotationStatus): string =>
+  openedRevision ?? current.revision ?? "none";
+
+/**
+ * Save the live segmentation as the version of this dataset scan that EVERY viewer sees.
+ *
+ * `openedRevision` is the shared revision the person was looking at when they opened the scan ("none" while
+ * it showed the original). It is what the server checks, so two annotators cannot silently overwrite each
+ * other: if someone saved since, the server answers 409 and nothing is written. Without it the current
+ * revision is used, which would let a stale tab overwrite a newer fix. Throws with a message safe to show.
+ */
+export async function saveSharedSegmentation(
+  apiBase: string,
+  caseId: string | number,
+  res: "low" | "full" = "low",
+  ownerId?: string | number,
+  openedRevision?: string,
+): Promise<{ labelled_voxels: number }> {
+  const status = await fetchSharedAnnotationStatus(apiBase, caseId);
+  if (!status.supported) throw new Error("This scan can't have a shared version.");
+  if (!status.can_override) throw new Error("You don't have permission to change the shared version.");
+  return saveSegmentation(apiBase, caseId, res, ownerId, { revision: revisionForSharedSave(openedRevision, status) });
 }
 
 /**

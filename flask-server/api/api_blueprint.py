@@ -81,7 +81,7 @@ load_dotenv()
 import nibabel as nib
 import uuid
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from .utils import *
 from . import utils as _search_tables   # live DF / DF_CV / DF_ALL (``import *`` copies the names at import time)
 import requests  # ⭐ 只在這裡 import 一次 requests
@@ -166,7 +166,8 @@ import threading
 # directory before it touches os.path; secure_filename is the barrier at each
 # path-construction site.
 from .path_safety import is_safe_id as _is_safe_id
-from .auth import current_user, require_auth, require_role
+from services import shared_annotations
+from .auth import current_roles, current_user, require_auth, require_role
 from .chunk_store import (
     DISCARD_NOTE, FinalizeHeartbeat, acquire_finalize_lock, finalize_running,
     first_missing_chunk, received_chunks, sweep_discarded_uploads, sweep_stale_uploads,
@@ -595,7 +596,7 @@ def _mesh_cache_is_stale(baked_path, mask_digits):
         return False
 
 
-def _manifest_with_request_urls(manifest, pants_id):
+def _manifest_with_request_urls(manifest, pants_id, case_dir=None):
     """Return a manifest whose mesh URLs always use the current browser origin."""
     for organ in manifest.get("organs", []):
         filename = organ_glb_filename(organ)
@@ -611,7 +612,7 @@ def _manifest_with_request_urls(manifest, pants_id):
         try:
             # st_mtime_ns: second-granularity floats collide when a save +
             # re-bake land within the same wall-clock second.
-            url += f"?v={os.stat(os.path.join(Constants.MESH_PATH, pants_id, filename)).st_mtime_ns}"
+            url += f"?v={os.stat(os.path.join(case_dir or os.path.join(Constants.MESH_PATH, pants_id), filename)).st_mtime_ns}"
         except OSError:
             pass
         organ["url"] = url
@@ -624,7 +625,7 @@ def _cancerverse_mask(case_id):
         folder = get_cancerverse_id(secure_filename(str(case_id)))
     except ValueError:
         return None, None
-    return folder, cv_catalog.resolve_mask_path(folder, Constants.CANCERVERSE_OVERLAY_PATH)
+    return folder, shared_annotations.existing_shared_mask(folder) or cv_catalog.resolve_mask_path(folder, Constants.CANCERVERSE_OVERLAY_PATH)
 
 
 def _abdomenatlas_mask(case_id):
@@ -633,7 +634,7 @@ def _abdomenatlas_mask(case_id):
         folder = get_abdomenatlas_id(secure_filename(str(case_id)))
     except ValueError:
         return None, None
-    return folder, at_catalog.resolve_mask_path(folder, Constants.ABDOMENATLAS_OVERLAY_PATH)
+    return folder, shared_annotations.existing_shared_mask(folder) or at_catalog.resolve_mask_path(folder, Constants.ABDOMENATLAS_OVERLAY_PATH)
 
 
 def _abdomenatlas_mesh_manifest(case_id):
@@ -641,7 +642,7 @@ def _abdomenatlas_mesh_manifest(case_id):
     folder, seg_path = _abdomenatlas_mask(case_id)
     if not seg_path:
         return jsonify({"error": "No segmentation for this case"}), 404
-    case_dir = os.path.join(Constants.MESH_PATH, folder)
+    case_dir = _dataset_mesh_directory(folder)
     manifest_path = os.path.join(case_dir, "manifest.json")
 
     def fresh():
@@ -662,7 +663,9 @@ def _abdomenatlas_mesh_manifest(case_id):
                     # Log the cause here; the browser only gets a fixed message.
                     print(f"[at-mesh] baking failed for {folder}: {type(error).__name__}: {error}", flush=True)
                     return jsonify({"error": "Mesh generation failed"}), 500
-    return jsonify(_manifest_with_request_urls(manifest, folder))
+    response = jsonify(_manifest_with_request_urls(manifest, folder, case_dir))
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 def _cancerverse_mesh_manifest(case_id):
@@ -670,7 +673,7 @@ def _cancerverse_mesh_manifest(case_id):
     folder, seg_path = _cancerverse_mask(case_id)
     if not seg_path:
         return jsonify({"error": "No tumor mask for this case"}), 404
-    case_dir = os.path.join(Constants.MESH_PATH, folder)
+    case_dir = _dataset_mesh_directory(folder)
     manifest_path = os.path.join(case_dir, "manifest.json")
 
     def fresh():
@@ -692,7 +695,9 @@ def _cancerverse_mesh_manifest(case_id):
                     # Log the cause here; the browser only gets a fixed message.
                     print(f"[cv-mesh] baking failed for {folder}: {type(error).__name__}: {error}", flush=True)
                     return jsonify({"error": "Mesh generation failed"}), 500
-    return jsonify(_manifest_with_request_urls(manifest, folder))
+    response = jsonify(_manifest_with_request_urls(manifest, folder, case_dir))
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 def _mesh_file_organ_key(display_id, filename):
@@ -744,7 +749,7 @@ def get_mesh_manifest(case_id):
             # this request; the next request can perform the same conversion.
             pass
     if manifest is not None and not _mesh_cache_is_stale(manifest_path, mask_digits):
-        response = jsonify(_manifest_with_request_urls(manifest, pants_id))
+        response = jsonify(_manifest_with_request_urls(manifest, pants_id, case_dir))
         # no-cache = revalidate (cheap 304s); the manifest is the freshness
         # root for the whole 3D pane, so a stale cached copy here would keep
         # serving pre-edit mesh URLs forever.
@@ -771,7 +776,7 @@ def get_mesh_manifest(case_id):
         # Another request may have finished the bake while we waited.
         manifest = _read_manifest_or_none(manifest_path)
         if manifest is not None and not _mesh_cache_is_stale(manifest_path, mask_digits):
-            response = jsonify(_manifest_with_request_urls(manifest, pants_id))
+            response = jsonify(_manifest_with_request_urls(manifest, pants_id, case_dir))
             response.headers["Cache-Control"] = "no-cache"
             return response
         try:
@@ -779,7 +784,7 @@ def get_mesh_manifest(case_id):
         except Exception as error:
             return jsonify({"error": f"Mesh generation failed: {error}"}), 500
 
-    response = jsonify(_manifest_with_request_urls(manifest, pants_id))
+    response = jsonify(_manifest_with_request_urls(manifest, pants_id, case_dir))
     response.headers["Cache-Control"] = "no-cache"
     return response
 
@@ -798,7 +803,7 @@ def get_mesh_file(display_id, filename):
     ):
         return jsonify({"error": "Invalid mesh filename"}), 400
     case_dir = (_pants_mesh_directory(display_id) if display_id.startswith("PanTS_")
-                else os.path.join(Constants.MESH_PATH, secure_filename(display_id)))
+                else _dataset_mesh_directory(secure_filename(display_id)))
     mesh_path = os.path.join(case_dir, secure_filename(filename))
     mask_digits = "".join(ch for ch in str(display_id) if ch.isdigit())
 
@@ -806,7 +811,10 @@ def get_mesh_file(display_id, filename):
     # regenerate from the current labelmap and refresh the cache. Generation
     # failure is a 500; a failed cache write is NOT (the bytes are in memory —
     # serve them anyway).
-    if not os.path.exists(mesh_path) or _mesh_cache_is_stale(mesh_path, mask_digits):
+    shared_mask = (None if display_id.startswith("PanTS_")
+                   else shared_annotations.existing_shared_mask(secure_filename(display_id)))
+    shared_newer = bool(shared_mask) and os.path.exists(mesh_path) and os.path.getmtime(mesh_path) < os.path.getmtime(shared_mask)
+    if not os.path.exists(mesh_path) or shared_newer or _mesh_cache_is_stale(mesh_path, mask_digits):
         safe_name = secure_filename(filename)
         organ_key = safe_name[:-4] if safe_name.endswith(".glb") else safe_name
         if display_id.startswith("CV_"):
@@ -1652,6 +1660,25 @@ async def get_specific_segmentations(combined_labels_id):
         return response
     except Exception as e: 
         return jsonify({"error": f"Error loading organ metrics: {str(e)}"}), 500
+def _serve_viewer_mask(path):
+    """Send a viewer mask; an edited one is replaced in place at the same URL, so it must be revalidated."""
+    mutable = _is_mutable_pants_mask_path(path)
+    if mutable and os.name == "nt":
+        # Windows cannot atomically replace a file held open by send_file.
+        # Snapshot the compressed bytes and release the master before streaming.
+        with open(path, "rb") as handle:
+            snapshot = handle.read()
+        response = make_response(send_file(io.BytesIO(snapshot), mimetype="application/gzip"))
+        response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    else:
+        response = _serve_dataset_volume(path)
+    # Any dataset mask can be replaced by an annotator's correction at the same URL, so no copy may be trusted
+    # without asking (the ETag makes the ask a cheap 304 while nothing changed). Without this, a browser that
+    # already opened the scan would keep showing the old mask for the 7 days the original used to be cached.
+    response.headers["Cache-Control"] = "no-cache" if mutable else "public, no-cache"
+    return response
+
+
 @api_blueprint.route('/get-segmentations/<combined_labels_id>.nii.gz', methods=['GET'])
 async def get_segmentations(combined_labels_id):
     if not _is_safe_id(combined_labels_id):
@@ -1662,14 +1689,14 @@ async def get_segmentations(combined_labels_id):
     if get_dataset_from_case_id(secure_filename(combined_labels_id)) == "CancerVerse":
         _folder, tumor_mask = _cancerverse_mask(combined_labels_id)
         if tumor_mask:
-            return _serve_dataset_volume(tumor_mask)
+            return _serve_viewer_mask(tumor_mask)
         return jsonify({"masks_available": False}), 200
     # AbdomenAtlas: the viewer mask built into the overlay by scripts/build_abdomenatlas_masks.py, served
     # from local disk. A case whose mask is not built yet gets the same graceful "no masks" answer.
     if get_dataset_from_case_id(secure_filename(combined_labels_id)) == "AbdomenAtlas":
         _folder, atlas_mask = _abdomenatlas_mask(combined_labels_id)
         if atlas_mask:
-            return _serve_dataset_volume(atlas_mask)
+            return _serve_viewer_mask(atlas_mask)
         return jsonify({"masks_available": False}), 200
     try:
         pants_id = get_panTS_id(secure_filename(combined_labels_id))
@@ -1681,8 +1708,7 @@ async def get_segmentations(combined_labels_id):
     down = mount_down_response() if not prefer_hf else None
     if down:
         independent_low = _pants_low_source_path(pants_id, allow_mount=False) if want_low else None
-        independent_edit = _pants_edited_mask_path(combined_labels_id)
-        if not independent_low and not (independent_edit and os.path.isfile(independent_edit)):
+        if not independent_low and not os.path.isfile(_pants_shared_edit_path(combined_labels_id)):
             return down
     try:
         serve_path = _pants_viewer_mask_path(
@@ -1693,19 +1719,7 @@ async def get_segmentations(combined_labels_id):
         )
         if not serve_path:
             return jsonify({"error": "Segmentation file unavailable"}), 404
-        mutable = _is_mutable_pants_mask_path(serve_path)
-        if mutable and os.name == "nt":
-            # Windows cannot atomically replace a file held open by send_file.
-            # Snapshot the compressed bytes and release the master before streaming.
-            with open(serve_path, "rb") as handle:
-                snapshot = handle.read()
-            response = make_response(send_file(io.BytesIO(snapshot), mimetype="application/gzip"))
-            response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
-        else:
-            response = _serve_dataset_volume(serve_path)
-        if mutable:
-            response.headers["Cache-Control"] = "no-cache"
-        return response
+        return _serve_viewer_mask(serve_path)
     except ValueError as error:
         return jsonify({"error": f"Unsupported PanTS label schema: {error}"}), 422
     except Exception as error:
@@ -4686,14 +4700,55 @@ def _pants_viewer_cache_root():
     return os.environ.get("PANTS_VIEWER_LABEL_CACHE_PATH") or os.path.join(Constants.PERMISSIONS_DIR, "pants_viewer_labels")
 
 
-def _pants_edited_mask_path(case_id, low=False):
-    pants_id = _ai_pants_id_or_none(case_id)
-    if not pants_id:
-        raise ValueError("Case id must be numeric")
-    filename = "combined_labels_lowres.nii.gz" if low else "combined_labels.nii.gz"
-    scope = _viewer_annotation_scope()
-    parts = ["edits", "accounts", scope] if scope else ["edits"]
-    return os.path.join(_pants_viewer_cache_root(), *parts, pants_id, filename)
+def _shared_case_key(case_id):
+    """Canonical folder id (PanTS_########, CV_########, BDMAP_########) of a dataset scan.
+
+    None for an interactive session, an upload or anything that is not a dataset id: only dataset
+    scans have the one version everybody sees.
+    """
+    text = secure_filename(str(case_id).strip())
+    if not text or text != str(case_id).strip() or _is_uuid_like(text):
+        return None  # an id that needed cleaning up (a path, odd characters) is not a scan id
+    try:
+        prefix, _, digits = get_folder_id(text).partition("_")
+        # "35", "0035" and "PanTS_00000035" are the same scan, so they must share one folder, one lock and one
+        # history; a longer digit string than any real id is not a scan.
+        return f"{prefix}_{int(digits):08d}" if len(digits) <= 12 else None
+    except ValueError:
+        return None
+
+
+def _pants_shared_dir(case_id):
+    """Where the version of a dataset scan's segmentation that EVERY viewer sees lives (see save_segmentation_shared)."""
+    key = _shared_case_key(case_id)
+    if not key:
+        raise ValueError("Not a dataset case id")
+    return os.path.join(_pants_viewer_cache_root(), "edits", "shared", key)
+
+
+def _pants_shared_edit_path(case_id, low=False):
+    """The shared (everyone sees it) mask, saved by an annotator. May not exist."""
+    key = _shared_case_key(case_id)
+    if not key:
+        raise ValueError("Not a dataset case id")
+    return shared_annotations.shared_mask_path(key, low)
+
+
+def _pants_shared_meta_path(case_id):
+    return os.path.join(_pants_shared_dir(case_id), "meta.json")
+
+
+def _pants_shared_history_dir(case_id):
+    key = _shared_case_key(case_id)
+    if not key:
+        raise ValueError("Not a dataset case id")
+    return os.path.join(_pants_viewer_cache_root(), "edits", "shared-history", key)
+
+
+def _pants_shared_revision(case_id):
+    """Revision of the shared mask, or "none" when the scan still shows the original."""
+    path = _pants_shared_edit_path(case_id)
+    return str(labelmap_revision(path)) if os.path.isfile(path) else "none"
 
 
 def _viewer_annotation_scope():
@@ -4707,15 +4762,19 @@ def _viewer_annotation_scope():
     return hashlib.sha256(str(user["id"]).encode("utf-8")).hexdigest()
 
 
+def _dataset_mesh_directory(folder):
+    """Where a dataset scan's baked meshes live.
+
+    An annotator's shared version is what everyone sees, so its meshes are shared too; they live
+    apart from the original's so reverting to the original needs no rebake.
+    """
+    if os.path.isfile(shared_annotations.shared_mask_path(folder)):
+        return os.path.join(Constants.MESH_PATH, "shared", folder)
+    return os.path.join(Constants.MESH_PATH, folder)
+
+
 def _pants_mesh_directory(case_id):
-    pants_id = get_panTS_id(secure_filename(str(case_id)))
-    scope = _viewer_annotation_scope()
-    # Shared immutable-source meshes remain reusable. Personal saved masks
-    # always derive their geometry into an account-specific cache instead.
-    numeric_id = str(int(pants_id.removeprefix("PanTS_")))
-    if scope and os.path.isfile(_pants_edited_mask_path(numeric_id)):
-        return os.path.join(Constants.MESH_PATH, "accounts", scope, pants_id)
-    return os.path.join(Constants.MESH_PATH, pants_id)
+    return _dataset_mesh_directory(get_panTS_id(secure_filename(str(case_id))))
 
 
 def _is_mutable_pants_mask_path(path):
@@ -4771,13 +4830,8 @@ def _pants_viewer_mask_path(case_id, low=False, prefer_hf=False, allow_mount=Tru
     pants_id = _ai_pants_id_or_none(case_id)
     if not pants_id:
         return None
-    edited = _pants_edited_mask_path(case_id)
-    # Preserve old loopback-only development saves without publishing legacy
-    # global overlays to production accounts or modifying those old files.
-    if not os.path.isfile(edited) and has_request_context() and getattr(g, "local_development_login", False):
-        legacy = os.path.join(_pants_viewer_cache_root(), "edits", pants_id, "combined_labels.nii.gz")
-        if os.path.isfile(legacy):
-            edited = legacy
+    # A dataset scan has ONE version for everybody: the one an approved annotator saved, else the original.
+    edited = _pants_shared_edit_path(case_id)
     if os.path.isfile(edited):
         reference = _pants_low_source_path(pants_id, allow_mount=allow_mount) if low else None
         return _pants_edited_preview_path(edited, reference) if reference else edited
@@ -4930,6 +4984,8 @@ def _ai_metrics_stamp(identifier):
         if identifier.isdigit():
             pants_id = _ai_pants_id_or_none(identifier)
             candidates = []
+            if pants_id:
+                candidates.append(_pants_shared_edit_path(identifier))  # a shared correction changes the numbers
             if pants_id and Constants.PANTS_PATH:
                 candidates.append(os.path.join(Constants.PANTS_PATH, "mask_only", pants_id, "combined_labels.nii.gz"))
             if pants_id:
@@ -4973,7 +5029,7 @@ def _mask_data_stamp(case_id):
     pants_id = _ai_pants_id_or_none(case_id)
     if not pants_id:
         return None
-    masks, cts = [], []
+    masks, cts = [_pants_shared_edit_path(case_id)], []  # a shared correction replaces the original
     if Constants.PANTS_PATH:
         masks.append(os.path.join(Constants.PANTS_PATH, "mask_only", pants_id, "combined_labels.nii.gz"))
         cts.append(os.path.join(Constants.PANTS_PATH, "image_only", pants_id, "ct.nii.gz"))
@@ -8702,6 +8758,92 @@ def _case_ct_path(case_id, low=False):
 
 
 
+def _empty_reference_mask(folder, low=False):
+    """An all-background mask on the CT's grid, for a scan that has no mask yet (an annotator may add the first).
+
+    ``low`` is the grid of the fast preview CT the viewer opens first, when the scan has one.
+    """
+    try:
+        paths = get_case_nifti_paths(folder)
+    except ValueError:
+        return None
+    ct_path = paths.get("image")
+    if low and paths.get("lowres_image") and os.path.isfile(paths["lowres_image"]):
+        ct_path = paths["lowres_image"]
+    else:
+        low = False
+    if not ct_path or not os.path.isfile(ct_path):
+        return None
+    destination = os.path.join(_pants_viewer_cache_root(), "empty-reference", f"{folder}{'-low' if low else ''}.nii.gz")
+    if os.path.isfile(destination):
+        return destination
+    image = nib.load(ct_path)
+    empty = nib.Nifti1Image(np.zeros(image.shape[:3], dtype=np.uint8), image.affine)
+    empty.set_data_dtype(np.uint8)
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    tmp_path = os.path.join(os.path.dirname(destination), f".empty-{uuid.uuid4().hex}.nii.gz")
+    try:
+        nib.save(empty, tmp_path)
+        os.replace(tmp_path, destination)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+    return destination
+
+
+def _run_in_background(work):
+    """Run ``work`` on a daemon thread (its own function so a test can run the work inline)."""
+    threading.Thread(target=work, daemon=True, name="shared-annotation-prewarm").start()
+
+
+def _prewarm_shared_version(case_id):
+    """Build, off the request, what the next visitor of a freshly saved shared version would otherwise wait for.
+
+    That is the 3D meshes (the slow part) and, for PanTS, the low-resolution preview the viewer opens first.
+    Nothing depends on it: a visitor who arrives first builds the same files themselves under the same lock,
+    so a failure here only costs that visitor the wait.
+    """
+    key = _shared_case_key(case_id)
+    if not key:
+        return
+
+    def work():
+        try:
+            case_dir = _dataset_mesh_directory(key)
+            if key.startswith("PanTS_"):
+                seg_path = _pants_viewer_mask_path(str(int(key.removeprefix("PanTS_"))))
+                low_source = _pants_low_source_path(key)
+                if low_source:
+                    _pants_edited_preview_path(_pants_shared_edit_path(key), low_source)
+                smooth, lock_key = True, case_dir
+            else:
+                seg_path = (_cancerverse_mask(key) if key.startswith("CV_") else _abdomenatlas_mask(key))[1]
+                smooth, lock_key = not key.startswith("CV_"), key
+            if not seg_path:
+                return
+            with _mesh_bake_lock(lock_key):
+                manifest = _read_manifest_or_none(os.path.join(case_dir, "manifest.json"))
+                if manifest is not None and manifest.get("labelmap_revision") == labelmap_revision(seg_path):
+                    return
+                bake_case_meshes(key, seg_path, case_dir, route_base="cases", smooth=smooth)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Prewarming the shared version of %s failed; the first visitor will build it", key)
+
+    _run_in_background(work)
+
+
+def _save_reference_path(case_id, low=False):
+    """The mask a save is measured against: what the scan shows now (shared or original), on its grid."""
+    key = _shared_case_key(case_id)
+    if key and key.startswith("PanTS_"):
+        return _pants_viewer_mask_path(str(int(key.removeprefix("PanTS_"))), low=low)
+    if key:
+        resolver = _cancerverse_mask if key.startswith("CV_") else _abdomenatlas_mask
+        return resolver(key)[1] or _empty_reference_mask(key, low=low)
+    return _case_mask_path(case_id, low=low)
+
+
 def _case_mask_path(case_id, low=False):
     if _is_uuid_like(case_id):
         p = _resolve_upload_mask_path(case_id)
@@ -9435,6 +9577,130 @@ def save_segmentation(case_id):
         return _save_segmentation_locked(case_id)
 
 
+SHARED_HISTORY_KEEP = 20
+
+
+def _archive_shared_version(case_id):
+    """Keep the shared mask about to be replaced, so a bad override can be undone by hand."""
+    current = _pants_shared_edit_path(case_id)
+    if not os.path.isfile(current):
+        return
+    history = _pants_shared_history_dir(case_id)
+    os.makedirs(history, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    shutil.copy2(current, os.path.join(history, f"{stamp}.nii.gz"))
+    kept = sorted(name for name in os.listdir(history) if name.endswith(".nii.gz"))
+    for name in kept[:-SHARED_HISTORY_KEEP]:
+        try:
+            os.remove(os.path.join(history, name))
+        except OSError:
+            pass
+
+
+def _read_shared_meta(case_id):
+    try:
+        with open(_pants_shared_meta_path(case_id), "r", encoding="utf-8") as handle:
+            meta = json.load(handle)
+        return meta if isinstance(meta, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_shared_meta(case_id, revision):
+    user = current_user() or {}
+    previous = _read_shared_meta(case_id)
+    meta = {
+        "version": int(previous.get("version") or 0) + 1,
+        "revision": str(revision),
+        "saved_by_id": user.get("id"),
+        "saved_by_name": user.get("name") or user.get("email"),
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with atomic_destination(_pants_shared_meta_path(case_id)) as tmp_path:
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(meta, handle)
+
+
+def _can_override_annotations():
+    roles = current_roles()
+    return role_store.ROLE_ANNOTATOR in roles or role_store.ROLE_ADMIN in roles
+
+
+def _refuse_unless_annotator():
+    if current_user() is None:
+        return jsonify({"error": "Authentication required"}), 401
+    if not _can_override_annotations():
+        return jsonify({"error": "You don't have access to this."}), 403
+    return None
+
+
+@api_blueprint.route('/save-segmentation-shared/<case_id>', methods=['POST'])
+def save_segmentation_shared(case_id):
+    """Save the caller's edit as the version of this scan EVERY viewer sees (annotators and admins).
+
+    The normal ``/save-segmentation`` keeps an edit private to the account; this replaces what the
+    dataset shows for everyone, so it needs the ``annotator`` (or ``admin``) role. The version it
+    replaces is archived. Meshes, metrics and the 2D masks follow because every reader resolves
+    the mask through ``_pants_viewer_mask_path``.
+    """
+    refused = _refuse_unless_annotator()
+    if refused:
+        return refused
+    from services.segmentation_save_lock import segmentation_save_lock
+    import hashlib
+    canonical_case = _shared_case_key(case_id) or str(case_id).lower()
+    lock_key = hashlib.sha256(f"shared:{canonical_case}".encode()).hexdigest()
+    with segmentation_save_lock(lock_key):
+        return _save_segmentation_locked(case_id, shared=True)
+
+
+@api_blueprint.route('/shared-annotation/<case_id>', methods=['GET'])
+@require_auth
+def shared_annotation_status(case_id):
+    """Whether this scan has a shared override, who saved it, and whether the caller may replace it."""
+    if not _shared_case_key(case_id):
+        return jsonify({"supported": False, "can_override": False}), 200
+    revision = _pants_shared_revision(case_id)
+    meta = _read_shared_meta(case_id) if revision != "none" else {}
+    return jsonify({
+        "supported": True,
+        "exists": revision != "none",
+        "revision": revision,
+        "version": meta.get("version"),
+        "saved_by": meta.get("saved_by_name"),
+        "saved_at": meta.get("saved_at"),
+        "can_override": _can_override_annotations(),
+    }), 200
+
+
+@api_blueprint.route('/shared-annotation/<case_id>', methods=['DELETE'])
+def revert_shared_annotation(case_id):
+    """Remove the shared override so everyone sees the original again (archived first)."""
+    refused = _refuse_unless_annotator()
+    if refused:
+        return refused
+    if not _shared_case_key(case_id):
+        return jsonify({"error": "Only dataset scans have a shared version."}), 400
+    from services.segmentation_save_lock import segmentation_save_lock
+    import hashlib
+    lock_key = hashlib.sha256(f"shared:{_shared_case_key(case_id)}".encode()).hexdigest()
+    with segmentation_save_lock(lock_key):
+        expected = request.headers.get("If-Match")
+        if expected and expected != _pants_shared_revision(case_id):
+            return jsonify({"error": "The shared version changed since you opened this scan."}), 409
+        if not os.path.isfile(_pants_shared_edit_path(case_id)):
+            return jsonify({"reverted": False, "exists": False}), 200
+        _archive_shared_version(case_id)
+        for path in (_pants_shared_edit_path(case_id), _pants_shared_edit_path(case_id, low=True), _pants_shared_meta_path(case_id)):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        _AI_METRICS_CACHE.pop(str(case_id).strip(), None)
+        current_app.logger.info("SHARED annotation for case %s reverted by user %s", case_id, (current_user() or {}).get("id"))
+    return jsonify({"reverted": True, "exists": False}), 200
+
+
 @api_blueprint.route('/segmentation-metadata/<case_id>', methods=['GET'])
 def segmentation_metadata(case_id):
     if not _is_uuid_like(str(case_id)) and not str(case_id).isdigit():
@@ -9451,8 +9717,13 @@ def segmentation_metadata(case_id):
                     "revision": labelmap_revision(path)})
 
 
-def _save_segmentation_locked(case_id):
+def _save_segmentation_locked(case_id, shared=False):
     """Persist the frontend's live edited segScalars to combined_labels.nii.gz.
+
+    ``shared=True`` (annotators only, checked by the route) writes the version every viewer sees
+    instead of the caller's own edit. It is only for numeric PanTS cases, requires an ``If-Match``
+    naming the shared revision the caller opened ("none" when the scan still shows the original),
+    keeps the version it replaces in the history folder, and records who saved it.
 
     Accepts a GZIP-compressed flat uint8 byte stream representing the full
     voxel scalar array of the active segmentation volume.  Shape is inferred
@@ -9472,6 +9743,10 @@ def _save_segmentation_locked(case_id):
     The file is written atomically (write to .tmp then os.replace) so a
     server crash mid-write cannot corrupt the existing segmentation.
     """
+    if _shared_case_key(case_id) and not shared:
+        return jsonify({"error": "A dataset scan has one version for everyone. Approved annotators change it with Save to JHU server."}), 403
+    if shared and not _shared_case_key(case_id):
+        return jsonify({"error": "Only dataset scans have a shared version."}), 400
     if _is_uuid_like(str(case_id)):
         session_id = str(case_id)
         if not _is_safe_id(session_id) or secure_filename(session_id) != session_id:
@@ -9484,16 +9759,21 @@ def _save_segmentation_locked(case_id):
         from services.segmentation_save_payload import decode_labelmap_payload, matches_labelmap_grid
 
         low      = (request.args.get("res") or "low").lower() == "low"
-        ref_path = _case_mask_path(case_id, low=low)
+        ref_path = _save_reference_path(case_id, low=low)
         if not ref_path or not os.path.exists(ref_path):
             return jsonify({"error": "Reference segmentation file not found for this case."}), 404
 
         ref_img = nib.load(ref_path)
-        full_reference = (nib.load(_pants_viewer_mask_path(case_id))
+        full_reference = (nib.load(_save_reference_path(case_id, low=False))
                           if not _is_uuid_like(str(case_id)) else ref_img)
-        full_path = _case_mask_path(case_id, low=False)
+        full_path = _save_reference_path(case_id, low=False)
         expected_revision = request.headers.get("If-Match")
-        if expected_revision and expected_revision != str(labelmap_revision(full_path)):
+        if shared:
+            if not expected_revision:
+                return jsonify({"error": "Reload the shared annotation status before saving."}), 428
+            if expected_revision != _pants_shared_revision(case_id):
+                return jsonify({"error": "Someone saved a newer shared version since you opened this scan. Reopen it before saving."}), 409
+        elif expected_revision and expected_revision != str(labelmap_revision(full_path)):
             return jsonify({"error": "This segmentation changed since it was opened. Reopen the case before saving."}), 409
         from services.segmentation_metadata import read_structures, validate_structures, write_structures
         metadata_header = request.headers.get("X-Labelmap-Metadata")
@@ -9559,7 +9839,7 @@ def _save_segmentation_locked(case_id):
         # leaves the existing file intact.
         # Catalog edits are canonical viewer masks stored separately from
         # immutable source/quiz references and content-addressed conversions.
-        destination = ref_path if _is_uuid_like(str(case_id)) else _pants_edited_mask_path(case_id)
+        destination = _pants_shared_edit_path(case_id) if shared else ref_path
         os.makedirs(os.path.dirname(destination), exist_ok=True)
         tmp_path = os.path.join(os.path.dirname(destination), f".save-{uuid.uuid4().hex}.nii.gz")
         out_img  = nib.Nifti1Image(scalars, affine, ref_img.header)
@@ -9586,17 +9866,25 @@ def _save_segmentation_locked(case_id):
         write_structures(out_img, structures)
         try:
             nib.save(out_img, tmp_path)
+            if shared:
+                _archive_shared_version(case_id)
             os.replace(tmp_path, destination)
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
         _AI_METRICS_CACHE.pop(str(case_id).strip(), None)
+        if shared:
+            _write_shared_meta(case_id, labelmap_revision(destination))
+            current_app.logger.info("SHARED annotation for case %s replaced by user %s", case_id, (current_user() or {}).get("id"))
 
         n_labelled = int(np.count_nonzero(np.asarray(out_img.dataobj)))
         current_app.logger.info("Saved segmentation for case %s (%d labelled voxels) to %s",
                                 case_id, n_labelled, destination)
-        return jsonify({"saved": True, "labelled_voxels": n_labelled,
-                        "revision": labelmap_revision(destination)}), 200
+        body = {"saved": True, "labelled_voxels": n_labelled, "revision": labelmap_revision(destination)}
+        if shared:
+            body["shared_revision"] = body["revision"]
+            _prewarm_shared_version(case_id)
+        return jsonify(body), 200
 
     except Exception as error:
         print("[save_segmentation error]", type(error).__name__, error)

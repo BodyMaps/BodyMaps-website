@@ -78,7 +78,7 @@ import {
   applyMargin, getActualMarginMm,
   applyIslandsOperation, applyLogicalOperator, applySmoothing,
   deleteSegmentEverywhere, getSegmentAtVoxel, getActiveEditSegment, type LogicalOperation,
-  type LevelTraceOperation, saveSegmentation
+  type LevelTraceOperation, saveSegmentation, saveSharedSegmentation, fetchSharedAnnotationStatus, type SharedAnnotationStatus
 } from "../helpers/CornerstoneNifti2";
 import {
     API_BASE,
@@ -120,6 +120,7 @@ import {
     getSharedMprView,
     getOrganCentroids,
     getPresentSegmentIndices,
+    getSegmentationExport,
     getOrganLabelAtPoint,
     getOrganLabelOnClick,
     LENGTH_TOOL,
@@ -180,6 +181,7 @@ import AnnotationToolbar, {
 } from "../components/viewer/AnnotationToolbar";
 import { TOOL_INFO, isAiTool } from "../components/viewer/annotationToolbarState";
 import { useSegmentationSave } from "../helpers/viewer/useSegmentationSave";
+import { downloadBytes, labelmapToNiftiGz, segmentationFileName } from "../helpers/viewer/segmentationFile";
 import { dropStaleGuardEntry, guardLeaving } from "../helpers/leaveGuard";
 import { setMaskBrushSize } from "../helpers/CornerstoneNifti2";
 import { useMorphPicker } from "../helpers/viewer/useMorphPicker";
@@ -2459,8 +2461,23 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	// Auto-save segmentation
 	// -----------------------------------------------------------------------
 	const previousSegmentRef = useRef<number | null>(null);
+	// A dataset scan (PanTS, CancerVerse, AbdomenAtlas) has ONE version for everybody and nobody keeps a private
+	// copy on the server. Everyone can "Save to computer" (a NIfTI file); approved annotators can also
+	// "Save to JHU server", which replaces what every visitor sees.
+	const sharedSaveClearsOnlyRef = useRef(false);
+	const isDatasetScan = !sessionId && !isLocalNifti && !isDicom && !isReconstruction && !isLiveRoom
+		&& !isSoloChallenge && !isQuizPractice && /^(\d+|PanTS_?\d+|CV_?\d+|BDMAP_?\d+)$/i.test(String(caseId));
 	const saveOperation = useCallback(async () => {
 		const targetId = caseId || sessionId;
+		if (isDatasetScan) {
+			// "Save to computer". The shared save runs this too, only to clear the unsaved state: no download then.
+			if (sharedSaveClearsOnlyRef.current) return;
+			const exported = getSegmentationExport();
+			if (!exported) throw new Error("No segmentation volume loaded or scalar data is unavailable.");
+			downloadBytes(await labelmapToNiftiGz(exported, exported.data), segmentationFileName(caseId));
+			sessionRef.current?.log("edit", "Saved segmentation to this computer", 2000);
+			return;
+		}
 		if (!targetId || isLocalNifti || isDicom || isReconstruction || isLiveRoom || isSoloChallenge || isQuizPractice || enhanceSettling || enhance.state === "failed") return;
 		try {
 			const res = await saveSegmentation(API_BASE, targetId, hdReady ? "full" : "low", ownerId);
@@ -2470,10 +2487,46 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			sessionRef.current?.log("edit", `Save failed: ${e instanceof Error ? e.message : "Unknown error"}`, 2000);
 			throw e;
 		}
-	}, [caseId, sessionId, hdReady, isLocalNifti, isDicom, isReconstruction, isLiveRoom, isSoloChallenge, isQuizPractice, ownerId, enhanceSettling, enhance.state]);
+	}, [caseId, sessionId, hdReady, isDatasetScan, isLocalNifti, isDicom, isReconstruction, isLiveRoom, isSoloChallenge, isQuizPractice, ownerId, enhanceSettling, enhance.state]);
 	const { state: saveState, save: triggerSave, markEdited } = useSegmentationSave(
 		`${ownerId}:${caseId || sessionId}:${isLocalNifti}:${isDicom}:${isReconstruction}`, saveOperation,
 	);
+	// "Save to JHU server": approved annotators replace the version of a dataset scan that everyone sees.
+	// The server decides who is approved (can_override); the button only exists for them.
+	const sharedEligible = Boolean(ownerId) && isDatasetScan;
+	const [sharedStatus, setSharedStatus] = useState<SharedAnnotationStatus | null>(null);
+	const [sharedSave, setSharedSave] = useState<{ status: "idle" | "saving" | "saved" | "error"; error?: string }>({ status: "idle" });
+	useEffect(() => {
+		setSharedStatus(null);
+		setSharedSave({ status: "idle" });
+		if (!sharedEligible) return;
+		const controller = new AbortController();
+		fetchSharedAnnotationStatus(API_BASE, caseId, controller.signal)
+			.then(setSharedStatus)
+			.catch(() => { /* no button when the status cannot be read */ });
+		return () => controller.abort();
+	}, [sharedEligible, caseId, ownerId]);
+	const handleSharedSave = useCallback(async () => {
+		if (!sharedEligible || sharedSave.status === "saving") return;
+		const previous = sharedStatus?.exists
+			? ` It currently shows the version saved by ${sharedStatus.saved_by || "another annotator"}.`
+			: " It currently shows the original annotation.";
+		if (!window.confirm(`Replace the annotation of case ${caseId} for EVERYONE?${previous} The version you replace is kept on the server.`)) return;
+		setSharedSave({ status: "saving" });
+		try {
+			const res = await saveSharedSegmentation(API_BASE, caseId, hdReady ? "full" : "low", ownerId, sharedStatus?.revision ?? "none");
+			sessionRef.current?.log("edit", `Saved shared annotation (${res.labelled_voxels} voxels)`, 2000);
+			setSharedSave({ status: "saved" });
+			sharedSaveClearsOnlyRef.current = true; // what everyone sees is saved: nothing left to download
+			try { await triggerSave(); } finally { sharedSaveClearsOnlyRef.current = false; }
+			fetchSharedAnnotationStatus(API_BASE, caseId).then(setSharedStatus).catch(() => undefined);
+		} catch (e) {
+			const message = e instanceof Error ? e.message : "Shared save failed";
+			console.error("Shared save failed", e);
+			sessionRef.current?.log("edit", `Shared save failed: ${message}`, 2000);
+			setSharedSave({ status: "error", error: message });
+		}
+	}, [sharedEligible, sharedSave.status, sharedStatus, caseId, hdReady, ownerId, triggerSave]);
 	const isSaving = saveState.status === "saving";
 	useEffect(() => {
 		dropStaleGuardEntry();
@@ -2498,11 +2551,12 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	}, [viewerReady, markEdited]);
 
 	useEffect(() => {
-		if (previousSegmentRef.current !== null && previousSegmentRef.current !== activeSegment && activeSegment !== null && (saveState.status === "dirty" || saveState.status === "error")) {
+		// Never automatically on a dataset scan: replacing what everyone sees needs a deliberate click and a confirmation.
+		if (!isDatasetScan && previousSegmentRef.current !== null && previousSegmentRef.current !== activeSegment && activeSegment !== null && (saveState.status === "dirty" || saveState.status === "error")) {
 			void triggerSave();
 		}
 		previousSegmentRef.current = activeSegment;
-	}, [activeSegment, triggerSave, saveState.status]);
+	}, [activeSegment, triggerSave, saveState.status, isDatasetScan]);
 
 
 	// A solo attempt is tab-scoped and survives refresh. Once Cornerstone is ready,
@@ -5781,12 +5835,16 @@ const aiAvailableOrgans = useMemo(() => {
 				onUndo={() => (liveRoom ? liveRoom.requestUndo() : handleUndo())}
 				onRedo={() => redoMaskEdit()}
 				onSave={() => { void triggerSave(); }}
+				saveLabel={isDatasetScan ? "Save to computer" : undefined}
 				canUndo={!collaborationDisabled}
 				canRedo={!liveRoom}
 				isSaving={isSaving}
 				saveStatus={saveState.status}
 				saveError={saveState.status === "error" ? saveState.message : undefined}
 				onRetrySave={() => { void triggerSave(); }}
+				onSaveShared={sharedEligible && sharedStatus?.supported && sharedStatus.can_override ? () => { void handleSharedSave(); } : undefined}
+				sharedSaveStatus={sharedSave.status}
+				sharedSaveError={sharedSave.error}
 				/* State machine input: does the targeted structure already have a mask? */
 				hasTargetSegmentation={hasTargetSegmentation}
 				/* Selection and structure management share one searchable control. */
