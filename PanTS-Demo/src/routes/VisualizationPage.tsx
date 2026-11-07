@@ -78,7 +78,7 @@ import {
   applyMargin, getActualMarginMm,
   applyIslandsOperation, applyLogicalOperator, applySmoothing,
   deleteSegmentEverywhere, getSegmentAtVoxel, getActiveEditSegment, type LogicalOperation,
-  type LevelTraceOperation, saveSegmentation
+  type LevelTraceOperation, saveSegmentation, saveSharedSegmentation, fetchSharedAnnotationStatus, type SharedAnnotationStatus
 } from "../helpers/CornerstoneNifti2";
 import {
     API_BASE,
@@ -2471,6 +2471,41 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			throw e;
 		}
 	}, [caseId, sessionId, hdReady, isLocalNifti, isDicom, isReconstruction, isLiveRoom, isSoloChallenge, isQuizPractice, ownerId, enhanceSettling, enhance.state]);
+	// "Save to JHU server": approved annotators replace the version of a dataset scan that everyone sees.
+	// The server decides who is approved (can_override); the button only exists for them, on a PanTS case.
+	const sharedEligible = Boolean(ownerId) && /^\d+$/.test(String(caseId)) && !sessionId && !isLocalNifti && !isDicom
+		&& !isReconstruction && !isLiveRoom && !isSoloChallenge && !isQuizPractice && !isCvCase && !isAtlasCase && !isServerOnlyCase;
+	const [sharedStatus, setSharedStatus] = useState<SharedAnnotationStatus | null>(null);
+	const [sharedSave, setSharedSave] = useState<{ status: "idle" | "saving" | "saved" | "error"; error?: string }>({ status: "idle" });
+	useEffect(() => {
+		setSharedStatus(null);
+		setSharedSave({ status: "idle" });
+		if (!sharedEligible) return;
+		const controller = new AbortController();
+		fetchSharedAnnotationStatus(API_BASE, caseId, controller.signal)
+			.then(setSharedStatus)
+			.catch(() => { /* no button when the status cannot be read */ });
+		return () => controller.abort();
+	}, [sharedEligible, caseId, ownerId]);
+	const handleSharedSave = useCallback(async () => {
+		if (!sharedEligible || sharedSave.status === "saving") return;
+		const previous = sharedStatus?.exists
+			? ` It currently shows the version saved by ${sharedStatus.saved_by || "another annotator"}.`
+			: " It currently shows the original annotation.";
+		if (!window.confirm(`Replace the annotation of case ${caseId} for EVERYONE?${previous} The version you replace is kept on the server.`)) return;
+		setSharedSave({ status: "saving" });
+		try {
+			const res = await saveSharedSegmentation(API_BASE, caseId, hdReady ? "full" : "low", ownerId);
+			sessionRef.current?.log("edit", `Saved shared annotation (${res.labelled_voxels} voxels)`, 2000);
+			setSharedSave({ status: "saved" });
+			fetchSharedAnnotationStatus(API_BASE, caseId).then(setSharedStatus).catch(() => undefined);
+		} catch (e) {
+			const message = e instanceof Error ? e.message : "Shared save failed";
+			console.error("Shared save failed", e);
+			sessionRef.current?.log("edit", `Shared save failed: ${message}`, 2000);
+			setSharedSave({ status: "error", error: message });
+		}
+	}, [sharedEligible, sharedSave.status, sharedStatus, caseId, hdReady, ownerId]);
 	const { state: saveState, save: triggerSave, markEdited } = useSegmentationSave(
 		`${ownerId}:${caseId || sessionId}:${isLocalNifti}:${isDicom}:${isReconstruction}`, saveOperation,
 	);
@@ -5811,6 +5846,9 @@ const aiAvailableOrgans = useMemo(() => {
 				saveStatus={saveState.status}
 				saveError={saveState.status === "error" ? saveState.message : undefined}
 				onRetrySave={() => { void triggerSave(); }}
+				onSaveShared={sharedEligible && sharedStatus?.supported && sharedStatus.can_override ? () => { void handleSharedSave(); } : undefined}
+				sharedSaveStatus={sharedSave.status}
+				sharedSaveError={sharedSave.error}
 				/* State machine input: does the targeted structure already have a mask? */
 				hasTargetSegmentation={hasTargetSegmentation}
 				/* Selection and structure management share one searchable control. */

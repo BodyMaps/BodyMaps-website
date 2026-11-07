@@ -81,6 +81,13 @@ beforeEach(() => {
             USER.avatar_url = method === "PUT" ? "/api/auth/avatar/u1/version1" : null;
             return json({ user: { ...USER } });
         }
+		if (u.includes("/api/auth/redeem-annotator-invite")) {
+			const { code } = JSON.parse(String(init?.body)) as { code: string };
+			if (code === "unconfigured") return json({ error: "Invitation codes are not configured." }, false, 503);
+			if (code !== "good-code") return json({ error: "Invalid invitation code." }, false, 403);
+			USER.roles = ["annotator"];
+			return json({ ok: true, user: { ...USER } });
+		}
 		if (u.includes("/api/auth/send-verification")) {
 			return json({ ok: true, already_verified: false, sent: true });
 		}
@@ -1040,5 +1047,50 @@ describe("privacy confirmation", () => {
 		// The finished delete closes the confirmation back to its button.
 		expect(screen.queryByRole("alertdialog")).toBeNull();
 		expect(deleteHistory).toHaveFocus();
+	});
+});
+
+
+describe("annotator access", () => {
+	it("offers an invitation code to an account without the role", async () => {
+		renderAt();
+		await screen.findByRole("heading", { name: "Profile" });
+		expect(await screen.findByLabelText(/Invitation code/)).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Redeem" })).toBeDisabled();
+	});
+
+	it("redeems a good code on the server and then shows the approved state", async () => {
+		const user = userEvent.setup();
+		renderAt();
+		await user.type(await screen.findByLabelText(/Invitation code/), "  good-code ");
+		await user.click(screen.getByRole("button", { name: "Redeem" }));
+		expect(await screen.findByText(/You can save corrections to a dataset scan for everyone/)).toBeInTheDocument();
+		expect(lastCall("POST", "/api/auth/redeem-annotator-invite")?.body).toEqual({ code: "good-code" });
+		expect(screen.queryByLabelText(/Invitation code/)).not.toBeInTheDocument();
+	});
+
+	it("says so plainly for a wrong code and keeps the field", async () => {
+		const user = userEvent.setup();
+		renderAt();
+		const field = await screen.findByLabelText(/Invitation code/);
+		await user.type(field, "nope");
+		await user.click(screen.getByRole("button", { name: "Redeem" }));
+		expect(await screen.findByText("That invitation code isn't valid.")).toBeInTheDocument();
+		expect(screen.getByLabelText(/Invitation code/)).toHaveValue("nope");
+	});
+
+	it("says codes are unavailable when the site has none configured", async () => {
+		const user = userEvent.setup();
+		renderAt();
+		await user.type(await screen.findByLabelText(/Invitation code/), "unconfigured");
+		await user.click(screen.getByRole("button", { name: "Redeem" }));
+		expect(await screen.findByText("Invitation codes aren't available on this site.")).toBeInTheDocument();
+	});
+
+	it.each(["annotator", "admin"])("an existing %s sees the approved state, not the code field", async (role) => {
+		USER.roles = [role];
+		renderAt();
+		expect(await screen.findByTestId("annotator-access")).toHaveTextContent(/Annotator access/);
+		expect(screen.queryByLabelText(/Invitation code/)).not.toBeInTheDocument();
 	});
 });

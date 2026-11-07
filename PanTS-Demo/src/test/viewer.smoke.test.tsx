@@ -74,6 +74,7 @@ vi.mock("../helpers/CornerstoneNifti2", async (importOriginal) => {
 		undoMaskEdit: vi.fn(),
 		redoMaskEdit: vi.fn(),
 		saveSegmentation: vi.fn(async () => ({ labelled_voxels: 10 })),
+		saveSharedSegmentation: vi.fn(async () => ({ labelled_voxels: 12 })),
 		getMaskEditHistoryState: vi.fn(() => ({ canUndo: false, canRedo: false })),
 		subscribeToSegmentationEdits: vi.fn(() => () => {}),
 		getEditedSegments: vi.fn(() => new Set()),
@@ -98,7 +99,7 @@ vi.mock("../helpers/NiiVueNifti", () => ({
 	updateVisibilities: vi.fn(),
 }));
 
-import { applyRemoteMeasurement, clearMeasurements, LENGTH_TOOL, renderVisualization, saveSegmentation } from "../helpers/CornerstoneNifti2";
+import { applyRemoteMeasurement, clearMeasurements, LENGTH_TOOL, renderVisualization, saveSegmentation, saveSharedSegmentation } from "../helpers/CornerstoneNifti2";
 import VisualizationPage from "../routes/VisualizationPage";
 import type { EducationResult, QuizPracticeController, SoloChallengeController } from "../education/types";
 import type { LiveRoomController } from "../liveRooms/types";
@@ -424,6 +425,95 @@ describe("viewer smoke test", () => {
 		const metadataRequest = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/segmentation-metadata/35"));
 		expect(metadataRequest).toBeDefined();
 		expect(new Headers(metadataRequest?.[1]?.headers).get("X-Upload-Owner")).toBe("viewer-owner-1");
+	});
+
+	describe("Save to JHU server (shared annotation override)", () => {
+		type Status = { supported: boolean; exists?: boolean; revision?: string; saved_by?: string | null; can_override: boolean };
+		const mountCase = async (status: Status | null, path = "/case/35") => {
+			const fallback = global.fetch;
+			const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input);
+				if (url.includes("/api/auth/me")) return new Response(JSON.stringify({ user: { id: "viewer-owner-1", email: "viewer@example.com" } }));
+				if (url.includes("/api/shared-annotation/")) {
+					return status ? new Response(JSON.stringify(status)) : new Response("{}", { status: 500 });
+				}
+				return fallback(input, init);
+			});
+			global.fetch = fetchMock as typeof fetch;
+			render(
+				<AuthProvider>
+					<MemoryRouter initialEntries={[path]}>
+						<Routes><Route path="/case/:caseId" element={<VisualizationPage />} /></Routes>
+					</MemoryRouter>
+				</AuthProvider>
+			);
+			await openAnnotationSave();
+			return fetchMock;
+		};
+		const sharedButton = () => screen.queryByRole("button", { name: "Save to JHU server" });
+		let confirmSpy: ReturnType<typeof vi.spyOn>;
+		beforeEach(() => { confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true); });
+		afterEach(() => { confirmSpy.mockRestore(); });
+
+		it("is offered above Save to approved annotators only", async () => {
+			await mountCase({ supported: true, exists: false, revision: "none", can_override: true });
+			const button = await screen.findByRole("button", { name: "Save to JHU server" });
+			const save = within(screen.getByRole("toolbar")).getByRole("button", { name: "Save", exact: true });
+			expect(button.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		});
+
+		it("is not offered to an account without permission", async () => {
+			const fetchMock = await mountCase({ supported: true, exists: false, revision: "none", can_override: false });
+			await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/shared-annotation/35"))).toBe(true));
+			expect(sharedButton()).not.toBeInTheDocument();
+		});
+
+		it("is not offered when the status cannot be read or the scan has no shared version", async () => {
+			await mountCase(null);
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			expect(sharedButton()).not.toBeInTheDocument();
+		});
+
+		it("is not offered on a scan the server says is unsupported", async () => {
+			await mountCase({ supported: false, can_override: true });
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			expect(sharedButton()).not.toBeInTheDocument();
+		});
+
+		it("asks before replacing what everyone sees, then saves with the owner and resolution", async () => {
+			await mountCase({ supported: true, exists: true, revision: "r1", saved_by: "Dr. Lee", can_override: true });
+			fireEvent.click(await screen.findByRole("button", { name: "Save to JHU server" }));
+			expect(confirmSpy).toHaveBeenCalledTimes(1);
+			expect(String(confirmSpy.mock.calls[0][0])).toMatch(/EVERYONE/);
+			expect(String(confirmSpy.mock.calls[0][0])).toMatch(/Dr\. Lee/);
+			await waitFor(() => expect(saveSharedSegmentation).toHaveBeenCalledWith(expect.any(String), "35", "full", "viewer-owner-1"));
+			expect(await screen.findByText("Saved for everyone")).toBeVisible();
+			expect(saveSegmentation).not.toHaveBeenCalled();
+		});
+
+		it("does nothing when the annotator cancels the confirmation", async () => {
+			confirmSpy.mockReturnValue(false);
+			await mountCase({ supported: true, exists: false, revision: "none", can_override: true });
+			fireEvent.click(await screen.findByRole("button", { name: "Save to JHU server" }));
+			expect(saveSharedSegmentation).not.toHaveBeenCalled();
+			expect(screen.queryByText("Saved for everyone")).not.toBeInTheDocument();
+		});
+
+		it("shows the server's reason when someone else saved first", async () => {
+			vi.mocked(saveSharedSegmentation).mockRejectedValueOnce(new Error("Someone saved a newer shared version since you opened this scan. Reopen it before saving."));
+			await mountCase({ supported: true, exists: false, revision: "none", can_override: true });
+			fireEvent.click(await screen.findByRole("button", { name: "Save to JHU server" }));
+			expect(await screen.findByText(/Someone saved a newer shared version/)).toBeVisible();
+			expect(screen.queryByText("Saved for everyone")).not.toBeInTheDocument();
+		});
+
+		it("leaves the normal Save untouched", async () => {
+			await mountCase({ supported: true, exists: false, revision: "none", can_override: true });
+			await screen.findByRole("button", { name: "Save to JHU server" });
+			fireEvent.click(within(screen.getByRole("toolbar")).getByRole("button", { name: "Save", exact: true }));
+			await waitFor(() => expect(saveSegmentation).toHaveBeenCalledWith(expect.any(String), "35", "full", "viewer-owner-1"));
+			expect(saveSharedSegmentation).not.toHaveBeenCalled();
+		});
 	});
 
 	it("VisualizationPage mounts for a dataset case without crashing", async () => {

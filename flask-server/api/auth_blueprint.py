@@ -155,6 +155,11 @@ _ADMIN_COUPON_ENV = "BODYMAPS_ADMIN_COUPON_SHA256"
 _COUPON_WINDOW_S = 3600
 _COUPON_MAX_ATTEMPTS = 5
 _coupon_limiter = Limiter(_COUPON_WINDOW_S)
+# Invitation codes that grant the ``annotator`` role (override the shared version of a dataset
+# scan's annotations). Like the coupon, only SHA-256 digests live in the environment: a
+# comma-separated list, so a code can be rotated or given to one group and withdrawn on its own.
+_ANNOTATOR_INVITE_ENV = "BODYMAPS_ANNOTATOR_INVITE_SHA256"
+_invite_limiter = Limiter(_COUPON_WINDOW_S)
 _avatar_limiter = Limiter(3600)
 
 
@@ -296,6 +301,53 @@ def redeem_admin_coupon():
         "access": "admin_coupon",
         "user": _with_roles(user),
     }), 200
+
+
+def _annotator_invite_digests() -> list[str]:
+    """The configured invitation-code digests; malformed entries are dropped, never compared."""
+    digests = []
+    for entry in (os.environ.get(_ANNOTATOR_INVITE_ENV) or "").split(","):
+        entry = entry.strip().lower()
+        if len(entry) == 64 and all(ch in "0123456789abcdef" for ch in entry):
+            digests.append(entry)
+    return digests
+
+
+@auth_blueprint.route("/auth/redeem-annotator-invite", methods=["POST"])
+@require_auth
+def redeem_annotator_invite():
+    """Redeem an invitation code for the ``annotator`` role.
+
+    The role lets the account save a dataset scan's segmentation as the version everyone sees.
+    It is a separate role from ``admin`` on purpose: a code that leaks must never reach account
+    management or analytics. Attempts are limited per account and per address; every configured
+    digest is compared (constant time) so the response time does not say how many codes exist.
+    """
+    user = current_user()
+    ip = request.remote_addr or "unknown"
+    if _invite_limiter.over("ip:" + ip, _COUPON_MAX_ATTEMPTS * 4) or _invite_limiter.over("user:" + user["id"], _COUPON_MAX_ATTEMPTS):
+        return jsonify({"error": "Too many invitation attempts. Try again later."}), 429
+
+    digests = _annotator_invite_digests()
+    if not digests:
+        return jsonify({"error": "Invitation codes are not configured."}), 503
+
+    code = _json().get("code")
+    if not isinstance(code, str) or not code.strip() or len(code) > 256:
+        return jsonify({"error": "Enter a valid invitation code."}), 400
+
+    given = _coupon_digest(code.strip())
+    matched = False
+    for digest in digests:
+        matched |= hmac.compare_digest(given, digest)
+    if not matched:
+        return jsonify({"error": "Invalid invitation code."}), 403
+
+    try:
+        role_store.grant(user["id"], role_store.ROLE_ANNOTATOR, granted_by=None)
+    except LookupError:
+        return jsonify({"error": "Account not found"}), 404
+    return jsonify({"ok": True, "user": _with_roles(user)}), 200
 
 
 @auth_blueprint.route("/auth/logout", methods=["POST"])

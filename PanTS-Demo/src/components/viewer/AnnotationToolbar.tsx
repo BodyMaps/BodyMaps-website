@@ -21,7 +21,8 @@ import {
 	IconChevronDown,
 	IconArrowBackUp,
 	IconArrowForwardUp,
-	IconDeviceFloppy,
+	IconCloudUpload,
+  IconDeviceFloppy,
 	IconLoader,
 	IconSparkles,
 } from "@tabler/icons-react";
@@ -138,6 +139,11 @@ interface AnnotationToolbarProps {
 	saveStatus?: "idle" | "dirty" | "saving" | "saved" | "error";
 	saveError?: string;
 	onRetrySave?: () => void;
+	/** Only passed to approved annotators on a dataset scan: saves the edit as the version every viewer
+	 *  sees (the normal Save keeps it on the person's own account). */
+	onSaveShared?: () => void;
+	sharedSaveStatus?: "idle" | "saving" | "saved" | "error";
+	sharedSaveError?: string;
 	canUndo: boolean;
 	canRedo: boolean;
 	showHistory?: boolean;
@@ -451,7 +457,7 @@ export default function AnnotationToolbar({
 	renderFlyout, scissorsPointCount, onScissorsCancel,
 	targetKey, onAiCancel, aiRunBusy, onAiCancelRun,
 	onGuidedPickingChange,
-	onUndo, onRedo, onSave, saveStatus, saveError, onRetrySave, canUndo, canRedo, showHistory = true, isSaving,
+	onUndo, onRedo, onSave, saveStatus, saveError, onRetrySave, onSaveShared, sharedSaveStatus, sharedSaveError, canUndo, canRedo, showHistory = true, isSaving,
 	hasTargetSegmentation, structures, colors, activeStructureId, onSelectStructure,
 	onCreateStructure, onRenameStructure, onColorChange, onDeleteStructure,
 	showOnlyTargetMask, onShowOnlyTargetMaskChange, managedStructureIds,
@@ -969,6 +975,27 @@ export default function AnnotationToolbar({
 				{/* Save remains available while the target is being edited. */}
 				{layout.save && (
 					<>
+						{onSaveShared && (
+							<>
+								<button
+									type="button"
+									className="atb__label-btn"
+									data-testid="save-to-jhu-server"
+									onClick={() => onSaveShared()}
+									disabled={sharedSaveStatus === "saving" || isSaving || saveStatus === "saving" || disabled}
+									title="Replace the version of this scan everyone sees"
+								>
+									{sharedSaveStatus === "saving" ? <IconLoader size={15} className="spin" /> : <IconCloudUpload size={15} />}
+									Save to JHU server
+								</button>
+								{sharedSaveStatus === "saved" && <span className="atb-save-status" role="status">Saved for everyone</span>}
+								{sharedSaveStatus === "error" && (
+									<span className="atb-save-status atb-save-status--error" role="status" title={sharedSaveError}>
+										{sharedSaveError || "Shared save failed"}
+									</span>
+								)}
+							</>
+						)}
 						<button
 							type="button"
 							className="atb__label-btn atb__label-btn--primary"

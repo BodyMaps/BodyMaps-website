@@ -132,6 +132,8 @@ type AuthContextValue = {
 	setPlan: (plan: PlanId) => Promise<void>;
 	/** Redeem a server-configured access coupon for sponsored model access. */
 	redeemAdminCoupon: (coupon: string) => Promise<AuthUser>;
+	/** Redeem an invitation code for the annotator role (replace a dataset scan's shared annotations). */
+	redeemAnnotatorInvite: (code: string) => Promise<AuthUser>;
 	/** Current plan usage, or null until loaded. Refreshed by refreshUsage(). */
 	usage: PlanUsage | null;
 	/** The last usage read failed. `usage` keeps the last good figures, if any. */
@@ -812,6 +814,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		return mapped;
 	}, [accountFailure, updateCurrentUser]);
 
+	const redeemAnnotatorInvite = useCallback(async (code: string) => {
+		const revision = sessionRevision.current;
+		const res = await authFetch("/api/auth/redeem-annotator-invite", {
+			method: "POST",
+			body: JSON.stringify({ code }),
+		});
+		const data = await res.json().catch(() => ({}));
+		if (res.status === 503) throw new Error("Invitation codes aren't available on this site.");
+		if (res.status === 403) throw new Error("That invitation code isn't valid.");
+		if (!res.ok) throw accountFailure(res, data, "Couldn't redeem that invitation code.", revision);
+		const mapped = mapApiUser(data.user);
+		updateCurrentUser(data.user);
+		return mapped;
+	}, [accountFailure, updateCurrentUser]);
+
 	// Keep usage in step with whoever is signed in — including after a plan
 	// change, since the limits it reports come from the plan.
 	useEffect(() => {
@@ -842,7 +859,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			deleteAccount,
 			 updateAccountProfile,
 			 setPlan,
-			 redeemAdminCoupon,
+			 redeemAdminCoupon, redeemAnnotatorInvite,
 			 usage,
 			usageFailed,
 			refreshUsage,
@@ -855,7 +872,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		[user, loading, signIn, signUp, signInWithProvider, requestPasswordReset,
 		 resetPassword, sendVerification, verifyEmail, oauthProviders, signOut,
 		 updatePreferences, updateName, updateAvatar, exportData, deleteScanHistory, deleteAccount,
-		 updateAccountProfile, setPlan, redeemAdminCoupon, usage, usageFailed, refreshUsage, authPrompt, promptAuth,
+		 updateAccountProfile, setPlan, redeemAdminCoupon, redeemAnnotatorInvite, usage, usageFailed, refreshUsage, authPrompt, promptAuth,
 		 closeAuthPrompt, oauthError, clearOauthError]
 	);
 

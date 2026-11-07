@@ -1,8 +1,11 @@
 """Roles: who holds them, who can hand them out, and the account list the admin
 UI searches.
 
-One role exists. ``admin`` gates the usage dashboard, this module's own
-grant/revoke endpoints, and — through ``plan_store`` — every plan limit.
+``admin`` gates the usage dashboard, this module's own grant/revoke endpoints,
+and — through ``plan_store`` — every plan limit. ``annotator`` lets an account
+replace the shared version of a dataset scan's segmentation (see
+``api_blueprint.save_segmentation_shared``); it is handed out by an admin or by
+redeeming an invitation code, and carries none of admin's powers.
 
 An unknown role name is refused rather than stored: the set of roles is a fixed
 vocabulary, and a typo'd "adminn" that stores cleanly is a grant that silently
@@ -26,8 +29,9 @@ from models.user import User
 from models.user_role import UserRole
 
 ROLE_ADMIN = "admin"
+ROLE_ANNOTATOR = "annotator"
 
-ROLES = frozenset({ROLE_ADMIN})
+ROLES = frozenset({ROLE_ADMIN, ROLE_ANNOTATOR})
 
 # Guardrails on revoke. Both exist to stop the system reaching a state with no
 # admin left, which nothing short of shell access can undo.

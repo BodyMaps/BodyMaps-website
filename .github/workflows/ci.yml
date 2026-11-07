@@ -82,6 +82,13 @@ jobs:
           PERMISSIONS_DIR: ${{ runner.temp }}/bodymaps-label-tests
         run: python -m pytest tests/unit/test_pants_labelmap.py tests/unit/test_pants_label_routes.py tests/unit/test_mesh_api.py -v
 
+      # Annotators replacing a dataset scan's segmentation for everyone: the role gate, the lost-update
+      # guard, who sees which version (original / shared / own edit), meshes, archive and revert.
+      - name: Shared annotation override
+        env:
+          PERMISSIONS_DIR: ${{ runner.temp }}/bodymaps-shared-annotation-tests
+        run: python -m pytest tests/unit/test_shared_annotation.py -v
+
       - name: Automatic report evidence and source preservation
         run: python -m pytest tests/unit/test_report_evidence.py tests/unit/test_report_measurements.py tests/unit/test_report_measurement_cache.py tests/unit/test_quiz_report_questions.py -v
 

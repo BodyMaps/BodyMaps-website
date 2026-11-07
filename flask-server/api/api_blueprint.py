@@ -81,7 +81,7 @@ load_dotenv()
 import nibabel as nib
 import uuid
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from .utils import *
 from . import utils as _search_tables   # live DF / DF_CV / DF_ALL (``import *`` copies the names at import time)
 import requests  # ⭐ 只在這裡 import 一次 requests
@@ -166,7 +166,8 @@ import threading
 # directory before it touches os.path; secure_filename is the barrier at each
 # path-construction site.
 from .path_safety import is_safe_id as _is_safe_id
-from .auth import current_user, require_auth, require_role
+from services import shared_annotations
+from .auth import current_roles, current_user, require_auth, require_role
 from .chunk_store import (
     DISCARD_NOTE, FinalizeHeartbeat, acquire_finalize_lock, finalize_running,
     first_missing_chunk, received_chunks, sweep_discarded_uploads, sweep_stale_uploads,
@@ -1682,7 +1683,9 @@ async def get_segmentations(combined_labels_id):
     if down:
         independent_low = _pants_low_source_path(pants_id, allow_mount=False) if want_low else None
         independent_edit = _pants_edited_mask_path(combined_labels_id)
-        if not independent_low and not (independent_edit and os.path.isfile(independent_edit)):
+        independent_shared = _pants_shared_edit_path(combined_labels_id)
+        if (not independent_low and not (independent_edit and os.path.isfile(independent_edit))
+                and not os.path.isfile(independent_shared)):
             return down
     try:
         serve_path = _pants_viewer_mask_path(
@@ -4696,6 +4699,33 @@ def _pants_edited_mask_path(case_id, low=False):
     return os.path.join(_pants_viewer_cache_root(), *parts, pants_id, filename)
 
 
+def _pants_shared_dir(case_id):
+    """Where the shared version of a PanTS scan's segmentation lives (see save_segmentation_shared)."""
+    pants_id = _ai_pants_id_or_none(case_id)
+    if not pants_id:
+        raise ValueError("Case id must be numeric")
+    return os.path.join(_pants_viewer_cache_root(), "edits", "shared", pants_id)
+
+
+def _pants_shared_edit_path(case_id, low=False):
+    """The shared (everyone sees it) edited mask, saved by an annotator. May not exist."""
+    return shared_annotations.shared_mask_path(_ai_pants_id_or_none(case_id) or _pants_shared_dir(case_id), low)
+
+
+def _pants_shared_meta_path(case_id):
+    return os.path.join(_pants_shared_dir(case_id), "meta.json")
+
+
+def _pants_shared_history_dir(case_id):
+    return os.path.join(_pants_viewer_cache_root(), "edits", "shared-history", _ai_pants_id_or_none(case_id))
+
+
+def _pants_shared_revision(case_id):
+    """Revision of the shared mask, or "none" when the scan still shows the original."""
+    path = _pants_shared_edit_path(case_id)
+    return str(labelmap_revision(path)) if os.path.isfile(path) else "none"
+
+
 def _viewer_annotation_scope():
     """An opaque account namespace; never accept storage scope from a URL/body."""
     if not has_request_context():
@@ -4715,6 +4745,10 @@ def _pants_mesh_directory(case_id):
     numeric_id = str(int(pants_id.removeprefix("PanTS_")))
     if scope and os.path.isfile(_pants_edited_mask_path(numeric_id)):
         return os.path.join(Constants.MESH_PATH, "accounts", scope, pants_id)
+    # An annotator's shared version is what everyone else sees, so its meshes are shared too; they
+    # live apart from the original's so reverting to the original needs no rebake.
+    if os.path.isfile(_pants_shared_edit_path(numeric_id)):
+        return os.path.join(Constants.MESH_PATH, "shared", pants_id)
     return os.path.join(Constants.MESH_PATH, pants_id)
 
 
@@ -4778,6 +4812,11 @@ def _pants_viewer_mask_path(case_id, low=False, prefer_hf=False, allow_mount=Tru
         legacy = os.path.join(_pants_viewer_cache_root(), "edits", pants_id, "combined_labels.nii.gz")
         if os.path.isfile(legacy):
             edited = legacy
+    # A person's own saved edit wins; otherwise the version an annotator saved for everyone.
+    if not os.path.isfile(edited):
+        shared = _pants_shared_edit_path(case_id)
+        if os.path.isfile(shared):
+            edited = shared
     if os.path.isfile(edited):
         reference = _pants_low_source_path(pants_id, allow_mount=allow_mount) if low else None
         return _pants_edited_preview_path(edited, reference) if reference else edited
@@ -4930,6 +4969,8 @@ def _ai_metrics_stamp(identifier):
         if identifier.isdigit():
             pants_id = _ai_pants_id_or_none(identifier)
             candidates = []
+            if pants_id:
+                candidates.append(_pants_shared_edit_path(identifier))  # a shared correction changes the numbers
             if pants_id and Constants.PANTS_PATH:
                 candidates.append(os.path.join(Constants.PANTS_PATH, "mask_only", pants_id, "combined_labels.nii.gz"))
             if pants_id:
@@ -4973,7 +5014,7 @@ def _mask_data_stamp(case_id):
     pants_id = _ai_pants_id_or_none(case_id)
     if not pants_id:
         return None
-    masks, cts = [], []
+    masks, cts = [_pants_shared_edit_path(case_id)], []  # a shared correction replaces the original
     if Constants.PANTS_PATH:
         masks.append(os.path.join(Constants.PANTS_PATH, "mask_only", pants_id, "combined_labels.nii.gz"))
         cts.append(os.path.join(Constants.PANTS_PATH, "image_only", pants_id, "ct.nii.gz"))
@@ -9435,6 +9476,130 @@ def save_segmentation(case_id):
         return _save_segmentation_locked(case_id)
 
 
+SHARED_HISTORY_KEEP = 20
+
+
+def _archive_shared_version(case_id):
+    """Keep the shared mask about to be replaced, so a bad override can be undone by hand."""
+    current = _pants_shared_edit_path(case_id)
+    if not os.path.isfile(current):
+        return
+    history = _pants_shared_history_dir(case_id)
+    os.makedirs(history, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    shutil.copy2(current, os.path.join(history, f"{stamp}.nii.gz"))
+    kept = sorted(name for name in os.listdir(history) if name.endswith(".nii.gz"))
+    for name in kept[:-SHARED_HISTORY_KEEP]:
+        try:
+            os.remove(os.path.join(history, name))
+        except OSError:
+            pass
+
+
+def _read_shared_meta(case_id):
+    try:
+        with open(_pants_shared_meta_path(case_id), "r", encoding="utf-8") as handle:
+            meta = json.load(handle)
+        return meta if isinstance(meta, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_shared_meta(case_id, revision):
+    user = current_user() or {}
+    previous = _read_shared_meta(case_id)
+    meta = {
+        "version": int(previous.get("version") or 0) + 1,
+        "revision": str(revision),
+        "saved_by_id": user.get("id"),
+        "saved_by_name": user.get("name") or user.get("email"),
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with atomic_destination(_pants_shared_meta_path(case_id)) as tmp_path:
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(meta, handle)
+
+
+def _can_override_annotations():
+    roles = current_roles()
+    return role_store.ROLE_ANNOTATOR in roles or role_store.ROLE_ADMIN in roles
+
+
+def _refuse_unless_annotator():
+    if current_user() is None:
+        return jsonify({"error": "Authentication required"}), 401
+    if not _can_override_annotations():
+        return jsonify({"error": "You don't have access to this."}), 403
+    return None
+
+
+@api_blueprint.route('/save-segmentation-shared/<case_id>', methods=['POST'])
+def save_segmentation_shared(case_id):
+    """Save the caller's edit as the version of this scan EVERY viewer sees (annotators and admins).
+
+    The normal ``/save-segmentation`` keeps an edit private to the account; this replaces what the
+    dataset shows for everyone, so it needs the ``annotator`` (or ``admin``) role. The version it
+    replaces is archived. Meshes, metrics and the 2D masks follow because every reader resolves
+    the mask through ``_pants_viewer_mask_path``.
+    """
+    refused = _refuse_unless_annotator()
+    if refused:
+        return refused
+    from services.segmentation_save_lock import segmentation_save_lock
+    import hashlib
+    canonical_case = _ai_pants_id_or_none(case_id) or str(case_id).lower()
+    lock_key = hashlib.sha256(f"shared:{canonical_case}".encode()).hexdigest()
+    with segmentation_save_lock(lock_key):
+        return _save_segmentation_locked(case_id, shared=True)
+
+
+@api_blueprint.route('/shared-annotation/<case_id>', methods=['GET'])
+@require_auth
+def shared_annotation_status(case_id):
+    """Whether this scan has a shared override, who saved it, and whether the caller may replace it."""
+    if not _ai_pants_id_or_none(case_id) or get_dataset_from_case_id(str(case_id)) in ("CancerVerse", "AbdomenAtlas"):
+        return jsonify({"supported": False, "can_override": False}), 200
+    revision = _pants_shared_revision(case_id)
+    meta = _read_shared_meta(case_id) if revision != "none" else {}
+    return jsonify({
+        "supported": True,
+        "exists": revision != "none",
+        "revision": revision,
+        "version": meta.get("version"),
+        "saved_by": meta.get("saved_by_name"),
+        "saved_at": meta.get("saved_at"),
+        "can_override": _can_override_annotations(),
+    }), 200
+
+
+@api_blueprint.route('/shared-annotation/<case_id>', methods=['DELETE'])
+def revert_shared_annotation(case_id):
+    """Remove the shared override so everyone sees the original again (archived first)."""
+    refused = _refuse_unless_annotator()
+    if refused:
+        return refused
+    if not _ai_pants_id_or_none(case_id):
+        return jsonify({"error": "Only PanTS dataset scans have a shared version."}), 400
+    from services.segmentation_save_lock import segmentation_save_lock
+    import hashlib
+    lock_key = hashlib.sha256(f"shared:{_ai_pants_id_or_none(case_id)}".encode()).hexdigest()
+    with segmentation_save_lock(lock_key):
+        expected = request.headers.get("If-Match")
+        if expected and expected != _pants_shared_revision(case_id):
+            return jsonify({"error": "The shared version changed since you opened this scan."}), 409
+        if not os.path.isfile(_pants_shared_edit_path(case_id)):
+            return jsonify({"reverted": False, "exists": False}), 200
+        _archive_shared_version(case_id)
+        for path in (_pants_shared_edit_path(case_id), _pants_shared_edit_path(case_id, low=True), _pants_shared_meta_path(case_id)):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        _AI_METRICS_CACHE.pop(str(case_id).strip(), None)
+        current_app.logger.info("SHARED annotation for case %s reverted by user %s", case_id, (current_user() or {}).get("id"))
+    return jsonify({"reverted": True, "exists": False}), 200
+
+
 @api_blueprint.route('/segmentation-metadata/<case_id>', methods=['GET'])
 def segmentation_metadata(case_id):
     if not _is_uuid_like(str(case_id)) and not str(case_id).isdigit():
@@ -9451,8 +9616,13 @@ def segmentation_metadata(case_id):
                     "revision": labelmap_revision(path)})
 
 
-def _save_segmentation_locked(case_id):
+def _save_segmentation_locked(case_id, shared=False):
     """Persist the frontend's live edited segScalars to combined_labels.nii.gz.
+
+    ``shared=True`` (annotators only, checked by the route) writes the version every viewer sees
+    instead of the caller's own edit. It is only for numeric PanTS cases, requires an ``If-Match``
+    naming the shared revision the caller opened ("none" when the scan still shows the original),
+    keeps the version it replaces in the history folder, and records who saved it.
 
     Accepts a GZIP-compressed flat uint8 byte stream representing the full
     voxel scalar array of the active segmentation volume.  Shape is inferred
@@ -9472,6 +9642,9 @@ def _save_segmentation_locked(case_id):
     The file is written atomically (write to .tmp then os.replace) so a
     server crash mid-write cannot corrupt the existing segmentation.
     """
+    if shared and (_is_uuid_like(str(case_id)) or not _ai_pants_id_or_none(case_id)
+                   or get_dataset_from_case_id(str(case_id)) in ("CancerVerse", "AbdomenAtlas")):
+        return jsonify({"error": "Only PanTS dataset scans have a shared version."}), 400
     if _is_uuid_like(str(case_id)):
         session_id = str(case_id)
         if not _is_safe_id(session_id) or secure_filename(session_id) != session_id:
@@ -9493,7 +9666,12 @@ def _save_segmentation_locked(case_id):
                           if not _is_uuid_like(str(case_id)) else ref_img)
         full_path = _case_mask_path(case_id, low=False)
         expected_revision = request.headers.get("If-Match")
-        if expected_revision and expected_revision != str(labelmap_revision(full_path)):
+        if shared:
+            if not expected_revision:
+                return jsonify({"error": "Reload the shared annotation status before saving."}), 428
+            if expected_revision != _pants_shared_revision(case_id):
+                return jsonify({"error": "Someone saved a newer shared version since you opened this scan. Reopen it before saving."}), 409
+        elif expected_revision and expected_revision != str(labelmap_revision(full_path)):
             return jsonify({"error": "This segmentation changed since it was opened. Reopen the case before saving."}), 409
         from services.segmentation_metadata import read_structures, validate_structures, write_structures
         metadata_header = request.headers.get("X-Labelmap-Metadata")
@@ -9559,7 +9737,8 @@ def _save_segmentation_locked(case_id):
         # leaves the existing file intact.
         # Catalog edits are canonical viewer masks stored separately from
         # immutable source/quiz references and content-addressed conversions.
-        destination = ref_path if _is_uuid_like(str(case_id)) else _pants_edited_mask_path(case_id)
+        destination = (_pants_shared_edit_path(case_id) if shared
+                       else ref_path if _is_uuid_like(str(case_id)) else _pants_edited_mask_path(case_id))
         os.makedirs(os.path.dirname(destination), exist_ok=True)
         tmp_path = os.path.join(os.path.dirname(destination), f".save-{uuid.uuid4().hex}.nii.gz")
         out_img  = nib.Nifti1Image(scalars, affine, ref_img.header)
@@ -9586,17 +9765,27 @@ def _save_segmentation_locked(case_id):
         write_structures(out_img, structures)
         try:
             nib.save(out_img, tmp_path)
+            if shared:
+                _archive_shared_version(case_id)
             os.replace(tmp_path, destination)
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
         _AI_METRICS_CACHE.pop(str(case_id).strip(), None)
+        if shared:
+            _write_shared_meta(case_id, labelmap_revision(destination))
+            current_app.logger.info("SHARED annotation for case %s replaced by user %s", case_id, (current_user() or {}).get("id"))
 
         n_labelled = int(np.count_nonzero(np.asarray(out_img.dataobj)))
         current_app.logger.info("Saved segmentation for case %s (%d labelled voxels) to %s",
                                 case_id, n_labelled, destination)
-        return jsonify({"saved": True, "labelled_voxels": n_labelled,
-                        "revision": labelmap_revision(destination)}), 200
+        body = {"saved": True, "labelled_voxels": n_labelled, "revision": labelmap_revision(destination)}
+        if shared:
+            # What this caller's next normal Save must name in If-Match: their own edit if they
+            # have one, otherwise the mask they now resolve to (the shared one just written).
+            body["shared_revision"] = body["revision"]
+            body["revision"] = labelmap_revision(_pants_viewer_mask_path(case_id))
+        return jsonify(body), 200
 
     except Exception as error:
         print("[save_segmentation error]", type(error).__name__, error)
