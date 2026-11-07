@@ -46,6 +46,16 @@ if pgrep -f "$PATTERN" >/dev/null 2>&1; then
 fi
 pgrep -f "$PATTERN" >/dev/null 2>&1 && fail "the old gunicorn on port $PORT refused to exit"
 
+# Keep the log of the run being replaced. Starting used to overwrite it, so after a deploy or a
+# watchdog restart the evidence for whatever went wrong earlier was gone. The newest 20 archived logs
+# stay in $LOG_ARCHIVE (under the home directory, so a reboot does not clear /tmp). Archiving is a
+# convenience: if it fails, the backend still starts, exactly as before.
+LOG_ARCHIVE="${BODYMAPS_LOG_ARCHIVE:-$HOME/gunicorn-logs}"
+if [ -s "$LOG" ]; then
+  mkdir -p "$LOG_ARCHIVE" 2>/dev/null && mv "$LOG" "$LOG_ARCHIVE/gunicorn-$(date +%Y%m%d-%H%M%S).log" 2>/dev/null
+  ls -1t "$LOG_ARCHIVE"/gunicorn-*.log 2>/dev/null | tail -n +21 | while read -r old; do rm -f "$old"; done
+fi
+
 # setsid: a dropped SSH connection (or the end of a cron job) must not take the backend with it.
 # 7>&- 8>&- 9>&-: our callers hold flock locks on those descriptors (deploy.sh, site_watchdog.sh). A
 # lock belongs to the open file, so a long-lived child that inherited one would keep the lock held for

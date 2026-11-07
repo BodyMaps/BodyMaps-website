@@ -294,6 +294,49 @@ def test_start_backend_fails_loudly_when_the_backend_never_answers(fake_backend)
         subprocess.run(["pkill", "-f", str(fake_backend / "bin" / "gunicorn")], capture_output=True)
 
 
+def test_start_backend_keeps_the_previous_log(fake_backend):
+    """A restart used to overwrite the log, so an earlier incident's evidence vanished with the next deploy."""
+    log = fake_backend / "g.log"
+    log.write_text("previous run: worker timeout on case 900")
+    try:
+        r = subprocess.run(["bash", START], env=_env(fake_backend, 18005), capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        kept = list((fake_backend / "gunicorn-logs").glob("gunicorn-*.log"))
+        assert len(kept) == 1 and "worker timeout on case 900" in kept[0].read_text()
+        assert "previous run" not in log.read_text(), "the live log starts fresh"
+    finally:
+        subprocess.run(["pkill", "-f", str(fake_backend / "bin" / "gunicorn")], capture_output=True)
+
+
+def test_start_backend_keeps_only_the_newest_twenty_logs(fake_backend):
+    arch = fake_backend / "gunicorn-logs"
+    arch.mkdir()
+    for i in range(25):
+        f = arch / f"gunicorn-20260101-0000{i:02d}.log"
+        f.write_text(f"old {i}")
+        os.utime(f, (1_700_000_000 + i, 1_700_000_000 + i))
+    (fake_backend / "g.log").write_text("latest")
+    try:
+        r = subprocess.run(["bash", START], env=_env(fake_backend, 18006), capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        names = sorted(p.name for p in arch.glob("gunicorn-*.log"))
+        assert len(names) == 20
+        assert "gunicorn-20260101-000000.log" not in names and "gunicorn-20260101-000004.log" not in names
+        assert any("latest" in (arch / n).read_text() for n in names)
+    finally:
+        subprocess.run(["pkill", "-f", str(fake_backend / "bin" / "gunicorn")], capture_output=True)
+
+
+def test_start_backend_still_starts_when_the_log_cannot_be_archived(fake_backend):
+    (fake_backend / "g.log").write_text("previous")
+    (fake_backend / "gunicorn-logs").write_text("a file where the archive folder should be")
+    try:
+        r = subprocess.run(["bash", START], env=_env(fake_backend, 18007), capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+    finally:
+        subprocess.run(["pkill", "-f", str(fake_backend / "bin" / "gunicorn")], capture_output=True)
+
+
 def test_a_started_backend_does_not_inherit_the_callers_lock(fake_backend):
     """flock locks belong to the open file. deploy.sh and the watchdog hold one while they call
     start_backend.sh; if the long-lived gunicorn inherited it, the lock would stay held for as long as

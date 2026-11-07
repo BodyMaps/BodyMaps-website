@@ -37,6 +37,7 @@ curl -s -m 10 http://127.0.0.1:8000/api/health ; echo          # status + whethe
 timeout -s KILL 8 stat /mnt/bodymaps/.probe-$RANDOM; echo "rc=$?"   # rc=1 fine ("no such file"), rc=137 hung
 ps -eo pid,stat,etime,wchan:22,cmd | awk '$2 ~ /^D/' | head      # processes stuck in D state
 tail -n 20 /tmp/gunicorn.log
+ls -t ~/gunicorn-logs | head                                  # earlier runs: each restart keeps the log it replaces (newest 20)
 ```
 
 **Never run `df` or `ls` on `/mnt/bodymaps` while it may be hung**: they hang too and pile up as `D`
