@@ -93,10 +93,7 @@ export default function StatisticsPage() {
 				<header className={styles.hero}>
 					<span className={styles.eyebrow}>Explore</span>
 					<h1 id="stats-title">Statistics</h1>
-					<p>
-						What is in the library, across three datasets. Select any bar, column, country or dataset to
-						narrow every chart.
-					</p>
+					<p>What is in the library. Select any bar or dataset to filter every chart.</p>
 				</header>
 
 				<div className={styles.toolbar}>
