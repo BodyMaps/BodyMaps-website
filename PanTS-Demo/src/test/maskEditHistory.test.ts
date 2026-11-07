@@ -12,6 +12,7 @@ import {
 	canUndoSmartFill,
 	getMaskEditHistoryState,
 	pushEditHistory,
+	redoMaskEdit,
 	resetMaskEditHistory,
 	undoMaskEdit,
 	undoSmartFill,
@@ -91,15 +92,49 @@ describe("mask edit history", () => {
 		expect(getMaskEditHistoryState()).toMatchObject({ canUndo: false, dirty: true });
 	});
 
-	it("is clean again once every edit it still holds has been undone", () => {
-		const memo = csCoreUtils.HistoryMemo.DefaultHistoryMemo;
-		for (let i = 0; i < 3; i++) pushEditHistory({ undo: vi.fn(), redo: vi.fn() });
-		memo.push({ restoreMemo: vi.fn() } as never);
-		eventTarget.dispatchEvent(new CustomEvent(csToolsEnums.Events.SEGMENTATION_DATA_MODIFIED));
-		expect(getMaskEditHistoryState()).toMatchObject({ canUndo: true, dirty: true });
+	// Which stack Ctrl+Z / Ctrl+Y use first is decided by comparing Date.now() stamps, so the clock is pinned here and
+	// every ordering is tested on purpose. Nothing below depends on whether two edits happen to land in the same
+	// millisecond (the unpinned version of this test failed at random in CI).
+	describe.each([
+		{ name: "the brush stroke is the newer edit", fill: 1000, brush: 1001 },
+		{ name: "the fills are the newer edits", fill: 1001, brush: 1000 },
+		{ name: "the fills and the brush stroke share a millisecond", fill: 1000, brush: 1000 },
+	])("when $name", ({ fill, brush }) => {
+		const seed = () => {
+			const memo = csCoreUtils.HistoryMemo.DefaultHistoryMemo;
+			const now = vi.spyOn(Date, "now");
+			const fills = [0, 1, 2].map(() => ({ undo: vi.fn(), redo: vi.fn() }));
+			const stroke = { restoreMemo: vi.fn() };
+			now.mockReturnValue(fill);
+			fills.forEach((entry) => pushEditHistory(entry));
+			now.mockReturnValue(brush);
+			memo.push(stroke as never);
+			eventTarget.dispatchEvent(new CustomEvent(csToolsEnums.Events.SEGMENTATION_DATA_MODIFIED));
+			return { fills, stroke };
+		};
+		afterEach(() => vi.restoreAllMocks());
 
-		for (let i = 0; i < 4; i++) undoMaskEdit();
+		it("is clean again once every edit it still holds has been undone, and every edit was undone", () => {
+			const { fills, stroke } = seed();
+			expect(getMaskEditHistoryState()).toMatchObject({ canUndo: true, dirty: true });
 
-		expect(getMaskEditHistoryState()).toMatchObject({ canUndo: false, dirty: false });
+			for (let i = 0; i < 4; i++) undoMaskEdit();
+
+			expect(getMaskEditHistoryState()).toMatchObject({ canUndo: false, dirty: false });
+			fills.forEach((entry) => expect(entry.undo).toHaveBeenCalledTimes(1)); // none was skipped
+			expect(stroke.restoreMemo).toHaveBeenCalledTimes(1);
+		});
+
+		it("redoes every edit again, with nothing left to redo", () => {
+			const { fills, stroke } = seed();
+			for (let i = 0; i < 4; i++) undoMaskEdit();
+			expect(getMaskEditHistoryState()).toMatchObject({ canRedo: true });
+
+			for (let i = 0; i < 4; i++) redoMaskEdit();
+
+			expect(getMaskEditHistoryState()).toMatchObject({ canUndo: true, canRedo: false, dirty: true });
+			fills.forEach((entry) => expect(entry.redo).toHaveBeenCalledTimes(1));
+			expect(stroke.restoreMemo).toHaveBeenCalledTimes(2); // undone once, redone once
+		});
 	});
 });
