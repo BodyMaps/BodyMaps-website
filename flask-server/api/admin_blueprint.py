@@ -6,7 +6,7 @@ Routes (registered under <BASE_PATH>/api), all admin-only:
   DELETE /admin/people/<user_id>/roles/<role>     -> revoke
   DELETE /admin/people/<user_id>                  -> schedule for deletion
   POST   /admin/people/<user_id>/restore          -> undo a scheduled deletion
-  POST   /admin/annotator-invites {hours}         -> a temporary single-use code that makes its redeemer an annotator
+  POST   /admin/annotator-invites {hours|permanent} -> a single-use code, temporary or permanent that makes its redeemer an annotator
   GET    /admin/annotator-invites                 -> recent codes: open, redeemed (by whom) or expired
   DELETE /admin/annotator-invites/<id>            -> withdraw a code nobody has used yet
 
@@ -114,13 +114,17 @@ def revoke_role(user_id: str, role: str):
 def create_annotator_invite():
     raw_body = request.get_json(silent=True)
     body = raw_body if isinstance(raw_body, dict) else {}
+    permanent = body.get("permanent", False)
+    if not isinstance(permanent, bool):
+        return jsonify({"error": "permanent must be true or false"}), 400
     try:
-        invite = annotator_invites.create(current_user()["id"], body.get("hours", 24))
+        invite = annotator_invites.create(current_user()["id"], body.get("hours", 24), permanent=permanent)
     except ValueError:
         # A fixed message: nothing from the exception goes back to the caller.
         return jsonify({"error": f"hours must be a whole number from 1 to {annotator_invites.MAX_HOURS}"}), 400
     # The only time the code is ever shown: the database keeps just its digest.
-    return jsonify({"id": invite["id"], "code": invite["code"], "expires_at": invite["expires_at"].isoformat() + "Z"}), 201
+    expires_at = None if invite["permanent"] else invite["expires_at"].isoformat() + "Z"
+    return jsonify({"id": invite["id"], "code": invite["code"], "expires_at": expires_at, "permanent": invite["permanent"]}), 201
 
 
 @admin_blueprint.route("/admin/annotator-invites", methods=["GET"])

@@ -25,6 +25,9 @@ from services import role_store
 _ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _CODE_LENGTH = 12
 MAX_HOURS = 24 * 14
+# A "permanent" code never expires. It is still single-use and can still be withdrawn. The column is NOT NULL,
+# so a date no real clock reaches stands in for "never".
+PERMANENT_EXPIRY = datetime(9999, 12, 31, 23, 59, 59)
 
 GRANTED = "granted"
 ALREADY = "already"
@@ -43,16 +46,20 @@ def _display(raw: str) -> str:
     return "-".join(raw[i:i + 4] for i in range(0, len(raw), 4))
 
 
-def create(created_by: str, hours) -> dict:
-    """A new code that works for ``hours``. The code is returned here and never stored in the clear."""
-    if not isinstance(hours, int) or isinstance(hours, bool) or not 1 <= hours <= MAX_HOURS:
+def is_permanent(expires_at: datetime) -> bool:
+    return expires_at.year >= PERMANENT_EXPIRY.year
+
+
+def create(created_by: str, hours, permanent: bool = False) -> dict:
+    """A new code that works for ``hours``, or never expires. It is returned here and never stored in the clear."""
+    if not permanent and (not isinstance(hours, int) or isinstance(hours, bool) or not 1 <= hours <= MAX_HOURS):
         raise ValueError(f"hours must be a whole number from 1 to {MAX_HOURS}")
     raw = "".join(secrets.choice(_ALPHABET) for _ in range(_CODE_LENGTH))
-    expires_at = utcnow() + timedelta(hours=hours)
+    expires_at = PERMANENT_EXPIRY if permanent else utcnow() + timedelta(hours=hours)
     invite_id = str(uuid.uuid4())
     with session_scope() as s:
         s.add(AnnotatorInvite(id=invite_id, code_hash=digest(raw), created_by=created_by, expires_at=expires_at))
-    return {"id": invite_id, "code": _display(raw), "expires_at": expires_at}
+    return {"id": invite_id, "code": _display(raw), "expires_at": expires_at, "permanent": permanent}
 
 
 def redeem(user_id: str, code: str) -> str | None:
@@ -92,7 +99,8 @@ def redeem(user_id: str, code: str) -> str | None:
 
 
 def _as_utc_text(value: datetime | None) -> str | None:
-    return value.isoformat() + "Z" if value is not None else None
+    """None for no date, and for a permanent code's "never"."""
+    return value.isoformat() + "Z" if value is not None and not is_permanent(value) else None
 
 
 def recent(limit: int = 50) -> list[dict]:
@@ -112,6 +120,7 @@ def recent(limit: int = 50) -> list[dict]:
             "status": "redeemed" if row.redeemed_at else ("expired" if row.expires_at <= now else "open"),
             "created_at": _as_utc_text(row.created_at),
             "expires_at": _as_utc_text(row.expires_at),
+            "permanent": is_permanent(row.expires_at),
             "redeemed_at": _as_utc_text(row.redeemed_at),
             "redeemed_by": emails.get(row.redeemed_by) if row.redeemed_by else None,
         } for row in rows]
