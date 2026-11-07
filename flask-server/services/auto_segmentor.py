@@ -9,6 +9,7 @@ import csv
 import shlex
 import shutil
 import threading
+import time
 from dotenv import load_dotenv
 
 from services import gpu_workers
@@ -266,6 +267,60 @@ def _tracked_run(cmd, check=False, capture_output=False, **kwargs):
     if check and proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=stderr)
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
+_OUTPUT_TAIL_CHARS = 2000
+# A model command that fails this soon after it starts has failed to start (a hiccup on the shared GPU), not
+# failed on the scan: such a run is repeated once.
+QUICK_FAILURE_SECONDS = 30
+QUICK_FAILURE_RETRY_DELAY = 3
+
+
+def _output_tail(error: subprocess.CalledProcessError) -> str:
+    """The end of what a failed command printed (stdout and stderr), as text."""
+    parts = []
+    for chunk in (error.output, error.stderr):
+        if chunk:
+            parts.append(chunk.decode("utf-8", "replace") if isinstance(chunk, bytes) else str(chunk))
+    return "".join(parts).strip()[-_OUTPUT_TAIL_CHARS:]
+
+
+def _log_failed_output(error: subprocess.CalledProcessError) -> None:
+    """Put the model's own error text in the server log. The job's error message keeps only the exit code, so
+    without this the reason a run failed was thrown away."""
+    captured = error.output is not None or error.stderr is not None
+    tail = _output_tail(error) or (
+        "(it printed nothing)" if captured else "(not captured here: it is printed in the lines above this one)"
+    )
+    print(
+        f"[ERROR] command exited with code {error.returncode}: {str(error.cmd)[:300]}\n"
+        f"Its last output:\n{tail}",
+        flush=True,
+    )
+
+
+def _run_model_command(cmd, **kwargs):
+    """``_tracked_run`` for a model command, with one repeat when it fails within seconds of starting.
+
+    The failures seen on the live site were R-Super and Atlas-Net runs ending in 4 to 8 seconds, on a scan that
+    ran fine minutes later. A run that already worked for a while, or that the user cancelled, is never repeated.
+    """
+    started = time.monotonic()
+    try:
+        return _tracked_run(cmd, **kwargs)
+    except subprocess.CalledProcessError as first:
+        _log_failed_output(first)
+        if time.monotonic() - started > QUICK_FAILURE_SECONDS or _current_session_cancelled():
+            raise
+        print(f"[INFO] the command failed within {QUICK_FAILURE_SECONDS}s of starting; running it once more", flush=True)
+        time.sleep(QUICK_FAILURE_RETRY_DELAY)
+        if _current_session_cancelled():
+            raise
+        try:
+            return _tracked_run(cmd, **kwargs)
+        except subprocess.CalledProcessError as second:
+            _log_failed_output(second)
+            raise
 
 
 def cancel_session(session_id):
@@ -1091,6 +1146,7 @@ def _run_epai_inference(input_path: str, session_dir: str, conda_path: str, epai
                 check=True,
             )
         except subprocess.CalledProcessError as e:
+            _log_failed_output(e)
             raise RuntimeError(
                 "ePAI inference command failed"
                 f"\nCommand: {full_cmd}"
@@ -1165,6 +1221,7 @@ def _run_suprem_inference(input_path: str, session_dir: str) -> str:
                 _note_run(getattr(_thread_session, "sid", None), gpu_workers._local_hostname())
                 _tracked_run(full_cmd, check=True, cwd=suprem_src, env=child_env)
         except subprocess.CalledProcessError as e:
+            _log_failed_output(e)
             raise RuntimeError(
                 f"SuPreM inference failed\nCommand: {full_cmd}\nExit code: {e.returncode}"
             ) from e
@@ -1199,6 +1256,7 @@ def _run_suprem_inference(input_path: str, session_dir: str) -> str:
         _tracked_run(full_cmd, shell=True, executable="/bin/bash", check=True,
                      cwd=suprem_src)
     except subprocess.CalledProcessError as e:
+        _log_failed_output(e)
         raise RuntimeError(
             f"SuPreM inference failed\nCommand: {full_cmd}\nExit code: {e.returncode}"
         ) from e
@@ -1293,6 +1351,7 @@ def _run_openvae_inference(input_path: str, session_dir: str) -> str:
     try:
         _tracked_run(full_cmd, shell=True, executable="/bin/bash", check=True, cwd=openvae_src)
     except subprocess.CalledProcessError as e:
+        _log_failed_output(e)
         raise RuntimeError(
             f"OpenVAE inference failed\nCommand: {full_cmd}\nExit code: {e.returncode}"
         ) from e
@@ -1414,6 +1473,7 @@ def _run_medformer_inference(input_path: str, session_dir: str) -> str:
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT
         )
     except subprocess.CalledProcessError as e:
+        _log_failed_output(e)
         raise RuntimeError(
             f"MedFormer inference failed\nCommand: {full_cmd}\nExit code: {e.returncode}"
         ) from e
@@ -1503,7 +1563,7 @@ def _run_rsuper_inference(input_path: str, session_dir: str, model: str = "R-Sup
     )
     print(f"[INFO] Running {model} inference\n{full_cmd}")
     try:
-        _tracked_run(
+        _run_model_command(
             full_cmd, shell=True, executable="/bin/bash", check=True, cwd=rsuper_src,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT
         )
@@ -1562,14 +1622,28 @@ def _run_atlasnet_inference(input_path: str, session_dir: str, conda_path: str, 
 
     print(f"[INFO] Running Atlas-Net command for case {case_id}")
     print(full_cmd)
+    case_pred = os.path.join(save_dir, f"{case_id}.nii.gz")
+    started = time.monotonic()
     try:
-        _tracked_run(full_cmd, shell=True, executable="/bin/bash", check=True)
+        _run_model_command(full_cmd, shell=True, executable="/bin/bash", check=True)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(
             f"Atlas-Net inference command failed\nCommand: {full_cmd}\nExit code: {e.returncode}"
         ) from e
 
-    case_pred = os.path.join(save_dir, f"{case_id}.nii.gz")
+    if (not os.path.exists(case_pred) and time.monotonic() - started <= QUICK_FAILURE_SECONDS
+            and not _current_session_cancelled()):
+        # Exit code 0 but nothing written, within seconds: the same kind of start-up failure, seen twice on the
+        # live site. Run it once more before giving up.
+        print("[ERROR] Atlas-Net finished without writing its output; running it once more", flush=True)
+        time.sleep(QUICK_FAILURE_RETRY_DELAY)
+        try:
+            _tracked_run(full_cmd, shell=True, executable="/bin/bash", check=True)
+        except subprocess.CalledProcessError as e:
+            _log_failed_output(e)
+            raise RuntimeError(
+                f"Atlas-Net inference command failed\nCommand: {full_cmd}\nExit code: {e.returncode}"
+            ) from e
     if not os.path.exists(case_pred):
         raise RuntimeError(f"Expected Atlas-Net output not found: {case_pred}")
 
@@ -1650,6 +1724,7 @@ def _run_lesionsegmenter_inference(input_path: str, session_dir: str, conda_path
     try:
         _tracked_run(full_cmd, shell=True, executable="/bin/bash", check=True)
     except subprocess.CalledProcessError as e:
+        _log_failed_output(e)
         raise RuntimeError(
             f"LesionSegmenter inference command failed\nCommand: {full_cmd}\nExit code: {e.returncode}"
         ) from e
@@ -1899,6 +1974,7 @@ def _run_shapekit_inference(input_dir: str, session_dir: str) -> str:
     try:
         _tracked_run(full_cmd, shell=True, executable="/bin/bash", check=True, cwd=shapekit_src)
     except subprocess.CalledProcessError as e:
+        _log_failed_output(e)
         raise RuntimeError(
             f"ShapeKit post-processing failed\nCommand: {full_cmd}\nExit code: {e.returncode}"
         ) from e
