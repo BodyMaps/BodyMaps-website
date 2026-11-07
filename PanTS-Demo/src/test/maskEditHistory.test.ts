@@ -102,4 +102,22 @@ describe("mask edit history", () => {
 
 		expect(getMaskEditHistoryState()).toMatchObject({ canUndo: false, dirty: false });
 	});
+
+	it("keeps undoing fills after a later brush stroke has been undone", () => {
+		const memo = csCoreUtils.HistoryMemo.DefaultHistoryMemo;
+		const now = vi.spyOn(Date, "now");
+		try {
+			now.mockReturnValue(1000);
+			for (let i = 0; i < 3; i++) pushEditHistory({ undo: vi.fn(), redo: vi.fn() });
+			now.mockReturnValue(1001); // the brush stroke is the more recent edit
+			memo.push({ restoreMemo: vi.fn() } as never);
+			eventTarget.dispatchEvent(new CustomEvent(csToolsEnums.Events.SEGMENTATION_DATA_MODIFIED));
+		} finally {
+			now.mockRestore();
+		}
+
+		for (let i = 0; i < 4; i++) undoMaskEdit();
+
+		expect(getMaskEditHistoryState()).toMatchObject({ canUndo: false, dirty: false });
+	});
 });

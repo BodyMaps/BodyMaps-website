@@ -1247,7 +1247,8 @@ export function undoMaskEdit() {
   // Prefer whichever stack was touched more recently, not always the fill
   // stack — a brush stroke after a box-segment (or vice versa) must undo in
   // the order it actually happened.
-  if (canUndoSmartFill() && _lastFillEditTime >= _lastBrushEditTime) {
+  // If the more recent stack has nothing left to undo, fall through to the other one.
+  if (canUndoSmartFill() && (_lastFillEditTime >= _lastBrushEditTime || !csCoreUtils.HistoryMemo.DefaultHistoryMemo.canUndo)) {
     undoSmartFill();
     return;
   }
@@ -1258,7 +1259,7 @@ export function undoMaskEdit() {
 }
 
 export function redoMaskEdit() {
-  if (canRedoSmartFill() && _lastFillEditTime >= _lastBrushEditTime) {
+  if (canRedoSmartFill() && (_lastFillEditTime >= _lastBrushEditTime || !csCoreUtils.HistoryMemo.DefaultHistoryMemo.canRedo)) {
     redoSmartFill();
     return;
   }
