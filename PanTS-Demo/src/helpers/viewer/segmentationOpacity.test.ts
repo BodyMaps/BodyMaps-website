@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import vtkPiecewiseFunction from "@kitware/vtk.js/Common/DataModel/PiecewiseFunction";
 import { render } from "@cornerstonejs/tools/tools/displayTools/Labelmap/labelmapDisplay";
 import { segmentationStyle } from "@cornerstonejs/tools/segmentation/SegmentationStyle";
-import { setFillOpacity, setOutlineOpacity } from "../CornerstoneNifti2";
+import { SegmentationRepresentations } from "@cornerstonejs/tools/enums";
+import { DEFAULT_SEGMENTATION_CONFIG, setFillOpacity } from "../CornerstoneNifti2";
 
 const { actor, hiddenSegments, activeSegmentation } = vi.hoisted(() => ({
   actor: {
@@ -52,6 +53,12 @@ describe("segmentation opacity in the CT renderer", () => {
     modified: ReturnType<typeof vi.fn>;
   };
 
+  const useStyle = (config: Record<string, unknown>) =>
+    segmentationStyle.setStyle(
+      { type: SegmentationRepresentations.Labelmap },
+      config as Parameters<typeof segmentationStyle.setStyle>[1],
+    );
+
   const draw = async () => render(viewport, {
     segmentationId: "opacity-test",
     colorLUTIndex: 0,
@@ -69,7 +76,8 @@ describe("segmentation opacity in the CT renderer", () => {
       modified: vi.fn(),
     };
     actor.getProperty.mockReturnValue(property);
-    setOutlineOpacity(0);
+    // The fill tests below look at colour alone, so start from a style with no border; the fixed border has its own tests.
+    useStyle({ renderOutline: false, outlineOpacity: 0, outlineOpacityInactive: 0 });
     setFillOpacity(0.6);
   });
 
@@ -91,12 +99,26 @@ describe("segmentation opacity in the CT renderer", () => {
     expect(ofun.getValue(2)).toBe(0);
   });
 
-  it("keeps borders independently adjustable while the fill is fully transparent", async () => {
-    setFillOpacity(0);
-    setOutlineOpacity(0.8);
+  it("draws the fixed border, and keeps it when the fill is turned all the way down", async () => {
+    // The border part of what a freshly loaded scan starts with (the fill is whatever the slider says).
+    const { fillAlpha: _fill, fillAlphaInactive: _fillInactive, ...border } = DEFAULT_SEGMENTATION_CONFIG;
+    useStyle(border);
     await draw();
-    expect(ofun.getValue(1)).toBe(0);
-    expect(property.setLabelOutlineOpacity).toHaveBeenLastCalledWith(0.8);
+    expect(property.setUseLabelOutline).toHaveBeenLastCalledWith(true);
+    expect(property.setLabelOutlineOpacity).toHaveBeenLastCalledWith(1);
+    expect(ofun.getValue(1)).toBeCloseTo(0.6);
+
+    setFillOpacity(0);
+    await draw();
+    expect(ofun.getValue(1)).toBe(0); // no colour wash...
+    expect(property.setUseLabelOutline).toHaveBeenLastCalledWith(true); // ...but the border stays
+    expect(property.setLabelOutlineOpacity).toHaveBeenLastCalledWith(1);
+  });
+
+  it("the fixed border is a solid 1px line, drawn for active and inactive segmentations alike", () => {
+    expect(DEFAULT_SEGMENTATION_CONFIG).toMatchObject({
+      renderOutline: true, outlineOpacity: 1, outlineOpacityInactive: 1, outlineWidth: 1, fillAlpha: 0.6,
+    });
   });
 
   it("preserves distinct fill levels throughout 50–100%, including changes back down", async () => {

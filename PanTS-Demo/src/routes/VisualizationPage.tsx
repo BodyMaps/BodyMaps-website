@@ -138,7 +138,6 @@ import {
     setActiveMaskEditTool,
     setActiveMeasurementTool,
     setFillOpacity,
-    setOutlineOpacity,
     setPaneSliceIndex,
     setReferenceLinesEnabled,
     setVisibilities,
@@ -186,7 +185,7 @@ import { dropStaleGuardEntry, guardLeaving } from "../helpers/leaveGuard";
 import { setMaskBrushSize } from "../helpers/CornerstoneNifti2";
 import { useMorphPicker } from "../helpers/viewer/useMorphPicker";
 import { CT_WINDOWS } from "../helpers/ctWindows";
-import { mrWindowPresets, type MrWindowPreset, type ScanAnalysis, type ScanModality } from "../helpers/scanModality";
+import { intensityUnit, mrWindowPresets, type MrWindowPreset, type ScanAnalysis, type ScanModality } from "../helpers/scanModality";
 import { escapeWasUsed, NON_TEXT_INPUT_TYPES } from "../helpers/viewer/escapeUsed";
 import { useToolbarFlyout } from "../helpers/viewer/useToolbarFlyout";
 import { useLassoTool } from "../helpers/viewer/useLassoTool";
@@ -794,14 +793,11 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	}, [checkState, isSoloChallenge, liveRoom?.metadata.mode, liveRoom?.quiz?.reveal, quizPractice, soloChallenge?.result]);
 	const [NV, _setNV] = useState<Niivue | undefined>();
 	const [checkBoxData, setCheckBoxData] = useState<CheckBoxData[]>([]);
-	// Fill (solid color wash) and outline (border) opacity are independent sliders — see
-	// setFillOpacity/setOutlineOpacity. Outline defaults to 0 (off), matching how the mask
-	// looked before this split existed (borders were never actually rendered).
+	// Fill (solid colour wash) opacity is a slider; the border around each structure is a fixed part of the look
+	// (see DEFAULT_SEGMENTATION_CONFIG).
 	const [opacityValue, setOpacityValue] = useState(
 		APP_CONSTANTS.DEFAULT_SEGMENTATION_OPACITY * 100
 	);
-	
-	const [outlineOpacityValue, setOutlineOpacityValue] = useState(0);
 	// Current/total slice per MPR pane, for the "245/519" caption + drag scrollbar.
 	// One event per case actually opened in the viewer — not per re-render, and
 	// not for a viewer opened on a local file, which has no case behind it.
@@ -3921,16 +3917,6 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 		sessionRef.current?.log("opacity", `Fill opacity set to ${value}%`, 1200);
 	};
 
-	const handleOutlineOpacityChange = (
-		event: React.ChangeEvent<HTMLInputElement>
-	) => {
-		const value = Number(event.target.value);
-		setOutlineOpacityValue(value);
-		setOutlineOpacity(value / 100);
-		sessionRef.current?.log("opacity", `Border opacity set to ${value}%`, 1200);
-	};
-
-
 	// Per-organ volume (cm³) + mean HU — the existing quantitative layer the backend
 	// already computes for the PDF report, surfaced inline. Fetched once, on first open.
 	const loadOrganStats = async () => {
@@ -4571,20 +4557,10 @@ const aiAvailableOrgans = useMemo(() => {
 												/>
 												<span className="vp-tb-slider__val">{Math.round(opacityValue)}%</span>
 											</label>
-											<label className="vp-tb-slider" title="Mask border opacity">
-												<span className="vp-tb-slider__label">Border</span>
-												<input
-													type="range" min="0" max="100" step="1" className="vp-range"
-													aria-label="Mask border opacity"
-													value={outlineOpacityValue}
-													onChange={handleOutlineOpacityChange}
-												/>
-												<span className="vp-tb-slider__val">{Math.round(outlineOpacityValue)}%</span>
-											</label>
 										</>
 									)}
-									<label className="vp-tb-slider" title="Brightness (window level)">
-										<span className="vp-tb-slider__label">Brt</span>
+									<label className="vp-tb-slider" title="Brightness (the window level). A lower number is a brighter image.">
+										<span className="vp-tb-slider__label">Brightness</span>
 										<input
 											type="range" min={intensityRange ? -intensityRange.max : -1000} max={intensityRange ? -intensityRange.min : 1000} step={intensityRange ? (intensityRange.max - intensityRange.min) / 1000 : 1} className="vp-range"
 											aria-label="Brightness"
@@ -4594,9 +4570,10 @@ const aiAvailableOrgans = useMemo(() => {
 												showWindowReadoutBriefly();
 											}}
 										/>
+										<span className="vp-tb-slider__val">L {Math.round(windowCenter)}{intensityUnit(scanModality)}</span>
 									</label>
-									<label className="vp-tb-slider" title="Contrast (window width)">
-										<span className="vp-tb-slider__label">Con</span>
+									<label className="vp-tb-slider" title="Contrast (the window width). A narrower window is a higher-contrast image.">
+										<span className="vp-tb-slider__label">Contrast</span>
 										<input
 											type="range" min={intensityRange ? (intensityRange.max - intensityRange.min) / 1000 : 1} max={intensityRange ? intensityRange.max - intensityRange.min : 2000} step={intensityRange ? (intensityRange.max - intensityRange.min) / 1000 : 1} className="vp-range"
 											aria-label="Contrast"
@@ -4606,6 +4583,7 @@ const aiAvailableOrgans = useMemo(() => {
 												showWindowReadoutBriefly();
 											}}
 										/>
+										<span className="vp-tb-slider__val">W {Math.round(windowWidth)}{intensityUnit(scanModality)}</span>
 									</label>
 									<label className="vp-tb-slider" title="Zoom">
 										<span className="vp-tb-slider__label">Zoom</span>

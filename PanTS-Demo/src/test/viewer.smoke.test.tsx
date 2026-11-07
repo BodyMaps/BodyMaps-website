@@ -608,6 +608,35 @@ describe("viewer smoke test", () => {
 		});
 	});
 
+	describe("Adjust panel", () => {
+		const openAdjust = async () => {
+			render(<AuthProvider><MemoryRouter initialEntries={["/case/35"]}>
+				<Routes><Route path="/case/:caseId" element={<VisualizationPage />} /></Routes>
+			</MemoryRouter></AuthProvider>);
+			await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
+			fireEvent.click(screen.getByRole("button", { name: "Adjust" }));
+			return await screen.findByRole("menu");
+		};
+
+		it("has no border slider: the border is a fixed part of the look", async () => {
+			const panel = await openAdjust();
+			expect(within(panel).queryByLabelText("Mask border opacity")).not.toBeInTheDocument();
+			expect(within(panel).queryByText("Border")).not.toBeInTheDocument();
+			expect(within(panel).getByLabelText("Mask fill opacity")).toBeInTheDocument();
+		});
+
+		it("says Brightness and Contrast in full, with the real numbers beside them", async () => {
+			const panel = await openAdjust();
+			expect(within(panel).getByText("Brightness")).toBeInTheDocument();
+			expect(within(panel).getByText("Contrast")).toBeInTheDocument();
+			expect(within(panel).queryByText("Brt")).not.toBeInTheDocument();
+			expect(within(panel).queryByText("Con")).not.toBeInTheDocument();
+			expect(within(panel).getByText("L 40 HU")).toBeInTheDocument(); // the default soft-tissue window level
+			expect(within(panel).getByText("W 400 HU")).toBeInTheDocument(); // and window width
+			expect(within(panel).getByTitle(/lower number is a brighter image/i)).toBeInTheDocument();
+		});
+	});
+
 	it("VisualizationPage mounts for a dataset case without crashing", async () => {
 		const { container, unmount } = render(
 			<AuthProvider>
