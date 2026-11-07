@@ -101,6 +101,21 @@ describe("workspace sidebar", () => {
         expect(screen.getByLabelText("Current route")).toHaveTextContent("/");
     });
 
+    it("lists navigation as workspace, dataset, statistics, team and moves the indicator with the route", () => {
+        const order = ["/", "/dashboard", "/statistics", "/team"];
+        mount("/team");
+        const nav = screen.getByRole("link", { name: "Team" }).closest("nav") as HTMLElement;
+        expect(Array.from(nav.querySelectorAll("a")).map((a) => a.getAttribute("href"))).toEqual(order);
+        const indicator = nav.querySelector(".design-nav-indicator") as HTMLElement;
+        expect(indicator.style.transform).toBe("translateY(132px)");
+    });
+
+    it("places the indicator on Statistics at the third row", () => {
+        mount("/statistics");
+        const indicator = screen.getByRole("link", { name: "Statistics" }).closest("nav")!.querySelector(".design-nav-indicator") as HTMLElement;
+        expect(indicator.style.transform).toBe("translateY(88px)");
+    });
+
     it("persists collapsing while retaining labelled navigation", async () => {
         const user = userEvent.setup();
         mount();
