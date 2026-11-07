@@ -90,6 +90,10 @@ jobs:
           PERMISSIONS_DIR: ${{ runner.temp }}/bodymaps-shared-annotation-tests
         run: python -m pytest tests/unit/test_shared_annotation.py tests/functional/test_admin_endpoints.py -v
 
+      # A model command that fails within seconds of starting is run once more, and its own error text is logged.
+      - name: Model command retry and failure logging
+        run: python -m pytest tests/unit/test_model_command_retry.py -v
+
       - name: Automatic report evidence and source preservation
         run: python -m pytest tests/unit/test_report_evidence.py tests/unit/test_report_measurements.py tests/unit/test_report_measurement_cache.py tests/unit/test_quiz_report_questions.py -v
 
