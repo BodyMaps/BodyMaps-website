@@ -134,7 +134,8 @@ def test_served_masks_are_in_viewer_ids_at_both_resolutions(dataset, tmp_path):
     expected = {1, 3, 14, 19, 23, 25, 22}
     full = client().get(f"/api/get-segmentations/35.nii.gz?labels={SCHEME}")
     assert full.status_code == 200
-    assert full.headers["Cache-Control"] == "public, max-age=604800, immutable"
+    # A mask can be replaced by an annotator's correction at the same URL, so it is always revalidated.
+    assert full.headers["Cache-Control"] == "public, no-cache"
     assert served_values(full, tmp_path) == expected
 
     low = client().get(f"/api/get-segmentations/35.nii.gz?labels={SCHEME}&res=low")
