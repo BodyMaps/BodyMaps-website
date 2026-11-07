@@ -114,6 +114,8 @@ import {
     FREEHAND_ROI_TOOL,
     getCrosshairMm,
     getCurrentVolumeModality,
+    analyzeCurrentVolume,
+    setCurrentVolumeModality,
     getCustomSegmentLabels,
     setSavedStructureName,
     getMeasurementSummaries,
@@ -184,6 +186,7 @@ import { dropStaleGuardEntry, guardLeaving } from "../helpers/leaveGuard";
 import { setMaskBrushSize } from "../helpers/CornerstoneNifti2";
 import { useMorphPicker } from "../helpers/viewer/useMorphPicker";
 import { CT_WINDOWS } from "../helpers/ctWindows";
+import { mrWindowPresets, type MrWindowPreset, type ScanAnalysis, type ScanModality } from "../helpers/scanModality";
 import { escapeWasUsed, NON_TEXT_INPUT_TYPES } from "../helpers/viewer/escapeUsed";
 import { useToolbarFlyout } from "../helpers/viewer/useToolbarFlyout";
 import { useLassoTool } from "../helpers/viewer/useLassoTool";
@@ -1314,6 +1317,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 					onOperationChange={setLevelTraceOperation}
 					toleranceHu={levelTraceTolerance}
 					onToleranceChange={setLevelTraceTolerance}
+					{...(intensityRange ? { unit: "", min: 1, max: Math.max(2, Math.round((intensityRange.max - intensityRange.min) * 0.25)), step: 1 } : {})}
 					onCloseSettings={onCloseSettings}
 				/>
 			);
@@ -1874,6 +1878,38 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	// single-view / 3d-fullscreen modes, which already give one pane 100% of the stage.
 	const [layoutPreset, setLayoutPreset] = useState<LayoutPreset>(savedPrefs.layout?.preset ?? "grid");
 	const [activePreset, setActivePreset] = useState<string>(savedPrefs.window?.preset ?? "Soft Tissue");
+	// CT or MRI for the scan on screen. MRI voxels are scanner units, so it gets windows and slider
+	// ranges taken from the scan itself instead of the fixed Hounsfield presets.
+	const [scanModality, setScanModality] = useState<ScanModality>("CT");
+	const [mrPresets, setMrPresets] = useState<MrWindowPreset[]>([]);
+	const [intensityRange, setIntensityRange] = useState<{ min: number; max: number } | null>(null);
+	const isUserScan = isLocalNifti || (Boolean(sessionId) && !pantsCase && !isReconstruction);
+	const applyScanConfig = useCallback((modality: ScanModality, analysis: ScanAnalysis | null): { width: number; center: number } => {
+		setScanModality(modality);
+		const nextPresets = modality === "MR" ? VOLUME_3D_PRESETS_MR : VOLUME_3D_PRESETS;
+		setVolume3DPresets(nextPresets);
+		if (volumePresetModalityRef.current !== modality) {
+			setVolumePreset(nextPresets[0].name);
+			volumePresetModalityRef.current = modality;
+		}
+		if (modality === "MR" && analysis) {
+			const presets = mrWindowPresets(analysis);
+			setMrPresets(presets);
+			setIntensityRange({ min: analysis.min, max: analysis.max });
+			setLevelTraceTolerance(Math.max(1, Math.round((analysis.p995 - analysis.p2) * 0.05)));
+			setWindowWidth(presets[0].width);
+			setWindowCenter(presets[0].center);
+			setActivePreset(presets[0].name);
+			return { width: presets[0].width, center: presets[0].center };
+		}
+		setMrPresets([]);
+		setIntensityRange(null);
+		setLevelTraceTolerance(50);
+		setActivePreset("Soft Tissue");
+		setWindowWidth(400);
+		setWindowCenter(40);
+		return { width: 400, center: 40 };
+	}, []);
 	const [_tooltip, setToolTip] = useState({
 		visible: false,
 		x: 0,
@@ -3035,8 +3071,9 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 						rawUrl,
 						undefined,
 						setLoading,
-						{ resourceKey: "local-nifti", signal: controller.signal }
+						{ resourceKey: "local-nifti", signal: controller.signal, detectModality: true }
 					);
+					if (result.scan) applyScanConfig(result.scan.modality, result.scan);
 					acceptLoadedViewer(result);
 				} catch (e) {
 					if (cancelled || (e instanceof DOMException && e.name === "AbortError")) return;
@@ -3095,13 +3132,14 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 								ctUrl,
 								segUrl ?? undefined,
 								setLoading,
-								{ resourceKey: ctUrl, signal: controller.signal, customLabels: savedStructures }
+								{ resourceKey: ctUrl, signal: controller.signal, customLabels: savedStructures, detectModality: isUserScan }
 							),
 							controller.signal,
 							(result) => result.dispose()
 						);
 
 						clearLoadDeadline();
+						if (result.scan) applyScanConfig(result.scan.modality, result.scan);
 						const modality = getCurrentVolumeModality();
 						if (modality === "MR" || modality === "CT") {
 							const nextPresets = modality === "MR" ? VOLUME_3D_PRESETS_MR : VOLUME_3D_PRESETS;
@@ -3499,7 +3537,17 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 		return () => ro.disconnect();
 	}, [renderingEngine, NV]);
 
-	const handlePresetClick = (preset: typeof CT_PRESETS[number]) => {
+	// Manual CT/MRI switch for an upload the detector got wrong: re-labels the volume and re-applies that
+	// modality's window, units and slider ranges.
+	const handleScanTypeOverride = (modality: ScanModality) => {
+		if (modality === scanModality) return;
+		setCurrentVolumeModality(modality);
+		const win = applyScanConfig(modality, analyzeCurrentVolume());
+		handleWindowChange(win.width, win.center);
+		sessionRef.current?.log("preset", `Scan type set to ${modality === "MR" ? "MRI" : "CT"}`);
+	};
+
+	const handlePresetClick = (preset: { name: string; width: number; center: number }) => {
 		setActivePreset(preset.name);
 		handleWindowChange(preset.width, preset.center);
 		showWindowReadoutBriefly();
@@ -4409,7 +4457,7 @@ const aiAvailableOrgans = useMemo(() => {
 							ref={windowFlyout.btnRef}
 							className={`vp-tb-mini vp-tb-mini--flyout ${windowFlyout.open ? "vp-tb-mini--active" : ""}`}
 							onClick={windowFlyout.toggle}
-							aria-label="CT window preset"
+							aria-label="Window preset"
 							aria-haspopup="menu"
 							aria-expanded={windowFlyout.open}
 						>
@@ -4424,7 +4472,7 @@ const aiAvailableOrgans = useMemo(() => {
 									ref={windowFlyout.menuRef}
 									style={{ position: "fixed", top: windowFlyout.pos.top, left: windowFlyout.pos.left }}
 								>
-									{CT_PRESETS.map((preset) => (
+									{(scanModality === "MR" ? mrPresets : CT_PRESETS).map((preset) => (
 										<button
 											key={preset.name}
 											className={`vp-flyout__item ${activePreset === preset.name ? "is-active" : ""}`}
@@ -4434,6 +4482,22 @@ const aiAvailableOrgans = useMemo(() => {
 											<span>{preset.name}</span>
 										</button>
 									))}
+									{isUserScan && (
+										<>
+											<div className="vp-flyout__divider" role="separator" />
+											{(["CT", "MR"] as const).map((modality) => (
+												<button
+													key={modality}
+													className={`vp-flyout__item ${scanModality === modality ? "is-active" : ""}`}
+													role="menuitemradio"
+													aria-checked={scanModality === modality}
+													onClick={() => handleScanTypeOverride(modality)}
+												>
+													<span>{modality === "MR" ? "Scan type: MRI" : "Scan type: CT"}</span>
+												</button>
+											))}
+										</>
+									)}
 								</div>,
 								document.body
 							)}
@@ -4492,7 +4556,7 @@ const aiAvailableOrgans = useMemo(() => {
 									<label className="vp-tb-slider" title="Brightness (window level)">
 										<span className="vp-tb-slider__label">Brt</span>
 										<input
-											type="range" min="-1000" max="1000" step="1" className="vp-range"
+											type="range" min={intensityRange ? -intensityRange.max : -1000} max={intensityRange ? -intensityRange.min : 1000} step={intensityRange ? (intensityRange.max - intensityRange.min) / 1000 : 1} className="vp-range"
 											aria-label="Brightness"
 											value={windowCenter * -1}
 											onChange={(e) => {
@@ -4504,7 +4568,7 @@ const aiAvailableOrgans = useMemo(() => {
 									<label className="vp-tb-slider" title="Contrast (window width)">
 										<span className="vp-tb-slider__label">Con</span>
 										<input
-											type="range" min="1" max="2000" step="1" className="vp-range"
+											type="range" min={intensityRange ? (intensityRange.max - intensityRange.min) / 1000 : 1} max={intensityRange ? intensityRange.max - intensityRange.min : 2000} step={intensityRange ? (intensityRange.max - intensityRange.min) / 1000 : 1} className="vp-range"
 											aria-label="Contrast"
 											value={windowWidth}
 											onChange={(e) => {

@@ -20,12 +20,34 @@ import { encodeSegmentationSavePayload } from "./viewer/segmentationSavePayload"
 import { gzipBytes } from "./viewer/gzipBytes";
 import { savedRevision, rememberSavedRevision, structureMetadataHeader, type SavedStructures } from "./viewer/segmentationMetadata";
 import { isIndexInsideGrid } from "./viewer/promptGrid";
+import { analyzeScan, intensityUnit, mrWindowPresets, type ScanAnalysis, type ScanModality } from "./scanModality";
 
 /** NIfTI scans are medical CTs but do not carry DICOM's Modality metadata. */
-export function _tagNiftiVolumeAsCt<T extends { metadata?: object | null }>(volume: T | null | undefined): void {
+export function _tagNiftiVolumeAsCt<T extends { metadata?: object | null }>(volume: T | null | undefined, modality: ScanModality = "CT"): void {
   const metadata = volume?.metadata as { Modality?: string } | null | undefined;
   if (!metadata || metadata.Modality) return;
-  metadata.Modality = "CT";
+  metadata.Modality = modality;
+}
+
+// Modality chosen for the NIfTI volume on screen, so the full-resolution swap re-tags the same way.
+let _niftiModality: ScanModality = "CT";
+
+function _analyzeVolume(volume: { voxelManager?: { getCompleteScalarDataArray?: () => ArrayLike<number> } } | null | undefined): ScanAnalysis | null {
+  const data = volume?.voxelManager?.getCompleteScalarDataArray?.();
+  return data && data.length ? analyzeScan(data) : null;
+}
+
+/** Re-labels the loaded volume as CT or MRI (the viewer's manual override for a misdetected upload). */
+export function setCurrentVolumeModality(modality: ScanModality): void {
+  const volume = _currentCtVolumeId ? (cache.getVolume(_currentCtVolumeId) as { metadata?: { Modality?: string } } | undefined) : undefined;
+  if (!volume?.metadata) return;
+  volume.metadata.Modality = modality;
+  _niftiModality = modality;
+}
+
+/** Display ranges for the loaded volume: used to scale the MRI window sliders and presets. */
+export function analyzeCurrentVolume(): ScanAnalysis | null {
+  return _currentCtVolumeId ? _analyzeVolume(cache.getVolume(_currentCtVolumeId) as never) : null;
 }
 
 const segmentationLoadedListeners = new Set<() => void>();
@@ -597,7 +619,7 @@ export function subscribeToVolumeProgress(
 // tool registration. Mirrors the guard in compareViewer.ts.
 let _cornerstoneInited = false;
 
-export async function renderVisualization(ref1: HTMLDivElement, ref2: HTMLDivElement, ref3: HTMLDivElement, convertedColorLUT: ColorLUT, ctUrl: string, segUrl: string | undefined, _setLoading: React.Dispatch<React.SetStateAction<boolean>>, opts?: { ctImageIds?: string[]; resourceKey?: string; signal?: AbortSignal; customLabels?: SavedStructures }) {
+export async function renderVisualization(ref1: HTMLDivElement, ref2: HTMLDivElement, ref3: HTMLDivElement, convertedColorLUT: ColorLUT, ctUrl: string, segUrl: string | undefined, _setLoading: React.Dispatch<React.SetStateAction<boolean>>, opts?: { ctImageIds?: string[]; resourceKey?: string; signal?: AbortSignal; customLabels?: SavedStructures; detectModality?: boolean }) {
     if (!_cornerstoneInited) {
         coreInit();
         niftiImageLoaderInit();
@@ -818,7 +840,11 @@ export async function renderVisualization(ref1: HTMLDivElement, ref2: HTMLDivEle
     );
     _throwIfViewerLoadStale(context, opts?.signal);
     await parallelPair(async () => { await volume.load(); }, async () => { await segmentationVolume?.load(); });
-    _tagNiftiVolumeAsCt(volume);
+    // User-provided NIfTI scans can be CT or MRI (no DICOM Modality to read): classify from the voxels.
+    // Dataset cases are CT by construction and skip the scan.
+    const scan = opts?.detectModality && !opts?.ctImageIds ? _analyzeVolume(volume) : null;
+    _niftiModality = scan?.modality ?? "CT";
+    _tagNiftiVolumeAsCt(volume, _niftiModality);
     _throwIfViewerLoadStale(context, opts?.signal);
     await setVolumesForViewports(
         renderingEngine,
@@ -886,11 +912,17 @@ export async function renderVisualization(ref1: HTMLDivElement, ref2: HTMLDivEle
         }
     }
 
+    if (scan?.modality === "MR") {
+        const auto = mrWindowPresets(scan)[0];
+        initialVoi = { windowCenter: auto.center, windowWidth: auto.width };
+    }
+
     return {
         viewportIds: viewportInputArray.map((viewport) => viewport.viewportId),
         renderingEngine: renderingEngine,
         volumeId: ctVolumeId,
         initialVoi,
+        scan,
         dispose: () => _disposeViewerContext(context),
     }
     } catch (error) {
@@ -1499,10 +1531,10 @@ function formatAnnotationValue(a: any): string {
     if (typeof stats.angle === "number") return `${formatNum(stats.angle)}°`;
     if (typeof stats.area === "number") {
       const area = `${formatNum(stats.area, 0)} ${stats.areaUnit ?? "mm²"}`;
-      return typeof stats.mean === "number" ? `${area} · mean ${formatNum(stats.mean, 0)} HU` : area;
+      return typeof stats.mean === "number" ? `${area} · mean ${formatNum(stats.mean, 0)}${intensityUnit(getCurrentVolumeModality())}` : area;
     }
-    if (typeof stats.value === "number") return `${formatNum(stats.value, 0)} HU`;
-    if (typeof stats.mean === "number") return `mean ${formatNum(stats.mean, 0)} HU`;
+    if (typeof stats.value === "number") return `${formatNum(stats.value, 0)}${intensityUnit(getCurrentVolumeModality())}`;
+    if (typeof stats.mean === "number") return `mean ${formatNum(stats.mean, 0)}${intensityUnit(getCurrentVolumeModality())}`;
   }
   return "…";
 }
@@ -2127,7 +2159,7 @@ export async function upgradeCtVolume(fullResCtUrl: string, signal?: AbortSignal
     const volume = await volumeLoader.createAndCacheVolume(newVolumeId, { imageIds });
     _throwIfViewerLoadStale(context, signal);
     await volume.load();
-    _tagNiftiVolumeAsCt(volume);
+    _tagNiftiVolumeAsCt(volume, _niftiModality);
     _throwIfViewerLoadStale(context, signal);
 
     // Preserve each pane's camera so the swap is visually seamless.
