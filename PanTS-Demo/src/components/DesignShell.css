@@ -7,8 +7,6 @@
 .design-brand>a { display:flex; align-items:center; gap:10px; min-width:0; font-size:18px; font-weight:600; letter-spacing:-.02em; color:#111; }
 .design-brand img { width:38px; height:38px; flex:none; }
 .design-shell .design-collapse,.design-shell .design-mobile-close { padding:8px; display:flex; margin-left:auto; border:0; background:transparent; color:var(--design-muted); }
-.design-new-run { display:flex; align-items:center; gap:12px; min-height:44px; width:100%; padding:10px 13px; border:1px solid var(--design-line); border-radius:15px; background:#fff; color:var(--design-ink); box-shadow:0 1px 2px #0f172a0a; text-align:left; font-size:14px; }
-.design-new-run svg { color:var(--design-navy); flex:none; }
 .design-nav-caption { margin:22px 0 6px; padding:0 14px; font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:400; letter-spacing:.12em; text-transform:uppercase; color:#6b7285; }
 .design-nav { position:relative; display:flex; flex-direction:column; gap:2px; }
 .design-nav-indicator { position:absolute; top:0; left:0; right:0; height:42px; border-radius:10px; background:#002d7214; pointer-events:none; transition:transform .5s cubic-bezier(.22,1,.36,1); }
@@ -42,7 +40,7 @@
 .design-shell.is-collapsed .design-brand>a { display:none; }
 .design-shell.is-collapsed .design-collapse { margin:auto; }
 .design-shell.is-collapsed .design-nav-caption { margin-top:20px; }.design-shell.is-collapsed .design-nav { margin-top:20px; }
-.design-shell.is-collapsed .design-nav>a { padding:12px 16px; }.design-shell.is-collapsed .design-new-run { justify-content:center; }
+.design-shell.is-collapsed .design-nav>a { padding:12px 16px; }
 @media(max-width:980px) and (min-width:701px) { .design-sidebar { width:220px; flex-basis:220px; } .design-brand>a { font-size:16px; } }
 @media(max-width:700px) {
   .design-shell { padding:0; }.design-frame { border:0; border-radius:0; display:flex; flex-direction:column; }

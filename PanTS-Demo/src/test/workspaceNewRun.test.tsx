@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DesignShell from "../components/DesignShell";
 import UploadPage from "../routes/UploadPage";
@@ -43,7 +43,13 @@ function RouteProbe() {
   return <output aria-label="Current route">{location.pathname}:{String(Boolean(location.state?.newWorkspaceRun))}</output>;
 }
 function HistoryProbe() { return <><h1>Account history</h1><p>{loadRecentUploads(account.id).map((run) => run.label).join(", ")}</p></>; }
-const mount = (path = "/upload") => render(<MemoryRouter initialEntries={[path]}><Routes>
+// The sidebar no longer has a New run button, but UploadPage still honours the route request the
+// button used to send. This stand-in sends the same request, so the page's reset logic stays covered.
+function NewRun() {
+  const navigate = useNavigate(); const { pathname } = useLocation();
+  return <button type="button" onClick={() => navigate(`${["/", "/upload"].includes(pathname) ? pathname : "/upload"}#scan-composer`, { state: { newWorkspaceRun: crypto.randomUUID() } })}>New run</button>;
+}
+const mount = (path = "/upload") => render(<MemoryRouter initialEntries={[path]}><NewRun /><Routes>
   <Route element={<DesignShell />}>
     <Route path="/" element={<><UploadPage /><RouteProbe /></>} />
     <Route path="/upload" element={<><UploadPage /><RouteProbe /></>} />

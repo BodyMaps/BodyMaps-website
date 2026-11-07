@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { IconLayoutSidebar, IconLayoutGrid, IconFocusCentered, IconUsers, IconChartBar, IconPlus, IconMenu2, IconX } from "@tabler/icons-react";
+import { IconLayoutSidebar, IconLayoutGrid, IconFocusCentered, IconUsers, IconChartBar, IconMenu2, IconX } from "@tabler/icons-react";
 import AuthButton from "./AuthButton";
 import SiteFooter from "./SiteFooter";
 import WorkspaceTour from "./WorkspaceTour";
@@ -83,15 +83,6 @@ export default function DesignShell() {
     try { localStorage.setItem(COLLAPSED_KEY, String(!previous)); } catch { /* optional preference */ }
     return !previous;
   });
-  const newRun = () => {
-    // A route-carried request works both in the mounted workspace and across
-    // the public/protected shell boundary. UploadPage consumes it once without
-    // unmounting or cancelling runs that already started.
-    navigate(`${isWorkspace ? location.pathname : "/upload"}#scan-composer`, {
-      state: { newWorkspaceRun: crypto.randomUUID() },
-    });
-    setMobileOpen(false);
-  };
   const replayWalkthrough = () => {
     // The V6 walkthrough explains the workspace. Replaying from an account or
     // Team page should show those controls too; replaying here keeps uploads.
@@ -130,7 +121,6 @@ export default function DesignShell() {
           <button className="design-collapse" type="button" onClick={toggleCollapsed} title={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!collapsed}><IconLayoutSidebar size={19} /></button>
           <button className="design-mobile-close" type="button" aria-label="Close navigation" onClick={() => { setMobileOpen(false); mobileButton.current?.focus(); }}><IconX size={19} /></button>
         </div>
-        <button className="design-new-run" type="button" onClick={newRun} title="New run" data-tour="new-run"><IconPlus size={19} /><span className="sidebar-label">New run</span></button>
         <div className="design-nav-caption sidebar-label">Explore</div>
         <nav className="design-nav" aria-label="Main navigation" data-tour="explore">
           <span className="design-nav-indicator" aria-hidden="true" style={{ opacity: navIndex < 0 ? 0 : 1, transform: `translateY(${Math.max(0, navIndex) * 44}px)` }} />
