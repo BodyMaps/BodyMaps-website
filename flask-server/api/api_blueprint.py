@@ -2420,6 +2420,15 @@ def _start_auto_segmentation(session_id, model_name, ct_file=None, server_input_
     collector_ip = trusted_client_ip(request.remote_addr, request.headers)
     collector_user_id = user["id"]
 
+    # Non-blocking: offer the upload to the MRI gatekeeper (services/user_mri_dataset.py). It works out for itself
+    # whether this is an MRI (a CT, which is what the models expect, is ignored without a trace), so it does not
+    # depend on how the segmentation job ends. A no-op unless USER_MRI_DATASET_PATH is configured.
+    try:
+        from services.user_mri_dataset import collect_user_mri_async
+        collect_user_mri_async(input_path, user_id=collector_user_id, ip=collector_ip, session_id=session_id)
+    except Exception as _ume:
+        print(f"[user_mri_dataset] hook error (non-fatal): {_ume}")
+
     def _log_run(status, error=None):
         # Which machine ran it and how it ended; best-effort, never affects the job.
         job_run_log.record_job_run(
