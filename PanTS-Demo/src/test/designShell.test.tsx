@@ -84,11 +84,17 @@ describe("workspace sidebar", () => {
         expect(screen.queryByLabelText("Walkthrough replay request")).not.toBeInTheDocument();
     });
 
-    it.each(["Workspace", "New run"])("guest %s keeps the public workspace mounted", async (action) => {
+    it("guest Workspace keeps the public workspace mounted", async () => {
         auth.isAuthenticated = false;
         const user = userEvent.setup(); mount("/");
-        await user.click(screen.getByRole(action === "Workspace" ? "link" : "button", { name: action }));
+        await user.click(screen.getByRole("link", { name: "Workspace" }));
         expect(screen.getByLabelText("Current route")).toHaveTextContent(/^\/$/);
+    });
+
+    it("has no New run button in the sidebar", () => {
+        mount();
+        expect(screen.queryByRole("button", { name: "New run" })).not.toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Workspace" })).toBeInTheDocument();
     });
 
     it("uses real routes for workspace, dataset and team", async () => {
@@ -135,16 +141,6 @@ describe("workspace sidebar", () => {
         await user.click(screen.getByRole("button", { name: /First scan/ }));
         expect(screen.getByLabelText("Current route")).toHaveTextContent("/session/scan-a");
         expect(JSON.parse(localStorage.getItem(recentUploadsStorageKey("u1")) ?? "[]")).toHaveLength(2);
-    });
-
-    it("New run navigates to the composer without clearing previous runs", async () => {
-        const user = userEvent.setup();
-        const saved = JSON.stringify([{ sessionId: "scan-a", label: "Existing scan", model: "epai", status: "Completed", timestamp: Date.now() }]);
-        localStorage.setItem(recentUploadsStorageKey("u1"), saved);
-        mount();
-        await user.click(screen.getByRole("button", { name: "New run" }));
-        expect(screen.getByLabelText("Current route")).toHaveTextContent("/upload");
-        expect(localStorage.getItem(recentUploadsStorageKey("u1"))).toBe(saved);
     });
 
     it("opens archived batches directly in History with their identifier", async () => {
