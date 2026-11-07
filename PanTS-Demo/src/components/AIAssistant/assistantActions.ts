@@ -41,6 +41,8 @@ export function buildViewerActions(opts: {
    *  show and which drives the panes. Zoom commands go through it so they
    *  stay in step with the slider. */
   setZoomLevel?: (value: number) => void;
+  /** Overrides the CT window table for the scan on screen (MRI has no Hounsfield windows). */
+  resolveWindowPreset?: (preset: string) => { width: number; center: number } | undefined;
 }): ViewerActions {
   const {
     checkBoxData,
@@ -50,6 +52,7 @@ export function buildViewerActions(opts: {
     setViewModeFn,
     setActiveMeasureToolFn,
     setZoomLevel,
+    resolveWindowPreset,
   } = opts;
 
   const windowPresets: Record<string, { width: number; center: number }> = {
@@ -124,7 +127,7 @@ export function buildViewerActions(opts: {
     },
 
     setWindowPreset(preset) {
-      const selectedPreset = windowPresets[preset];
+      const selectedPreset = resolveWindowPreset?.(preset) ?? windowPresets[preset];
       if (selectedPreset) handleWindowChange(selectedPreset.width, selectedPreset.center);
     },
 

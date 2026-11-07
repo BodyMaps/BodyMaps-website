@@ -114,8 +114,6 @@ import {
     FREEHAND_ROI_TOOL,
     getCrosshairMm,
     getCurrentVolumeModality,
-    analyzeCurrentVolume,
-    setCurrentVolumeModality,
     getCustomSegmentLabels,
     setSavedStructureName,
     getMeasurementSummaries,
@@ -197,7 +195,7 @@ import { loadViewerPrefs, saveViewerPrefs } from "../helpers/viewer/viewerPrefs"
 import { ShortcutSheet } from "../components/viewer/ViewerHelp";
 import { type MaskingArea } from "../components/segmentation/MaskingSelect";
 import { getLocalDicomFiles, loadLocalDicomSeries } from "../helpers/dicomLocal";
-import { loadLocalNiftiAsRawBlobUrl } from "../helpers/localNifti";
+import { getLocalNiftiFile, loadLocalNiftiAsRawBlobUrl } from "../helpers/localNifti";
 import {
     describeBasis,
     loadOrganNorms,
@@ -1881,11 +1879,13 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	// CT or MRI for the scan on screen. MRI voxels are scanner units, so it gets windows and slider
 	// ranges taken from the scan itself instead of the fixed Hounsfield presets.
 	const [scanModality, setScanModality] = useState<ScanModality>("CT");
+	const [scanDetected, setScanDetected] = useState(false);
 	const [mrPresets, setMrPresets] = useState<MrWindowPreset[]>([]);
 	const [intensityRange, setIntensityRange] = useState<{ min: number; max: number } | null>(null);
 	const isUserScan = isLocalNifti || (Boolean(sessionId) && !pantsCase && !isReconstruction);
 	const applyScanConfig = useCallback((modality: ScanModality, analysis: ScanAnalysis | null): { width: number; center: number } => {
 		setScanModality(modality);
+		setScanDetected(true);
 		const nextPresets = modality === "MR" ? VOLUME_3D_PRESETS_MR : VOLUME_3D_PRESETS;
 		setVolume3DPresets(nextPresets);
 		if (volumePresetModalityRef.current !== modality) {
@@ -3071,7 +3071,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 						rawUrl,
 						undefined,
 						setLoading,
-						{ resourceKey: "local-nifti", signal: controller.signal, detectModality: true }
+						{ resourceKey: "local-nifti", signal: controller.signal, detectModality: true, scanName: getLocalNiftiFile()?.name }
 					);
 					if (result.scan) applyScanConfig(result.scan.modality, result.scan);
 					acceptLoadedViewer(result);
@@ -3536,16 +3536,6 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 		ro.observe(el);
 		return () => ro.disconnect();
 	}, [renderingEngine, NV]);
-
-	// Manual CT/MRI switch for an upload the detector got wrong: re-labels the volume and re-applies that
-	// modality's window, units and slider ranges.
-	const handleScanTypeOverride = (modality: ScanModality) => {
-		if (modality === scanModality) return;
-		setCurrentVolumeModality(modality);
-		const win = applyScanConfig(modality, analyzeCurrentVolume());
-		handleWindowChange(win.width, win.center);
-		sessionRef.current?.log("preset", `Scan type set to ${modality === "MR" ? "MRI" : "CT"}`);
-	};
 
 	const handlePresetClick = (preset: { name: string; width: number; center: number }) => {
 		setActivePreset(preset.name);
@@ -4065,7 +4055,9 @@ const aiActions = useMemo(() => buildViewerActions({
 	setViewModeFn: setViewMode,
 	setActiveMeasureToolFn: setActiveMeasureTool,
 	setZoomLevel,
-}), [checkBoxData, handleWindowChange]);
+	// MRI has no tissue-specific CT windows: every named preset means "the scan's own auto window".
+	resolveWindowPreset: scanModality === "MR" && mrPresets.length ? () => ({ width: mrPresets[0].width, center: mrPresets[0].center }) : undefined,
+}), [checkBoxData, handleWindowChange, scanModality, mrPresets]);
 
 const statRows = useMemo(
 () =>
@@ -4362,7 +4354,7 @@ const aiAvailableOrgans = useMemo(() => {
 					    show + edit the same friendly name the Upload page shows -- both
 					    read/write recentUploads, so renaming here updates it there too. */}
 					<div className="vp-tb-id">
-						<span className="vp-tb-id__eyebrow">{sessionId ? "Session" : "Case"}</span>
+						<span className="vp-tb-id__eyebrow">{scanDetected && isUserScan ? `${scanModality === "MR" ? "MRI" : "CT"} · ` : ""}{sessionId ? "Session" : "Case"}</span>
 						{renamingScan ? (
 							<input
 								autoFocus
@@ -4482,22 +4474,6 @@ const aiAvailableOrgans = useMemo(() => {
 											<span>{preset.name}</span>
 										</button>
 									))}
-									{isUserScan && (
-										<>
-											<div className="vp-flyout__divider" role="separator" />
-											{(["CT", "MR"] as const).map((modality) => (
-												<button
-													key={modality}
-													className={`vp-flyout__item ${scanModality === modality ? "is-active" : ""}`}
-													role="menuitemradio"
-													aria-checked={scanModality === modality}
-													onClick={() => handleScanTypeOverride(modality)}
-												>
-													<span>{modality === "MR" ? "Scan type: MRI" : "Scan type: CT"}</span>
-												</button>
-											))}
-										</>
-									)}
 								</div>,
 								document.body
 							)}

@@ -20,7 +20,7 @@ import { encodeSegmentationSavePayload } from "./viewer/segmentationSavePayload"
 import { gzipBytes } from "./viewer/gzipBytes";
 import { savedRevision, rememberSavedRevision, structureMetadataHeader, type SavedStructures } from "./viewer/segmentationMetadata";
 import { isIndexInsideGrid } from "./viewer/promptGrid";
-import { analyzeScan, intensityUnit, mrWindowPresets, type ScanAnalysis, type ScanModality } from "./scanModality";
+import { analyzeScan, intensityUnit, mrWindowPresets, waitForFrames, type ScanAnalysis, type ScanModality } from "./scanModality";
 
 /** NIfTI scans are medical CTs but do not carry DICOM's Modality metadata. */
 export function _tagNiftiVolumeAsCt<T extends { metadata?: object | null }>(volume: T | null | undefined, modality: ScanModality = "CT"): void {
@@ -32,23 +32,11 @@ export function _tagNiftiVolumeAsCt<T extends { metadata?: object | null }>(volu
 // Modality chosen for the NIfTI volume on screen, so the full-resolution swap re-tags the same way.
 let _niftiModality: ScanModality = "CT";
 
-function _analyzeVolume(volume: { voxelManager?: { getCompleteScalarDataArray?: () => ArrayLike<number> } } | null | undefined): ScanAnalysis | null {
+function _analyzeVolume(volume: { voxelManager?: { getCompleteScalarDataArray?: () => ArrayLike<number> } } | null | undefined, name?: string): ScanAnalysis | null {
   const data = volume?.voxelManager?.getCompleteScalarDataArray?.();
-  return data && data.length ? analyzeScan(data) : null;
+  return data && data.length ? analyzeScan(data, name) : null;
 }
 
-/** Re-labels the loaded volume as CT or MRI (the viewer's manual override for a misdetected upload). */
-export function setCurrentVolumeModality(modality: ScanModality): void {
-  const volume = _currentCtVolumeId ? (cache.getVolume(_currentCtVolumeId) as { metadata?: { Modality?: string } } | undefined) : undefined;
-  if (!volume?.metadata) return;
-  volume.metadata.Modality = modality;
-  _niftiModality = modality;
-}
-
-/** Display ranges for the loaded volume: used to scale the MRI window sliders and presets. */
-export function analyzeCurrentVolume(): ScanAnalysis | null {
-  return _currentCtVolumeId ? _analyzeVolume(cache.getVolume(_currentCtVolumeId) as never) : null;
-}
 
 const segmentationLoadedListeners = new Set<() => void>();
 
@@ -619,7 +607,7 @@ export function subscribeToVolumeProgress(
 // tool registration. Mirrors the guard in compareViewer.ts.
 let _cornerstoneInited = false;
 
-export async function renderVisualization(ref1: HTMLDivElement, ref2: HTMLDivElement, ref3: HTMLDivElement, convertedColorLUT: ColorLUT, ctUrl: string, segUrl: string | undefined, _setLoading: React.Dispatch<React.SetStateAction<boolean>>, opts?: { ctImageIds?: string[]; resourceKey?: string; signal?: AbortSignal; customLabels?: SavedStructures; detectModality?: boolean }) {
+export async function renderVisualization(ref1: HTMLDivElement, ref2: HTMLDivElement, ref3: HTMLDivElement, convertedColorLUT: ColorLUT, ctUrl: string, segUrl: string | undefined, _setLoading: React.Dispatch<React.SetStateAction<boolean>>, opts?: { ctImageIds?: string[]; resourceKey?: string; signal?: AbortSignal; customLabels?: SavedStructures; detectModality?: boolean; scanName?: string }) {
     if (!_cornerstoneInited) {
         coreInit();
         niftiImageLoaderInit();
@@ -842,7 +830,7 @@ export async function renderVisualization(ref1: HTMLDivElement, ref2: HTMLDivEle
     await parallelPair(async () => { await volume.load(); }, async () => { await segmentationVolume?.load(); });
     // User-provided NIfTI scans can be CT or MRI (no DICOM Modality to read): classify from the voxels.
     // Dataset cases are CT by construction and skip the scan.
-    const scan = opts?.detectModality && !opts?.ctImageIds ? _analyzeVolume(volume) : null;
+    const scan = opts?.detectModality && !opts?.ctImageIds && await waitForFrames(volume, () => _throwIfViewerLoadStale(context, opts?.signal)) ? _analyzeVolume(volume, opts?.scanName) : null;
     _niftiModality = scan?.modality ?? "CT";
     _tagNiftiVolumeAsCt(volume, _niftiModality);
     _throwIfViewerLoadStale(context, opts?.signal);
