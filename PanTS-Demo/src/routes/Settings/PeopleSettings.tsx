@@ -5,6 +5,7 @@ import { track } from "../../helpers/analytics";
 import { parseServerTime } from "../../helpers/resetTime";
 import { useSettings } from "./context";
 import { titleCase } from "./analytics/format";
+import AnnotatorCodes from "./AnnotatorCodes";
 import "./analytics/dashboard.css";
 
 // People: every account, and the roles they hold.
@@ -12,9 +13,10 @@ import "./analytics/dashboard.css";
 // Admin-only, checked here as well as on the server — the settings nav hides the
 // link for everyone else, but a hidden link is not access control.
 //
-// Admin is the only role there is. The vocabulary comes from the server
-// (body.roles) rather than a list here, so the menu follows whatever the server
-// is actually willing to grant.
+// The roles are admin and annotator (an annotator can save a corrected scan for everyone, and nothing
+// else). The vocabulary comes from the server (body.roles) rather than a list here, so the menu follows
+// whatever the server is actually willing to grant. Above the list, the admin can also make a temporary
+// code that grants the annotator role (AnnotatorCodes).
 //
 // Every row's actions sit behind one Edit button, and every action behind a
 // confirmation. The toggles this replaced were a single click from making a
@@ -78,6 +80,20 @@ const explain = (person: Person, action: Action): { title: string; body: string 
 			title: `Restore ${person.email}?`,
 			body: "The account becomes usable again and they can sign in as before.",
 		};
+	}
+	if (action.role === "annotator") {
+		return action.held
+			? {
+				title: `Remove editing access from ${person.email}?`,
+				body: "They can no longer save changes to scans for everyone. What they already "
+					+ "saved stays, and every replaced version is kept on the server.",
+			}
+			: {
+				title: `Let ${person.email} edit scans for everyone?`,
+				body: "They'll get Save to JHU server in the viewer. What they save replaces the "
+					+ "scan's annotation and 3D model for every visitor (the version it replaces "
+					+ "is kept). They can't manage accounts or give this access to anyone else.",
+			};
 	}
 	return action.held
 		? {
@@ -300,6 +316,8 @@ const PeopleSettings: React.FC = () => {
 					aria-label="Search accounts"
 				/>
 			</div>
+
+			<AnnotatorCodes />
 
 			{error && (
 				<div className="set-banner set-banner--error dash-banner" role="alert">

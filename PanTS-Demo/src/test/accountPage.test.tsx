@@ -83,7 +83,6 @@ beforeEach(() => {
         }
 		if (u.includes("/api/auth/redeem-annotator-invite")) {
 			const { code } = JSON.parse(String(init?.body)) as { code: string };
-			if (code === "unconfigured") return json({ error: "Invitation codes are not configured." }, false, 503);
 			if (code !== "good-code") return json({ error: "Invalid invitation code." }, false, 403);
 			USER.roles = ["annotator"];
 			return json({ ok: true, user: { ...USER } });
@@ -1075,16 +1074,8 @@ describe("annotator access", () => {
 		const field = await screen.findByLabelText(/Invitation code/);
 		await user.type(field, "nope");
 		await user.click(screen.getByRole("button", { name: "Redeem" }));
-		expect(await screen.findByText("That invitation code isn't valid.")).toBeInTheDocument();
+		expect(await screen.findByText("That code isn't valid. It may have expired or already been used.")).toBeInTheDocument();
 		expect(screen.getByLabelText(/Invitation code/)).toHaveValue("nope");
-	});
-
-	it("says codes are unavailable when the site has none configured", async () => {
-		const user = userEvent.setup();
-		renderAt();
-		await user.type(await screen.findByLabelText(/Invitation code/), "unconfigured");
-		await user.click(screen.getByRole("button", { name: "Redeem" }));
-		expect(await screen.findByText("Invitation codes aren't available on this site.")).toBeInTheDocument();
 	});
 
 	it.each(["annotator", "admin"])("an existing %s sees the approved state, not the code field", async (role) => {

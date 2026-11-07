@@ -1,23 +1,21 @@
 # Annotator access: saving corrections for everyone
 
-Approved people can fix a dataset scan's segmentation and save it as the version **everyone** sees
-(viewer button **Save to JHU server**, above the normal **Save**, shown only to them, only on PanTS cases).
-The normal **Save** still keeps an edit on the person's own account.
+A dataset scan (PanTS, CancerVerse, AbdomenAtlas) has **one version for everybody**. Nobody keeps a private copy of
+it on the server. Approved people (annotators) can fix a scan's segmentation and save it with **Save to JHU server**
+(viewer toolbar, above **Save to computer**, shown only to them). From then on every visitor gets the corrected
+mask: the 2D masks, the 3D meshes, the organ statistics and PDAC staging all follow it. Everyone else sees only
+**Save to computer**, which downloads their edit as a NIfTI file.
 
 ## Who is approved
 
-The `annotator` role (admins can also save). Two ways to get it:
+The `annotator` role (admins can also save). **Only admins can grant it** (today: the two people in `ADMIN_EMAILS`).
+An annotator cannot grant it to anyone or see other accounts. Two ways:
 
-1. **Invitation code.** Settings > Profile > Invitation code. The server compares it with the SHA-256 digests in
-   `BODYMAPS_ANNOTATOR_INVITE_SHA256` (comma-separated, so several codes can exist and one can be withdrawn):
-
-   ```bash
-   printf '%s' 'the-long-random-code' | sha256sum        # use a long random code; attempts are limited per account and IP
-   # flask-server/.env:  BODYMAPS_ANNOTATOR_INVITE_SHA256=<digest>[,<digest>...]
-   ```
-
-   Restart the backend after changing the variable. Redeeming is idempotent and grants nothing but `annotator`.
-2. **An admin** (Settings > People > Make annotator / Remove annotator).
+1. **A temporary code.** Settings > People > *Editing access* > pick how long it works (1 hour, 1 day, 7 days) >
+   **Create code**. The code (`XXXX-XXXX-XXXX`) is shown once; give it to the person. They enter it under
+   Settings > Profile > *Invitation code*. A code works **once** and then expires, can be withdrawn from the same
+   list, and the list shows who used each one. Only a SHA-256 digest is stored.
+2. **By email.** Settings > People > search the person > Edit > **Make annotator** (or **Remove annotator**).
 
 ## Where the corrected version lives
 
@@ -25,22 +23,30 @@ Under the viewer label cache (`PANTS_VIEWER_LABEL_CACHE_PATH`, default `<PERMISS
 
 | What | Path |
 | --- | --- |
-| shared mask | `edits/shared/PanTS_########/combined_labels.nii.gz` (+ `meta.json`: version, who, when) |
-| replaced versions | `edits/shared-history/PanTS_########/<UTC timestamp>.nii.gz` (newest 20 kept) |
-| shared 3D meshes | `<MESH_PATH>/shared/PanTS_########/` |
+| shared mask | `edits/shared/<PanTS_########, CV_######## or BDMAP_########>/combined_labels.nii.gz` (+ `meta.json`: version, who, when) |
+| replaced versions | `edits/shared-history/<id>/<UTC timestamp>.nii.gz` (newest 20 kept) |
+| shared 3D meshes | `<MESH_PATH>/shared/<id>/` |
 
-The dataset's own `mask_only/` is read-only and never touched. Every reader that shows a mask (2D masks, low-res
-preview, 3D meshes, organ statistics, PDAC staging) prefers the shared mask over the original; a person's own saved
-edit still wins for that person.
+The dataset's own files (`mask_only/`, the CancerVerse / AbdomenAtlas overlays) are never touched. Every reader that
+shows a mask prefers the shared mask. Saving also builds the new 3D meshes (and the PanTS low-resolution preview) in the
+background, so the first visitor after a save does not wait for them; if that fails they are built on first view as
+before.
+
+Older per-account edits (`edits/accounts/<hash>/...`) are no longer shown or written; the files are left on disk.
+
+## Before this goes live
+
+Run the usual deploy (`alembic upgrade head` creates the `annotator_invite` table; it is additive and reversible), then
+restart the backend. No environment variable is needed any more.
 
 ## Undoing a bad correction
 
 - In the app: an annotator can call `DELETE /api/shared-annotation/<case>` (everyone sees the original again; the
   removed version is archived).
-- By hand: copy a file from `shared-history/` back to `edits/shared/PanTS_########/combined_labels.nii.gz`. Meshes and
+- By hand: copy a file from `shared-history/` back to `edits/shared/<id>/combined_labels.nii.gz`. Meshes and
   statistics refresh themselves (they are keyed by the file's revision).
 
 ## Not covered yet
 
-Per-organ source files that PDF reports and report measurements read (`mask_only/<case>/segmentations/*.nii.gz`) are not
-rewritten, so those still describe the original annotation.
+Per-organ source files that PDF reports and report measurements read (`mask_only/<case>/segmentations/*.nii.gz`) are
+not rewritten, so those still describe the original annotation.

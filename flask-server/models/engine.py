@@ -46,6 +46,7 @@ from models import combined_labels as _combined_labels  # noqa: F401,E402
 from models import usage_event as _usage_event  # noqa: F401,E402
 from models import analytics_event as _analytics_event  # noqa: F401,E402
 from models import user_role as _user_role  # noqa: F401,E402
+from models import annotator_invite as _annotator_invite  # noqa: F401,E402
 from models import password_reset as _password_reset  # noqa: F401,E402
 from models import email_verification as _email_verification  # noqa: F401,E402
 

@@ -821,8 +821,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			body: JSON.stringify({ code }),
 		});
 		const data = await res.json().catch(() => ({}));
-		if (res.status === 503) throw new Error("Invitation codes aren't available on this site.");
-		if (res.status === 403) throw new Error("That invitation code isn't valid.");
+		if (res.status === 403) throw new Error("That code isn't valid. It may have expired or already been used.");
 		if (!res.ok) throw accountFailure(res, data, "Couldn't redeem that invitation code.", revision);
 		const mapped = mapApiUser(data.user);
 		updateCurrentUser(data.user);

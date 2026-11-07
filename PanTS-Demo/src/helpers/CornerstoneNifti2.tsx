@@ -2588,21 +2588,29 @@ export async function fetchSharedAnnotationStatus(apiBase: string, caseId: strin
   return await resp.json() as SharedAnnotationStatus;
 }
 
+/** The shared revision a save is checked against: the one the person opened the scan at when known. */
+export const revisionForSharedSave = (openedRevision: string | undefined, current: SharedAnnotationStatus): string =>
+  openedRevision ?? current.revision ?? "none";
+
 /**
- * Save the live segmentation as the version of this dataset scan that EVERY viewer sees. Reads the current
- * shared revision first so two annotators cannot silently overwrite each other (the server answers 409 if
- * someone saved in between). Throws with a message safe to show the user.
+ * Save the live segmentation as the version of this dataset scan that EVERY viewer sees.
+ *
+ * `openedRevision` is the shared revision the person was looking at when they opened the scan ("none" while
+ * it showed the original). It is what the server checks, so two annotators cannot silently overwrite each
+ * other: if someone saved since, the server answers 409 and nothing is written. Without it the current
+ * revision is used, which would let a stale tab overwrite a newer fix. Throws with a message safe to show.
  */
 export async function saveSharedSegmentation(
   apiBase: string,
   caseId: string | number,
   res: "low" | "full" = "low",
   ownerId?: string | number,
+  openedRevision?: string,
 ): Promise<{ labelled_voxels: number }> {
   const status = await fetchSharedAnnotationStatus(apiBase, caseId);
   if (!status.supported) throw new Error("This scan can't have a shared version.");
   if (!status.can_override) throw new Error("You don't have permission to change the shared version.");
-  return saveSegmentation(apiBase, caseId, res, ownerId, { revision: status.revision ?? "none" });
+  return saveSegmentation(apiBase, caseId, res, ownerId, { revision: revisionForSharedSave(openedRevision, status) });
 }
 
 /**

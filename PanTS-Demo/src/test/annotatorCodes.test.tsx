@@ -1,0 +1,144 @@
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthProvider } from "../contexts/authContext";
+import PeopleSettings from "../routes/Settings/PeopleSettings";
+import { SettingsContext } from "../routes/Settings/context";
+
+// The two ways an admin gives someone the right to save a corrected scan for everyone: a temporary code
+// (made here, shown once, works once) and Edit > Make annotator on the person's account. Both are
+// admin-only on the server; this page only has to make them easy and say what they do.
+
+const ME = { id: "me", email: "admin@example.com", name: "Admin", plan: "free", account_type: null, roles: ["admin"] };
+const PERSON = {
+	id: "u2", email: "radiologist@example.com", name: "Rad", plan: "free", account_type: null,
+	created_at: "2026-01-04T00:00:00", deletion_requested_at: null as string | null, roles: [] as string[],
+};
+
+type Invite = { id: string; status: "open" | "redeemed" | "expired"; created_at: string; expires_at: string; redeemed_at: string | null; redeemed_by: string | null };
+let calls: { method: string; url: string; body?: unknown }[] = [];
+let invites: Invite[] = [];
+let createStatus = 201;
+
+const json = (body: unknown, ok = true, status = 200) => ({
+	ok, status, json: async () => body, text: async () => "", headers: { get: () => "application/json" },
+});
+
+beforeEach(() => {
+	calls = [];
+	invites = [];
+	createStatus = 201;
+	PERSON.roles = [];
+	localStorage.clear();
+	global.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+		const u = String(url);
+		const method = init?.method ?? "GET";
+		calls.push({ method, url: u, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+		if (u.includes("/api/auth/me")) return json({ user: { ...ME } });
+		if (u.includes("/api/auth/oauth/providers")) return json({});
+		if (u.includes("/api/admin/annotator-invites")) {
+			if (method === "POST") {
+				if (createStatus !== 201) return json({ error: "nope" }, false, createStatus);
+				invites = [{ id: "i1", status: "open", created_at: "2026-11-06T20:00:00", expires_at: "2026-11-07T20:00:00", redeemed_at: null, redeemed_by: null }, ...invites];
+				return json({ id: "i1", code: "ABCD-EFGH-JKMN", expires_at: "2026-11-07T20:00:00Z" }, true, 201);
+			}
+			if (method === "DELETE") {
+				invites = invites.map((invite) => ({ ...invite, status: "expired" as const }));
+				return json({ revoked: true });
+			}
+			return json({ invites });
+		}
+		if (u.includes("/api/admin/people") && method === "GET") return json({ people: [PERSON], roles: ["admin", "annotator"], total: 1 });
+		if (u.includes("/roles")) return json({ user_id: "u2", roles: ["annotator"] });
+		return json({});
+	}) as unknown as typeof fetch;
+});
+
+afterEach(() => vi.restoreAllMocks());
+
+const renderPage = () =>
+	render(
+		<AuthProvider>
+			<MemoryRouter>
+				<SettingsContext.Provider value={{ busy: false, run: async (fn) => fn(), notify: () => {}, fail: () => {} }}>
+					<PeopleSettings />
+				</SettingsContext.Provider>
+			</MemoryRouter>
+		</AuthProvider>,
+	);
+
+describe("temporary editing codes", () => {
+	it("creates a code for the chosen lifetime and shows it once", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		const panel = await screen.findByTestId("annotator-codes");
+		await user.selectOptions(within(panel).getByLabelText("Works for"), "168");
+		await user.click(within(panel).getByRole("button", { name: "Create code" }));
+		const created = await screen.findByTestId("annotator-code-created");
+		expect(created).toHaveTextContent("ABCD-EFGH-JKMN");
+		expect(created).toHaveTextContent(/shown once/i);
+		const post = calls.find((call) => call.method === "POST" && call.url.includes("/annotator-invites"));
+		expect(post?.body).toEqual({ hours: 168 });
+	});
+
+	it("defaults to one day", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		await user.click(await screen.findByRole("button", { name: "Create code" }));
+		await screen.findByTestId("annotator-code-created");
+		expect(calls.find((call) => call.method === "POST")?.body).toEqual({ hours: 24 });
+	});
+
+	it("lists open, used and expired codes and lets an open one be withdrawn", async () => {
+		invites = [
+			{ id: "i1", status: "open", created_at: "2026-11-06T20:00:00", expires_at: "2026-11-07T20:00:00", redeemed_at: null, redeemed_by: null },
+			{ id: "i2", status: "redeemed", created_at: "2026-11-05T20:00:00", expires_at: "2026-11-06T20:00:00", redeemed_at: "2026-11-05T21:00:00", redeemed_by: "dr.lee@example.com" },
+			{ id: "i3", status: "expired", created_at: "2026-11-01T20:00:00", expires_at: "2026-11-02T20:00:00", redeemed_at: null, redeemed_by: null },
+		];
+		const user = userEvent.setup();
+		renderPage();
+		const list = await screen.findByRole("list", { name: "Recent codes" });
+		expect(within(list).getAllByRole("listitem")).toHaveLength(3);
+		expect(list).toHaveTextContent("Used by dr.lee@example.com");
+		expect(within(list).getAllByRole("button", { name: "Withdraw" })).toHaveLength(1); // only the open one
+		await user.click(within(list).getByRole("button", { name: "Withdraw" }));
+		await waitFor(() => expect(calls.some((call) => call.method === "DELETE" && call.url.endsWith("/annotator-invites/i1"))).toBe(true));
+	});
+
+	it("says so when a code could not be made, and shows no code", async () => {
+		createStatus = 500;
+		const user = userEvent.setup();
+		renderPage();
+		await user.click(await screen.findByRole("button", { name: "Create code" }));
+		expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't create a code");
+		expect(screen.queryByTestId("annotator-code-created")).not.toBeInTheDocument();
+	});
+});
+
+describe("granting editing access from an account", () => {
+	it("offers Make annotator and says what it grants (not what admin grants)", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		await user.click(await screen.findByRole("button", { name: /Edit radiologist@example.com/ }));
+		await user.click(await screen.findByRole("button", { name: "Make annotator" }));
+		const dialog = await screen.findByRole("alertdialog");
+		expect(dialog).toHaveTextContent(/edit scans for everyone/i);
+		expect(dialog).toHaveTextContent(/can't manage accounts or give this access to anyone else/i);
+		expect(dialog).not.toHaveTextContent(/email address/i);
+		expect(calls.filter((call) => call.url.includes("/roles"))).toHaveLength(0); // nothing sent before confirming
+		await user.click(within(dialog).getByRole("button", { name: "Make annotator" }));
+		await waitFor(() => expect(calls.find((call) => call.url.includes("/api/admin/people/u2/roles"))?.body).toEqual({ role: "annotator" }));
+	});
+
+	it("says what removing it does", async () => {
+		PERSON.roles = ["annotator"];
+		const user = userEvent.setup();
+		renderPage();
+		await user.click(await screen.findByRole("button", { name: /Edit radiologist@example.com/ }));
+		await user.click(await screen.findByRole("button", { name: "Remove annotator" }));
+		const dialog = await screen.findByRole("alertdialog");
+		expect(dialog).toHaveTextContent(/no longer save changes/i);
+		expect(dialog).not.toHaveTextContent(/usage dashboard/i);
+	});
+});

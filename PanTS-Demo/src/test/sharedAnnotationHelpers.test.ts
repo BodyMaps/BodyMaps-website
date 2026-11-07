@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchSharedAnnotationStatus, saveSharedSegmentation } from "../helpers/CornerstoneNifti2";
+import { fetchSharedAnnotationStatus, revisionForSharedSave, saveSharedSegmentation } from "../helpers/CornerstoneNifti2";
 
 const respond = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
@@ -48,5 +48,19 @@ describe("saveSharedSegmentation", () => {
 		vi.stubGlobal("fetch", fetchMock);
 		await expect(saveSharedSegmentation("", "35")).rejects.toThrow(/No segmentation volume/);
 		expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("save-segmentation"))).toBe(true);
+	});
+});
+
+describe("revisionForSharedSave", () => {
+	const current = { supported: true, exists: true, revision: "r9", can_override: true };
+
+	it("uses the revision the scan was opened at, not the newest, so a stale tab cannot overwrite a newer fix", () => {
+		expect(revisionForSharedSave("r7", current)).toBe("r7");
+		expect(revisionForSharedSave("none", current)).toBe("none");
+	});
+
+	it("falls back to the current revision only when none was recorded", () => {
+		expect(revisionForSharedSave(undefined, current)).toBe("r9");
+		expect(revisionForSharedSave(undefined, { supported: true, can_override: true })).toBe("none");
 	});
 });

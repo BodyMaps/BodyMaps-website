@@ -21,6 +21,11 @@ vi.mock("@niivue/niivue", () => ({
 	},
 }));
 
+vi.mock("../helpers/viewer/segmentationFile", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../helpers/viewer/segmentationFile")>()),
+	downloadBytes: vi.fn(),
+}));
+
 vi.mock("../helpers/CornerstoneNifti2", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../helpers/CornerstoneNifti2")>();
 	return {
@@ -99,12 +104,14 @@ vi.mock("../helpers/NiiVueNifti", () => ({
 	updateVisibilities: vi.fn(),
 }));
 
-import { applyRemoteMeasurement, clearMeasurements, LENGTH_TOOL, renderVisualization, saveSegmentation, saveSharedSegmentation } from "../helpers/CornerstoneNifti2";
+import { downloadBytes } from "../helpers/viewer/segmentationFile";
+import { applyRemoteMeasurement, clearMeasurements, LENGTH_TOOL, renderVisualization, getSegmentationExport, saveSegmentation, saveSharedSegmentation, subscribeToSegmentationEdits } from "../helpers/CornerstoneNifti2";
 import VisualizationPage from "../routes/VisualizationPage";
 import type { EducationResult, QuizPracticeController, SoloChallengeController } from "../education/types";
 import type { LiveRoomController } from "../liveRooms/types";
 
-async function openAnnotationSave() {
+// A dataset scan has one version for everybody, so its Save button writes a file to the person's computer.
+async function openAnnotationSave({ saveName = "Save" }: { saveName?: string } = {}) {
 	await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
 	expect(screen.queryByRole("button", { name: "Save Segmentation" })).not.toBeInTheDocument();
 	expect(screen.queryByRole("button", { name: "Save", exact: true })).not.toBeInTheDocument();
@@ -112,9 +119,9 @@ async function openAnnotationSave() {
 	fireEvent.click(await screen.findByRole("button", { name: "Select structure" }));
 	fireEvent.click(screen.getByRole("option", { name: /^spleen$/i }));
 	fireEvent.click(screen.getByRole("button", { name: "Brush", exact: true }));
-	const save = within(screen.getByRole("toolbar")).getByRole("button", { name: "Save", exact: true });
+	const save = within(screen.getByRole("toolbar")).getByRole("button", { name: saveName, exact: true });
 	expect(save).toBeEnabled();
-	expect(screen.getAllByRole("button", { name: "Save", exact: true })).toHaveLength(1);
+	expect(screen.getAllByRole("button", { name: saveName, exact: true })).toHaveLength(1);
 	return save;
 }
 
@@ -389,8 +396,8 @@ describe("viewer smoke test", () => {
 		vi.mocked(saveSegmentation).mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce({ labelled_voxels: 10 });
 		render(
 			<AuthProvider>
-				<MemoryRouter initialEntries={["/case/1"]}>
-					<Routes><Route path="/case/:caseId" element={<VisualizationPage />} /></Routes>
+				<MemoryRouter initialEntries={["/session/abc123"]}>
+					<Routes><Route path="/session/:sessionId" element={<VisualizationPage />} /></Routes>
 				</MemoryRouter>
 			</AuthProvider>
 		);
@@ -402,7 +409,7 @@ describe("viewer smoke test", () => {
 		expect(saveSegmentation).toHaveBeenCalledTimes(2);
 	});
 
-	it("binds a viewer save to the account that opened the case", async () => {
+	it("binds a viewer save to the account that opened the session", async () => {
 		const fallback = global.fetch;
 		const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			if (String(input).includes("/api/auth/me")) {
@@ -414,17 +421,14 @@ describe("viewer smoke test", () => {
 
 		render(
 			<AuthProvider>
-				<MemoryRouter initialEntries={["/case/35"]}>
-					<Routes><Route path="/case/:caseId" element={<VisualizationPage />} /></Routes>
+				<MemoryRouter initialEntries={["/session/abc123"]}>
+					<Routes><Route path="/session/:sessionId" element={<VisualizationPage />} /></Routes>
 				</MemoryRouter>
 			</AuthProvider>
 		);
 		fireEvent.click(await openAnnotationSave());
 
-		await waitFor(() => expect(saveSegmentation).toHaveBeenCalledWith(expect.any(String), "35", "full", "viewer-owner-1"));
-		const metadataRequest = fetchMock.mock.calls.find(([input]) => String(input).includes("/api/segmentation-metadata/35"));
-		expect(metadataRequest).toBeDefined();
-		expect(new Headers(metadataRequest?.[1]?.headers).get("X-Upload-Owner")).toBe("viewer-owner-1");
+		await waitFor(() => expect(saveSegmentation).toHaveBeenCalledWith(expect.any(String), "abc123", "full", "viewer-owner-1"));
 	});
 
 	describe("Save to JHU server (shared annotation override)", () => {
@@ -447,25 +451,39 @@ describe("viewer smoke test", () => {
 					</MemoryRouter>
 				</AuthProvider>
 			);
-			await openAnnotationSave();
+			await openAnnotationSave({ saveName: "Save to computer" });
 			return fetchMock;
 		};
 		const sharedButton = () => screen.queryByRole("button", { name: "Save to JHU server" });
 		let confirmSpy: ReturnType<typeof vi.spyOn>;
-		beforeEach(() => { confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true); });
-		afterEach(() => { confirmSpy.mockRestore(); });
+		beforeEach(() => {
+			confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+			vi.mocked(getSegmentationExport).mockImplementation(() => ({
+				dimensions: [2, 1, 1], spacing: [1, 1, 1], origin: [0, 0, 0], direction: [1, 0, 0, 0, 1, 0, 0, 0, 1], data: [0, 1],
+			}));
+		});
+		afterEach(() => {
+			confirmSpy.mockRestore();
+			vi.mocked(getSegmentationExport).mockImplementation(() => null);
+		});
 
-		it("is offered above Save to approved annotators only", async () => {
-			await mountCase({ supported: true, exists: false, revision: "none", can_override: true });
-			const button = await screen.findByRole("button", { name: "Save to JHU server" });
-			const save = within(screen.getByRole("toolbar")).getByRole("button", { name: "Save", exact: true });
-			expect(button.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		it.each(["/case/35", "/case/CV_00000001", "/case/BDMAP_00000001"])("is offered to approved annotators on %s, above Save to computer", async (path) => {
+			const fetchMock = await mountCase({ supported: true, exists: false, revision: "none", can_override: true }, path);
+			const shared = await screen.findByRole("button", { name: "Save to JHU server" });
+			expect(shared).toBeEnabled();
+			const local = within(screen.getByRole("toolbar")).getByRole("button", { name: "Save to computer", exact: true });
+			expect(shared.compareDocumentPosition(local) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+			expect(within(screen.getByRole("toolbar")).queryByRole("button", { name: "Save", exact: true })).not.toBeInTheDocument(); // no account-private Save
+			const id = path.split("/").pop()!;
+			expect(fetchMock.mock.calls.some(([input]) => String(input).includes(`/api/shared-annotation/${id}`))).toBe(true);
 		});
 
 		it("is not offered to an account without permission", async () => {
 			const fetchMock = await mountCase({ supported: true, exists: false, revision: "none", can_override: false });
 			await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/shared-annotation/35"))).toBe(true));
-			expect(sharedButton()).not.toBeInTheDocument();
+			expect(sharedButton()).not.toBeInTheDocument(); // normal users never see it
+			expect(screen.getByRole("button", { name: "Save to computer", exact: true })).toBeEnabled();
+			expect(screen.queryByRole("button", { name: "Save", exact: true })).not.toBeInTheDocument();
 		});
 
 		it("is not offered when the status cannot be read or the scan has no shared version", async () => {
@@ -486,7 +504,7 @@ describe("viewer smoke test", () => {
 			expect(confirmSpy).toHaveBeenCalledTimes(1);
 			expect(String(confirmSpy.mock.calls[0][0])).toMatch(/EVERYONE/);
 			expect(String(confirmSpy.mock.calls[0][0])).toMatch(/Dr\. Lee/);
-			await waitFor(() => expect(saveSharedSegmentation).toHaveBeenCalledWith(expect.any(String), "35", "full", "viewer-owner-1"));
+			await waitFor(() => expect(saveSharedSegmentation).toHaveBeenCalledWith(expect.any(String), "35", "full", "viewer-owner-1", "r1")); // the revision it was opened at
 			expect(await screen.findByText("Saved for everyone")).toBeVisible();
 			expect(saveSegmentation).not.toHaveBeenCalled();
 		});
@@ -507,11 +525,85 @@ describe("viewer smoke test", () => {
 			expect(screen.queryByText("Saved for everyone")).not.toBeInTheDocument();
 		});
 
-		it("leaves the normal Save untouched", async () => {
+		// The viewer mock never reports edits by itself; keep the page's listeners so a test can make one.
+		const captureEditListener = () => {
+			const listeners = new Set<(detail?: unknown) => void>();
+			vi.mocked(subscribeToSegmentationEdits).mockImplementation((callback: (detail?: unknown) => void) => {
+				listeners.add(callback);
+				return () => { listeners.delete(callback); };
+			});
+			return () => act(() => { listeners.forEach((listener) => listener()); });
+		};
+		const switchStructure = () => {
+			fireEvent.click(screen.getByRole("button", { name: /select structure|spleen/i }));
+			fireEvent.click(screen.getByRole("option", { name: /^liver$/i }));
+		};
+
+		it("keeps an annotator's edit unsaved until they save it for everyone, and never saves a personal copy", async () => {
+			const edit = captureEditListener();
 			await mountCase({ supported: true, exists: false, revision: "none", can_override: true });
 			await screen.findByRole("button", { name: "Save to JHU server" });
-			fireEvent.click(within(screen.getByRole("toolbar")).getByRole("button", { name: "Save", exact: true }));
-			await waitFor(() => expect(saveSegmentation).toHaveBeenCalledWith(expect.any(String), "35", "full", "viewer-owner-1"));
+			edit();
+			expect(await screen.findByText("Unsaved")).toBeVisible();
+			switchStructure(); // switching structure auto-saves a normal case; here it must change nothing
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			fireEvent.click(screen.getByRole("button", { name: /select structure|liver/i }));
+			fireEvent.click(screen.getByRole("option", { name: /^spleen$/i }));
+			fireEvent.click(screen.getByRole("button", { name: "Brush", exact: true }));
+			expect(await screen.findByText("Unsaved")).toBeVisible(); // still unsaved: nothing was saved behind their back
+			expect(saveSegmentation).not.toHaveBeenCalled();
+			expect(saveSharedSegmentation).not.toHaveBeenCalled();
+			fireEvent.click(screen.getByRole("button", { name: "Save to JHU server" }));
+			expect(await screen.findByText("Saved for everyone")).toBeVisible();
+			await waitFor(() => expect(screen.queryByText("Unsaved")).not.toBeInTheDocument());
+			expect(saveSegmentation).not.toHaveBeenCalled();
+			expect(downloadBytes).not.toHaveBeenCalled(); // saving for everyone does not also download a file
+		});
+
+		it("keeps the annotator's edit unsaved when the shared save fails", async () => {
+			vi.mocked(saveSharedSegmentation).mockRejectedValueOnce(new Error("Offline"));
+			const edit = captureEditListener();
+			await mountCase({ supported: true, exists: false, revision: "none", can_override: true });
+			await screen.findByRole("button", { name: "Save to JHU server" });
+			edit();
+			fireEvent.click(await screen.findByRole("button", { name: "Save to JHU server" }));
+			expect(await screen.findByText("Offline")).toBeVisible();
+			expect(screen.getByText("Unsaved")).toBeVisible();
+		});
+
+		it("lets a plain reader save to their computer, and never to the server", async () => {
+			const edit = captureEditListener();
+			const fetchMock = await mountCase({ supported: true, exists: false, revision: "none", can_override: false });
+			await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/shared-annotation/35"))).toBe(true));
+			edit();
+			expect(await screen.findByText("Unsaved")).toBeVisible();
+			fireEvent.click(screen.getByRole("button", { name: "Save to computer", exact: true }));
+			expect(await screen.findByText("Saved")).toBeVisible();
+			expect(downloadBytes).toHaveBeenCalledTimes(1);
+			const [bytes, fileName] = vi.mocked(downloadBytes).mock.calls[0];
+			expect(fileName).toBe("segmentation_35.nii.gz");
+			expect(bytes).toBeInstanceOf(Uint8Array);
+			expect(Array.from((bytes as Uint8Array).slice(0, 2))).toEqual([0x1f, 0x8b]); // a gzip file
+			expect(saveSegmentation).not.toHaveBeenCalled();
+			expect(saveSharedSegmentation).not.toHaveBeenCalled();
+		});
+
+		it("shows a failed download and keeps the edit unsaved", async () => {
+			vi.mocked(getSegmentationExport).mockImplementation(() => null);
+			const edit = captureEditListener();
+			await mountCase({ supported: true, exists: false, revision: "none", can_override: false });
+			edit();
+			fireEvent.click(await screen.findByRole("button", { name: "Save to computer", exact: true }));
+			expect(await screen.findByText("Save failed")).toBeVisible();
+			expect(downloadBytes).not.toHaveBeenCalled();
+		});
+
+		it("an annotator's Save to computer downloads a file and does not replace what everyone sees", async () => {
+			const edit = captureEditListener();
+			await mountCase({ supported: true, exists: false, revision: "none", can_override: true });
+			edit();
+			fireEvent.click(await screen.findByRole("button", { name: "Save to computer", exact: true }));
+			await waitFor(() => expect(downloadBytes).toHaveBeenCalledTimes(1));
 			expect(saveSharedSegmentation).not.toHaveBeenCalled();
 		});
 	});

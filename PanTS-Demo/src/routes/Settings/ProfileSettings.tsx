@@ -40,7 +40,7 @@ const AnnotatorAccessRow: React.FC = () => {
 	}
 	return (
 		<div className="set-row" data-testid="annotator-access">
-			<label className="set-row-label" htmlFor="set-annotator-code">Invitation code<span className="set-row-note">Have a code from the team? It lets you save corrections to dataset scans for everyone.</span></label>
+			<label className="set-row-label" htmlFor="set-annotator-code">Invitation code<span className="set-row-note">Have a one-time code from the team? It lets you save corrections to dataset scans for everyone.</span></label>
 			<div className="set-picture-actions">
 				<input id="set-annotator-code" className="set-input" value={code} maxLength={256} autoComplete="off" disabled={busy}
 					onChange={(event) => setCode(event.target.value)}

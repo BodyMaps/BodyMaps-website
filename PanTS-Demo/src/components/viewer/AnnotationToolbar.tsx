@@ -136,11 +136,13 @@ interface AnnotationToolbarProps {
 	onUndo: () => void;
 	onRedo: () => void;
 	onSave: () => void;
+	/** Names the Save button; a dataset scan's Save writes a file to the person's computer. */
+	saveLabel?: string;
 	saveStatus?: "idle" | "dirty" | "saving" | "saved" | "error";
 	saveError?: string;
 	onRetrySave?: () => void;
-	/** Only passed to approved annotators on a dataset scan: saves the edit as the version every viewer
-	 *  sees (the normal Save keeps it on the person's own account). */
+	/** Only passed to approved annotators on a dataset scan: saves the edit as the one version every viewer
+	 *  sees (`onSave` then only writes a file to the person's own computer). */
 	onSaveShared?: () => void;
 	sharedSaveStatus?: "idle" | "saving" | "saved" | "error";
 	sharedSaveError?: string;
@@ -457,7 +459,7 @@ export default function AnnotationToolbar({
 	renderFlyout, scissorsPointCount, onScissorsCancel,
 	targetKey, onAiCancel, aiRunBusy, onAiCancelRun,
 	onGuidedPickingChange,
-	onUndo, onRedo, onSave, saveStatus, saveError, onRetrySave, onSaveShared, sharedSaveStatus, sharedSaveError, canUndo, canRedo, showHistory = true, isSaving,
+	onUndo, onRedo, onSave, saveLabel, saveStatus, saveError, onRetrySave, onSaveShared, sharedSaveStatus, sharedSaveError, canUndo, canRedo, showHistory = true, isSaving,
 	hasTargetSegmentation, structures, colors, activeStructureId, onSelectStructure,
 	onCreateStructure, onRenameStructure, onColorChange, onDeleteStructure,
 	showOnlyTargetMask, onShowOnlyTargetMaskChange, managedStructureIds,
@@ -1002,10 +1004,11 @@ export default function AnnotationToolbar({
 							data-onboarding-target="save"
 							onClick={() => onSave()}
 							disabled={isSaving || saveStatus === "saving" || disabled}
-							aria-label={CONTROL_INFO.save.label}
+							aria-label={saveLabel ?? CONTROL_INFO.save.label}
+							title={saveLabel ? "Download the segmentation as a file" : undefined}
 						>
 							{isSaving || saveStatus === "saving" ? <IconLoader size={15} className="spin" /> : <IconDeviceFloppy size={15} />}
-							Save
+							{saveLabel ?? "Save"}
 						</button>
 						{saveStatus === "dirty" && <span className="atb-save-status" role="status">Unsaved</span>}
 						{saveStatus === "saved" && <span className="atb-save-status" role="status">Saved</span>}

@@ -6,6 +6,9 @@ Routes (registered under <BASE_PATH>/api), all admin-only:
   DELETE /admin/people/<user_id>/roles/<role>     -> revoke
   DELETE /admin/people/<user_id>                  -> schedule for deletion
   POST   /admin/people/<user_id>/restore          -> undo a scheduled deletion
+  POST   /admin/annotator-invites {hours}         -> a temporary single-use code that makes its redeemer an annotator
+  GET    /admin/annotator-invites                 -> recent codes: open, redeemed (by whom) or expired
+  DELETE /admin/annotator-invites/<id>            -> withdraw a code nobody has used yet
   GET    /admin/models/health                     -> per-model run health (Diagnostics page)
 
 Deliberately NOT behind ANALYTICS_DASHBOARD. That flag exists because the usage
@@ -22,7 +25,7 @@ to — but it is why the only way in is require_role("admin").
 from flask import Blueprint, jsonify, request
 
 from api.auth import current_user, require_role
-from services import auth_store, model_health, role_store
+from services import annotator_invites, auth_store, model_health, role_store
 
 admin_blueprint = Blueprint("admin", __name__)
 
@@ -73,6 +76,33 @@ def revoke_role(user_id: str, role: str):
     except ValueError:
         return jsonify({"error": "Unknown role"}), 400
     return jsonify({"user_id": user_id, "roles": roles}), 200
+
+
+@admin_blueprint.route("/admin/annotator-invites", methods=["POST"])
+@require_role(role_store.ROLE_ADMIN)
+def create_annotator_invite():
+    raw_body = request.get_json(silent=True)
+    body = raw_body if isinstance(raw_body, dict) else {}
+    try:
+        invite = annotator_invites.create(current_user()["id"], body.get("hours", 24))
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    # The only time the code is ever shown: the database keeps just its digest.
+    return jsonify({"id": invite["id"], "code": invite["code"], "expires_at": invite["expires_at"].isoformat() + "Z"}), 201
+
+
+@admin_blueprint.route("/admin/annotator-invites", methods=["GET"])
+@require_role(role_store.ROLE_ADMIN)
+def list_annotator_invites():
+    return jsonify({"invites": annotator_invites.recent()}), 200
+
+
+@admin_blueprint.route("/admin/annotator-invites/<invite_id>", methods=["DELETE"])
+@require_role(role_store.ROLE_ADMIN)
+def revoke_annotator_invite(invite_id: str):
+    if not annotator_invites.revoke(invite_id):
+        return jsonify({"error": "No unused code with that id"}), 404
+    return jsonify({"revoked": True}), 200
 
 
 @admin_blueprint.route("/admin/people/<user_id>", methods=["DELETE"])

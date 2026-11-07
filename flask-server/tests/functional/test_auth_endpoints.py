@@ -868,12 +868,11 @@ def test_normal_session_takes_precedence_over_local_account(client, monkeypatch)
 
 
 # ---- annotator invitation codes ------------------------------------------------------------------
+# An admin creates a temporary single-use code (see test_admin_endpoints); these tests cover redeeming it.
 
-def _invite_env(monkeypatch, *codes):
-    monkeypatch.setenv(
-        "BODYMAPS_ANNOTATOR_INVITE_SHA256",
-        ",".join(hashlib.sha256(code.encode("utf-8")).hexdigest() for code in codes),
-    )
+def _new_code(hours=24):
+    from services import annotator_invites
+    return annotator_invites.create(None, hours)["code"]
 
 
 def _sign_up(client, email="annotator@example.com"):
@@ -882,76 +881,108 @@ def _sign_up(client, email="annotator@example.com"):
     return r.get_json()["user"]
 
 
-def test_annotator_invite_requires_authentication(client, monkeypatch):
-    _invite_env(monkeypatch, "open-sesame-2026")
-    r = client.post("/api/auth/redeem-annotator-invite", json={"code": "open-sesame-2026"})
+def _roles(client):
+    return client.get("/api/auth/me").get_json()["user"]["roles"]
+
+
+def test_annotator_invite_requires_authentication(client):
+    r = client.post("/api/auth/redeem-annotator-invite", json={"code": _new_code()})
     assert r.status_code == 401
 
 
-def test_annotator_invite_grants_only_the_annotator_role(client, monkeypatch):
-    _invite_env(monkeypatch, "open-sesame-2026")
+def test_annotator_invite_grants_only_the_annotator_role(client):
+    code = _new_code()
     _sign_up(client)
-    assert client.get("/api/auth/me").get_json()["user"]["roles"] == []
-    r = client.post("/api/auth/redeem-annotator-invite", json={"code": "  open-sesame-2026  "})
+    assert _roles(client) == []
+    r = client.post("/api/auth/redeem-annotator-invite", json={"code": f"  {code.lower().replace('-', ' ')}  "})
     assert r.status_code == 200
     assert r.get_json()["user"]["roles"] == ["annotator"]
-    assert client.get("/api/auth/me").get_json()["user"]["roles"] == ["annotator"]
+    assert _roles(client) == ["annotator"]
 
 
-def test_annotator_invite_wrong_code_grants_nothing(client, monkeypatch):
-    _invite_env(monkeypatch, "open-sesame-2026")
+def test_a_redeemed_annotator_cannot_create_codes_or_manage_accounts(client):
+    code = _new_code()
     _sign_up(client)
-    r = client.post("/api/auth/redeem-annotator-invite", json={"code": "open-sesame-2025"})
-    assert r.status_code == 403
-    assert client.get("/api/auth/me").get_json()["user"]["roles"] == []
-
-
-@pytest.mark.parametrize("body", [{}, {"code": ""}, {"code": "   "}, {"code": 12345}, {"code": "x" * 300}, None])
-def test_annotator_invite_rejects_malformed_input(client, monkeypatch, body):
-    _invite_env(monkeypatch, "open-sesame-2026")
-    _sign_up(client)
-    r = client.post("/api/auth/redeem-annotator-invite", json=body)
-    assert r.status_code == 400
-    assert client.get("/api/auth/me").get_json()["user"]["roles"] == []
-
-
-def test_annotator_invite_unconfigured_deployment_refuses_instead_of_matching_empty(client, monkeypatch):
-    monkeypatch.delenv("BODYMAPS_ANNOTATOR_INVITE_SHA256", raising=False)
-    _sign_up(client)
-    assert client.post("/api/auth/redeem-annotator-invite", json={"code": ""}).status_code == 503
-    assert client.post("/api/auth/redeem-annotator-invite", json={"code": "anything"}).status_code == 503
-    # A malformed digest is dropped, never compared.
-    monkeypatch.setenv("BODYMAPS_ANNOTATOR_INVITE_SHA256", "not-a-digest, ,12345")
-    assert client.post("/api/auth/redeem-annotator-invite", json={"code": "not-a-digest"}).status_code == 503
-    assert client.get("/api/auth/me").get_json()["user"]["roles"] == []
-
-
-def test_annotator_invite_accepts_any_configured_code_and_is_idempotent(client, monkeypatch):
-    _invite_env(monkeypatch, "team-one-code", "team-two-code")
-    _sign_up(client)
-    assert client.post("/api/auth/redeem-annotator-invite", json={"code": "team-two-code"}).status_code == 200
-    again = client.post("/api/auth/redeem-annotator-invite", json={"code": "team-one-code"})
-    assert again.status_code == 200
-    assert again.get_json()["user"]["roles"] == ["annotator"]
-
-
-def test_annotator_invite_is_not_the_admin_coupon_or_admin_role(client, monkeypatch):
-    _invite_env(monkeypatch, "open-sesame-2026")
-    monkeypatch.setenv("BODYMAPS_ADMIN_COUPON_SHA256", hashlib.sha256(b"admin-coupon").hexdigest())
-    _sign_up(client)
-    assert client.post("/api/auth/redeem-annotator-invite", json={"code": "admin-coupon"}).status_code == 403
-    assert client.post("/api/auth/redeem-admin-coupon", json={"coupon": "open-sesame-2026"}).status_code == 403
-    client.post("/api/auth/redeem-annotator-invite", json={"code": "open-sesame-2026"})
-    user = client.get("/api/auth/me").get_json()["user"]
-    assert "admin" not in user["roles"]
+    client.post("/api/auth/redeem-annotator-invite", json={"code": code})
+    assert client.post("/api/admin/annotator-invites", json={"hours": 1}).status_code in (401, 403, 404)
     assert client.get("/api/admin/people").status_code in (401, 403, 404)
 
 
-def test_annotator_invite_attempts_are_rate_limited(client, monkeypatch):
-    _invite_env(monkeypatch, "open-sesame-2026")
+def test_a_code_works_once(client):
+    code = _new_code()
+    _sign_up(client, "first@example.com")
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": code}).status_code == 200
+    client.post("/api/auth/logout")
+    _sign_up(client, "second@example.com")
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": code}).status_code == 403
+    assert _roles(client) == []
+
+
+def test_an_expired_code_grants_nothing(client):
+    from datetime import timedelta
+    from models.annotator_invite import AnnotatorInvite
+    from models.engine import session_scope
+    from models.job import utcnow
+    code = _new_code()
+    with session_scope() as s:
+        for invite in s.query(AnnotatorInvite).all():
+            invite.expires_at = utcnow() - timedelta(minutes=1)
+    _sign_up(client)
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": code}).status_code == 403
+    assert _roles(client) == []
+
+
+def test_annotator_invite_wrong_code_grants_nothing(client):
+    _new_code()
+    _sign_up(client)
+    r = client.post("/api/auth/redeem-annotator-invite", json={"code": "AAAA-BBBB-CCCC"})
+    assert r.status_code == 403
+    assert _roles(client) == []
+
+
+@pytest.mark.parametrize("body", [{}, {"code": ""}, {"code": "   "}, {"code": 12345}, {"code": "x" * 300}, None])
+def test_annotator_invite_rejects_malformed_input(client, body):
+    _new_code()
+    _sign_up(client)
+    r = client.post("/api/auth/redeem-annotator-invite", json=body)
+    assert r.status_code == 400
+    assert _roles(client) == []
+
+
+def test_there_is_no_code_when_none_was_ever_created(client):
+    _sign_up(client)
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": "anything"}).status_code == 403
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": "ABCD-EFGH-JKMN"}).status_code == 403
+    assert _roles(client) == []
+
+
+def test_someone_who_may_already_annotate_does_not_use_up_a_code(client):
+    code = _new_code()
+    _sign_up(client, "already@example.com")
+    client.post("/api/auth/redeem-annotator-invite", json={"code": _new_code()})
+    assert _roles(client) == ["annotator"]
+    again = client.post("/api/auth/redeem-annotator-invite", json={"code": code})
+    assert again.status_code == 200
+    client.post("/api/auth/logout")
+    _sign_up(client, "someone-else@example.com")
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": code}).status_code == 200  # code was kept
+
+
+def test_annotator_invite_is_not_the_admin_coupon_or_admin_role(client, monkeypatch):
+    code = _new_code()
+    monkeypatch.setenv("BODYMAPS_ADMIN_COUPON_SHA256", hashlib.sha256(b"admin-coupon").hexdigest())
+    _sign_up(client)
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": "admin-coupon"}).status_code == 403
+    assert client.post("/api/auth/redeem-admin-coupon", json={"coupon": code}).status_code == 403
+    client.post("/api/auth/redeem-annotator-invite", json={"code": code})
+    assert "admin" not in _roles(client)
+
+
+def test_annotator_invite_attempts_are_rate_limited(client):
+    code = _new_code()
     _sign_up(client)
     statuses = [client.post("/api/auth/redeem-annotator-invite", json={"code": f"guess-{n}"}).status_code for n in range(8)]
     assert statuses[:5] == [403] * 5
     assert statuses[5:] == [429] * 3
     # Even the right code is refused while the account is locked out.
-    assert client.post("/api/auth/redeem-annotator-invite", json={"code": "open-sesame-2026"}).status_code == 429
+    assert client.post("/api/auth/redeem-annotator-invite", json={"code": code}).status_code == 429
