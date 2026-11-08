@@ -49,10 +49,10 @@ describe("team page", () => {
       ["Lucy Wu", "Core Contributor"],
     ];
     const added = [
+      "Yusuf Abdulkadir",
       "Aditya Sanjeev",
       "Alexander Poon",
       "Ahmad Durre Rehman",
-      "Yusuf Abdulkadir",
       "Ishita Ahelleya",
       "Harleen Sachdev",
     ];
@@ -70,6 +70,8 @@ describe("team page", () => {
         expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/alexander-poon.webp");
       } else if (name === "Ahmad Durre Rehman") {
         expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/ahmad-durre-rehman.jpg?v=20261013");
+      } else if (name === "Yusuf Abdulkadir") {
+        expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/yusuf-abdulkadir.webp");
       } else {
         expect(screen.queryByAltText(name)).not.toBeInTheDocument();
       }
