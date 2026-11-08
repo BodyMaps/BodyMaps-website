@@ -296,6 +296,13 @@ describe("dataset page requests", () => {
 		expect(where()).toBe("/dashboard");
 	});
 
+	it("lists the best scans first, in one plain order, from the Statistics link and every list view", async () => {
+		renderPage("/dashboard?browse=1");
+		await screen.findByText(/Page 1 of 4/);
+		expect(searchUrls().length).toBeGreaterThan(0);
+		for (const url of searchUrls()) expect(url.searchParams.get("sort_by")).toBe("best");
+	});
+
 	it("pages the applied filters, not pills picked since", async () => {
 		const user = userEvent.setup();
 		renderPage("/dashboard?dataset=all&sex%5B%5D=M");

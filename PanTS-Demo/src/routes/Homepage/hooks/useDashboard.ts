@@ -261,7 +261,7 @@ export function useDashboard() {
     setLoading(true);
     setPreviewMetadata({});
     try {
-      const params = buildSearchParams(f, { sortBy: "quality", perPage: PER_PAGE });
+      const params = buildSearchParams(f, { sortBy: "best", perPage: PER_PAGE });
       params.set("page", String(p));
       const res = await fetch(`${API_BASE}/api/search?${params.toString()}`);
       if (!res.ok) throw new Error(`Search failed (${res.status})`);

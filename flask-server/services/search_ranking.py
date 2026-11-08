@@ -221,6 +221,32 @@ def rank_quality_results(
     return ranked.iloc[selected].drop(columns=["__search_quality_score", "__search_position"])
 
 
+DATASET_ANNOTATION_ORDER = {"PanTS": 0, "AbdomenAtlas": 1}   # anything else (CancerVerse) follows
+
+
+def rank_best_first(df: pd.DataFrame) -> pd.DataFrame:
+    """One plain list, best scans first: no rotation between cohorts.
+
+    Order: thumbnail tier; then the datasets whose cases carry full organ masks (PanTS, then
+    AbdomenAtlas) ahead of CT-only CancerVerse; then, inside each, the same scan-detail score as
+    ``rank_quality_results`` (voxel count, voxel spacing, compressed size, shape, known age and sex),
+    best first, with the case ID breaking ties. Without the dataset step the detail score alone puts
+    CancerVerse (larger scans on average) in 478 of the first 480 places. Like that score, this is a
+    metadata proxy for usability and detail, not a clinical quality grade.
+    Order is computed before pagination, so page 2 continues page 1.
+    """
+    if df.empty:
+        return df
+    ranked = rank_quality_results(df, balance_sex=False, balance_age=False,
+                                  balance_tumor=False, balance_dataset=False)
+    dataset = ranked["__dataset"] if "__dataset" in ranked.columns else pd.Series("PanTS", index=ranked.index)
+    ranked = ranked.assign(__annotation_rank=dataset.map(DATASET_ANNOTATION_ORDER).fillna(2).astype(int))
+    keys = [c for c in ("__thumbnail_quality_rank", "__annotation_rank") if c in ranked.columns]
+    # rank_quality_results already ordered by tier and score; a stable sort on these keys keeps that
+    # order inside every (tier, dataset) group.
+    return ranked.sort_values(keys, kind="mergesort", na_position="last").drop(columns=["__annotation_rank"])
+
+
 SAMPLE_MAX_CT_BYTES = 16 * 1024 * 1024
 
 
