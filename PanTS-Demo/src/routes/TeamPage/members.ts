@@ -49,6 +49,11 @@ export const MEMBERS: Member[] = [
     role: "Core Contributor",
     photo: "/headshots/lucy-wu.webp",
   },
+  {
+    name: "Yusuf Abdulkadir",
+    role: "Core Contributor",
+    photo: "/headshots/yusuf-abdulkadir.webp",
+  },
   { name: "Aditya Sanjeev", role: "Core Contributor" },
   {
     name: "Alexander Poon",
@@ -63,7 +68,6 @@ export const MEMBERS: Member[] = [
     portrait: true,
     links: { linkedin: "https://linkedin.com/in/ahmad-durre-rehman-121577382" },
   },
-  { name: "Yusuf Abdulkadir", role: "Core Contributor" },
   { name: "Ishita Ahelleya", role: "Core Contributor" },
   { name: "Harleen Sachdev", role: "Core Contributor" },
 ];
