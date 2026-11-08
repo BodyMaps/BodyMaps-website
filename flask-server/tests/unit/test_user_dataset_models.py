@@ -8,6 +8,7 @@ import hashlib
 import http.server
 import importlib
 import json
+import re
 import os
 import sys
 import threading
@@ -112,6 +113,9 @@ class Recorder:
                       local_hostname=lambda: "bdmap1", now=self.now, sleep=self.sleep)
 
 
+THREE = ("ePAI", "Atlas-Net", "LesionSegmenter")   # the loop tests use three models; DEFAULT_MODELS has its own tests
+
+
 @pytest.fixture()
 def world(tmp_path):
     root = tmp_path / "UserData"
@@ -119,7 +123,7 @@ def world(tmp_path):
     sessions.mkdir()
     return types.SimpleNamespace(root=str(root), sessions=str(sessions), rec=Recorder(str(root)),
                                  cfg=M.Config(idle_checks=2, check_interval=0, poll_seconds=0.02, max_run_seconds=30,
-                                              loop_sleep=0, idle_sleep=0))
+                                              loop_sleep=0, idle_sleep=0, models=THREE))
 
 
 def run(world, **kw):
@@ -135,17 +139,17 @@ def test_pending_tasks_skip_the_users_own_model_finished_versions_and_backoff(wo
     make_case(world.root, "USER_00000001", "ePAI")
     make_case(world.root, "USER_00000002", "LesionSegmenter")
     state = M.load_state(world.root)
-    tasks = M.pending_tasks(world.root, M.DEFAULT_MODELS, state, 1000.0)
+    tasks = M.pending_tasks(world.root, THREE, state, 1000.0)
     assert [(t.case_id, t.model) for t in tasks] == [
         ("USER_00000001", "Atlas-Net"), ("USER_00000001", "LesionSegmenter"),
         ("USER_00000002", "ePAI"), ("USER_00000002", "Atlas-Net")]
     assert all(t.model != t.origin for t in tasks)
     M.note_result(state, tasks[0], "failed", 1000.0, "boom")
-    assert tasks[0].key not in {t.key for t in M.pending_tasks(world.root, M.DEFAULT_MODELS, state, 1001.0)}
-    assert tasks[0].key in {t.key for t in M.pending_tasks(world.root, M.DEFAULT_MODELS, state, 1000.0 + 3601)}
+    assert tasks[0].key not in {t.key for t in M.pending_tasks(world.root, THREE, state, 1001.0)}
+    assert tasks[0].key in {t.key for t in M.pending_tasks(world.root, THREE, state, 1000.0 + 3601)}
     # a model the user ran that is not in the configured set still gets every configured model
     make_case(world.root, "USER_00000003", "SuPreM")
-    assert len([t for t in M.pending_tasks(world.root, M.DEFAULT_MODELS, M.load_state(world.root), 0) if t.case_id == "USER_00000003"]) == 3
+    assert len([t for t in M.pending_tasks(world.root, THREE, M.load_state(world.root), 0) if t.case_id == "USER_00000003"]) == 3
 
 
 def test_failures_back_off_then_give_up_and_preemption_is_not_a_failure():
@@ -371,7 +375,7 @@ def test_the_whole_backlog_is_worked_through_once_and_never_repeated(world):
     assert counts["ok"] == 6 and counts["failed"] == 0 and len(world.rec.calls) == 6
     for i, model in enumerate(["ePAI", "LesionSegmenter", "Atlas-Net"], 1):
         meta = json.loads(Path(world.root, "mask_only", f"USER_0000000{i}", "metadata.json").read_text())
-        assert sorted(v["model"] for v in meta["model_versions"]) == sorted(M.DEFAULT_MODELS)
+        assert sorted(v["model"] for v in meta["model_versions"]) == sorted(THREE)
         assert meta["model_versions"][0] == {"model": model, "role": "user_run", "mask": ".", "pipeline": {"segmentation_input": "original"}}
     assert os.listdir(world.sessions) == []
     again = run(world, once=True)
@@ -519,6 +523,34 @@ def test_the_safety_relies_on_these_behaviours_of_the_runner_and_the_worker_modu
     # a worker run happens only for a session folder under .../tmp/ with an id-shaped name: ours qualifies
     session = "/home/visitor/PanTS-Viewer/tmp/so-USER_00000017-LesionSegmenter-3fa9c2d1"
     assert gpu_workers._is_session_path(session)
-    assert M._SAFE_MODEL.match("Atlas-Net") and all(gpu_workers._SESSION_ID.match(f"so-USER_00000017-{m}-3fa9c2d1") for m in M.DEFAULT_MODELS)
+    assert all(M._SAFE_MODEL.match(m) for m in M.DEFAULT_MODELS) and all(gpu_workers._SESSION_ID.match(f"so-USER_00000017-{m}-3fa9c2d1") for m in M.DEFAULT_MODELS)
     # every model run here must be one the runner knows, and the user dataset must record the same names
-    assert all(f"model == '{m}'" in seg for m in M.DEFAULT_MODELS)
+    # (the R-Super releases are matched as a group: `model in RSUPER_VARIANTS`)
+    assert all(f"model == '{m}'" in seg or m in auto_segmentor.RSUPER_VARIANTS for m in M.DEFAULT_MODELS)
+
+
+# ------------------------------------------------------------------ the default model list
+def test_the_default_models_are_every_model_the_site_offers():
+    """A model added to the picker must also be added here, or scans kept afterwards would never get its version."""
+    page = (Path(__file__).resolve().parents[3] / "PanTS-Demo" / "src" / "routes" / "UploadPage.tsx").read_text(encoding="utf-8")
+    block = page[page.index("const MODEL_OPTIONS"): page.index("const MODEL_OPTIONS") + 12000]
+    offered = [m for m in re.findall(r'^    id: "([^"]+)"', block, re.M) if m != "None"]
+    assert offered and set(offered) == set(M.DEFAULT_MODELS), (offered, M.DEFAULT_MODELS)
+    assert len(set(M.DEFAULT_MODELS)) == len(M.DEFAULT_MODELS)
+    assert M.Config.from_env({}).models == M.DEFAULT_MODELS
+
+
+def test_every_default_model_has_a_checkpoint_rule_and_settings():
+    from services import model_provenance as mp
+    for model in M.DEFAULT_MODELS:
+        assert model in mp.MODEL_CHECKPOINT or model in mp.MODEL_CHECKPOINT_FILE, model
+        assert mp.inference_settings(model, env={}) is not None, model
+
+
+def test_a_kept_scan_is_owed_a_version_from_every_other_model(world):
+    make_case(world.root, "USER_00000001", "SuPreM")
+    make_case(world.root, "USER_00000002", "R-Super-Merlin")
+    tasks = M.pending_tasks(world.root, M.DEFAULT_MODELS, M.load_state(world.root), 0)
+    by_case = {c: sorted(t.model for t in tasks if t.case_id == c) for c in ("USER_00000001", "USER_00000002")}
+    assert by_case["USER_00000001"] == sorted(set(M.DEFAULT_MODELS) - {"SuPreM"})
+    assert by_case["USER_00000002"] == sorted(set(M.DEFAULT_MODELS) - {"R-Super-Merlin"})

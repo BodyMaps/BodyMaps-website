@@ -3,7 +3,7 @@
 A scan is kept in UserData with the mask of the model the user ran. This module (driven by
 scripts/user_dataset_second_opinions.py, a separate process from the website) runs the same stored CT through
 the remaining models and saves each result beside the original, so one scan carries an ePAI version, an
-Atlas-Net version and a LesionSegmenter version:
+Atlas-Net version, a LesionSegmenter version and so on for every model the site offers:
 
     mask_only/USER_00000017/
         combined_labels.nii.gz, segmentations/, metadata.json     the model the user ran (unchanged)
@@ -45,7 +45,8 @@ from services import user_dataset as ud
 from services.atomic_write import atomic_destination
 
 SCHEMA = 1
-DEFAULT_MODELS = ("ePAI", "Atlas-Net", "LesionSegmenter")
+# Every model the site offers, so each kept scan ends up with one version from each.
+DEFAULT_MODELS = ("ePAI", "Atlas-Net", "LesionSegmenter", "SuPreM", "R-Super-Pancreas-Kidney", "R-Super-Merlin")
 BY_MODEL = "by_model"
 STATE_FILE = "second_opinions_state.json"
 AUDIT_FILE = "second_opinions.jsonl"

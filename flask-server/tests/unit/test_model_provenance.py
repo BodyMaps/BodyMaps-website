@@ -76,7 +76,7 @@ def test_settings_follow_the_environment():
                  "checkpoint_name": "checkpoint_best.pth", "tensorrt_plan": "/p/plan.trt"}
     s = mp.inference_settings("LesionSegmenter", env={"LESIONSEG_LESION_THRESHOLD": "0.2", "LESIONSEG_LESION_CHANNEL": "41"})
     assert s["lesion_threshold"] == 0.2 and s["lesion_channel"] == 41
-    assert mp.inference_settings("SuPreM", env={}) is None
+    assert mp.inference_settings("OpenVAE", env={}) is None             # no rule for a model that is not a segmenter here
 
 
 # ----------------------------- checkpoint identity -----------------------------
@@ -133,7 +133,7 @@ def test_checkpoint_that_cannot_be_read_says_why(tmp_path):
     assert fp["hashed"] is False and "checkpoint_final.pth not found" in fp["reason"]
     fp = mp.checkpoint_fingerprint("ePAI", env={"EPAI_CKPT_PATH": str(empty), "EPAI_CHECKPOINT_NAME": "best.pth"})
     assert "best.pth not found" in fp["reason"]                              # honours the configured file name
-    assert mp.checkpoint_fingerprint("SuPreM", env={}) == {"hashed": False, "reason": "no checkpoint rule for this model"}
+    assert mp.checkpoint_fingerprint("OpenVAE", env={}) == {"hashed": False, "reason": "no checkpoint rule for this model"}
 
 
 def test_epai_tensorrt_engine_is_fingerprinted_when_configured(tmp_path):
@@ -220,3 +220,65 @@ def test_describe_never_raises(monkeypatch):
     out = mp.describe("LesionSegmenter", real_names(), (22,))
     assert out["provenance"] == {"error": "RuntimeError: disk on fire"}
     assert out["label_support"]["known"] is True
+
+
+# ----------------------------- models whose weights are a single file -----------------------------
+FILE_MODELS = ["SuPreM", "R-Super-Pancreas-Kidney", "R-Super-Merlin"]
+
+
+def test_single_file_rules_match_the_runners():
+    """Provenance repeats the runners' environment variables and defaults; a stale copy would hash the wrong file."""
+    from services.auto_segmentor import RSUPER_VARIANTS
+    for model in ("R-Super-Pancreas-Kidney", "R-Super-Merlin"):
+        v = RSUPER_VARIANTS[model]
+        ckpt_var, ckpt_default, list_var, list_default = mp.MODEL_CHECKPOINT_FILE[model]
+        assert (ckpt_var, ckpt_default) == (v["checkpoint_env"], v["checkpoint"])
+        assert (list_var, list_default) == (v["class_list_env"], v["class_list"])
+        assert mp.inference_settings(model, env={})["organ_mask_on_lesion"] is v["organ_mask_on_lesion"]
+    var, default, _, _ = mp.MODEL_CHECKPOINT_FILE["SuPreM"]
+    body = _function_source(SEGMENTOR, "_run_suprem_inference")
+    assert re.search(rf'"{var}",\s*"{re.escape(default)}"', body), "_run_suprem_inference no longer reads this checkpoint"
+    assert '"--backbone", "unet"' in body and '"--suprem"' in body       # the fixed settings recorded for SuPreM
+
+
+@pytest.mark.parametrize("model", FILE_MODELS)
+def test_a_single_file_checkpoint_is_hashed_with_its_class_list(model, tmp_path):
+    ckpt_var, _, list_var, _ = mp.MODEL_CHECKPOINT_FILE[model]
+    weights = tmp_path / "fold_0_latest.pth"; weights.write_bytes(b"weights-" + model.encode())
+    env = {ckpt_var: str(weights)}
+    if list_var:
+        classes = tmp_path / "labels.yaml"; classes.write_bytes(b"liver: 1\n")
+        env[list_var] = str(classes)
+    fp = mp.checkpoint_fingerprint(model, env=env)
+    assert fp["hashed"] is True and fp["path"] == str(weights)
+    assert fp["files"]["fold_0_latest.pth"]["sha256"] == hashlib.sha256(b"weights-" + model.encode()).hexdigest()
+    assert fp["files"]["fold_0_latest.pth"]["size_bytes"] == len(b"weights-" + model.encode())
+    if list_var:
+        assert fp["files"]["labels.yaml"]["sha256"] == hashlib.sha256(b"liver: 1\n").hexdigest()
+
+
+@pytest.mark.parametrize("model", FILE_MODELS)
+def test_a_missing_single_file_checkpoint_says_why(model, tmp_path):
+    ckpt_var = mp.MODEL_CHECKPOINT_FILE[model][0]
+    fp = mp.checkpoint_fingerprint(model, env={ckpt_var: str(tmp_path / "absent.pth")})
+    assert fp["hashed"] is False and fp["reason"] == "checkpoint file not found on this host"
+
+
+def test_a_missing_class_list_is_noted_but_the_weights_are_still_hashed(tmp_path):
+    weights = tmp_path / "w.pth"; weights.write_bytes(b"w")
+    fp = mp.checkpoint_fingerprint("R-Super-Merlin", env={"RSUPER_MERLIN_CHECKPOINT_PATH": str(weights),
+                                                           "RSUPER_MERLIN_CLASS_LIST": str(tmp_path / "gone.yaml")})
+    assert fp["hashed"] is True and list(fp["files"]) == ["w.pth"] and fp["class_list_missing"].endswith("gone.yaml")
+
+
+def test_settings_for_the_single_file_models_are_fixed_by_the_runners():
+    assert mp.inference_settings("SuPreM", env={}) == {"backbone": "unet", "suprem": True,
+                                                       "checkpoint_name": "supervised_suprem_unet_2100.pth"}
+    assert mp.inference_settings("R-Super-Pancreas-Kidney", env={})["organ_mask_on_lesion"] is True
+    assert mp.inference_settings("R-Super-Merlin", env={})["organ_mask_on_lesion"] is False
+
+
+def test_label_support_for_the_r_super_releases_says_it_is_unknown_rather_than_guess():
+    for model in ("R-Super-Pancreas-Kidney", "R-Super-Merlin"):
+        assert mp.label_support(model, real_names())["known"] is False
+    assert mp.label_support("SuPreM", real_names())["known"] is True
