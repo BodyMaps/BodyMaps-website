@@ -31,6 +31,9 @@ export type RecentUpload = PipelinePreviewSelection & {
 	// finished scan for the age-based History split. Optional/undefined for
 	// older localStorage entries and for anything still Processing.
 	viewed?: boolean;
+	// Why a run failed before it started (a file the server refused, a server error), kept so the run
+	// card can say so instead of only "Failed". Set with the Failed status, dropped with any other.
+	failureReason?: string;
 	// Server-confirmed entries can be removed when absent from a later owned list.
 	serverSynced?: boolean;
 	// Last server status version; never compare server time with the device clock.
@@ -248,11 +251,16 @@ export const updateRecentUploadStatus = (
 	status: RecentUploadStatus,
 	ownerId: string | null = activeAccountId,
 	updatedAt?: unknown,
+	failureReason?: string,
 ): RecentUpload[] => {
 	const version = readJobUpdatedAt(updatedAt);
 	const list = loadRecentUploads(ownerId).map((u) => {
 		if (u.sessionId !== sessionId || (version !== undefined && u.serverUpdatedAt !== undefined && version < u.serverUpdatedAt)) return u;
-		return { ...u, status, serverUpdatedAt: version };
+		const next = { ...u, status, serverUpdatedAt: version };
+		// The reason belongs to the Failed status only.
+		if (status === "Failed" && failureReason) next.failureReason = failureReason;
+		else if (status !== "Failed") delete next.failureReason;
+		return next;
 	});
 	persistRecentUploads(list, ownerId);
 	return list;
