@@ -235,22 +235,35 @@ def _scan(case_id, dataset, *, voxels, order, spacing=1.0, tumor=0, sex="F", age
     return row
 
 
-def test_best_first_puts_thumbnail_tier_then_annotated_datasets_then_detail():
-    """Thumbnail tier first, then PanTS, AbdomenAtlas, CancerVerse, then detail inside each group.
-    Without the dataset step the biggest CancerVerse scan would lead (see the quality test above)."""
+def test_best_first_takes_turns_between_datasets_best_scan_first():
+    """Best of each dataset in turn (PanTS, AbdomenAtlas, CancerVerse), then second best of each, and so on.
+    The biggest CancerVerse scan no longer leads, and no dataset is pushed to the bottom either."""
     df = _frame([
         _scan("cv-big", "CancerVerse", voxels=9000, spacing=0.1, order=1),
         _scan("cv-small", "CancerVerse", voxels=500, spacing=1.0, order=2),
-        _scan("aa", "AbdomenAtlas", voxels=800, order=3),
-        _scan("pants-small", "PanTS", voxels=100, spacing=2.0, order=4),
-        _scan("pants-big", "PanTS", voxels=700, spacing=0.5, order=5),
-        _scan("pants-distorted", "PanTS", voxels=9999, spacing=0.1, order=6, thumbnail_rank=2),
+        _scan("aa-big", "AbdomenAtlas", voxels=800, order=3),
+        _scan("aa-small", "AbdomenAtlas", voxels=300, order=4),
+        _scan("pants-small", "PanTS", voxels=100, spacing=2.0, order=5),
+        _scan("pants-big", "PanTS", voxels=700, spacing=0.5, order=6),
+        _scan("pants-mid", "PanTS", voxels=400, spacing=1.0, order=7),
     ])
-    assert best_ids(df) == ["pants-big", "pants-small", "aa", "cv-big", "cv-small", "pants-distorted"]
+    assert best_ids(df) == ["pants-big", "aa-big", "cv-big", "pants-mid", "aa-small", "cv-small", "pants-small"]
+
+
+def test_best_first_never_mixes_thumbnail_tiers_and_lets_an_empty_dataset_drop_out():
+    df = _frame([
+        _scan("cv", "CancerVerse", voxels=900, order=1),
+        _scan("pants", "PanTS", voxels=100, order=2),
+        _scan("pants-2", "PanTS", voxels=90, order=3),
+        _scan("pants-distorted", "PanTS", voxels=9999, order=4, thumbnail_rank=2),
+        _scan("cv-distorted", "CancerVerse", voxels=9998, order=5, thumbnail_rank=2),
+    ])
+    # No AbdomenAtlas rows: PanTS and CancerVerse alternate, the rest follows; the worse tier is last.
+    assert best_ids(df) == ["pants", "cv", "pants-2", "pants-distorted", "cv-distorted"]
 
 
 def test_best_first_never_rotates_between_tumor_sex_or_age():
-    """sort_by=quality alternates cohorts; the library list must be one plain order by detail."""
+    """sort_by=quality alternates cohorts; inside a dataset the library list is one plain order by detail."""
     rows = [_scan(f"p{i}", "PanTS", voxels=1000 - i, order=i, tumor=int(i < 5), sex="F" if i % 2 else "M", age=20 + 10 * (i % 4))
             for i in range(10)]
     assert best_ids(_frame(rows)) == [f"p{i}" for i in range(10)]
@@ -262,6 +275,7 @@ def test_best_first_breaks_exact_ties_by_case_order_and_handles_edge_frames():
     assert best_ids(df) == ["a", "b"]
     assert best_ids(df.drop(columns=["__dataset"])) == ["a", "b"]                 # no dataset column
     assert rank_best_first(df.iloc[:0]).empty and len(rank_best_first(df.iloc[:1])) == 1
+    assert not {"__turn", "__turn_order"} & set(rank_best_first(df).columns)       # helper columns do not leak
 
 
 def best_ids(df):

@@ -352,6 +352,12 @@ def test_best_sort_pages_continue_one_ranking():
     assert page(1, 3) + page(2, 3) + page(3, 3) == everything[:9]
 
 
+def test_best_sort_first_page_mixes_the_datasets(with_atlas):
+    with APP.test_request_context('/api/search?sort_by=best&per_page=6'):
+        first = [i['dataset'] for i in api_routes.api_search().get_json()['items']]
+    assert first[:3] == ['PanTS', 'AbdomenAtlas', 'CancerVerse']       # each dataset's best scan, in turn
+
+
 @pytest.mark.parametrize('sort_by',['id','id_desc','age_asc','age_desc','shape','spacing','sample'])
 def test_explicit_sorts_never_use_diverse_quality_ranking(monkeypatch,sort_by):
     monkeypatch.setattr(api_routes,'rank_quality_results',lambda *_a,**_k: pytest.fail('explicit sort changed'))

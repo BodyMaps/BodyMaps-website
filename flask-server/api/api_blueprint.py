@@ -4032,9 +4032,9 @@ def api_search():
         by = []
         asc = []
     elif sort_by == "best":
-        # The library list: best scans first, in one plain order (services/search_ranking.py). No
-        # rotation between datasets, tumor status, sex or age (that is sort_by=quality), so the
-        # first page is the top of the ranking and the next page continues it.
+        # The library list (services/search_ranking.py): best scans first inside each dataset, the
+        # datasets taking turns, no rotation by tumor status, sex or age (that is sort_by=quality).
+        # The next page continues the same order.
         df = rank_best_first(df)
         by = []
         asc = []
