@@ -46,7 +46,7 @@ def main(argv=None) -> int:
     mode.add_argument("--once", action="store_true")
     mode.add_argument("--loop", action="store_true")
     parser.add_argument("--limit", type=int, default=None, help="stop after this many finished tasks")
-    parser.add_argument("--models", default=None, help="comma-separated models (default: ePAI,Atlas-Net,LesionSegmenter)")
+    parser.add_argument("--models", default=None, help="comma-separated models (default: every model the site offers)")
     parser.add_argument("--root", default=None, help="UserData folder (default: USER_DATASET_PATH)")
     parser.add_argument("--json", action="store_true", help="print --status/--dry-run as JSON")
     args = parser.parse_args(argv)

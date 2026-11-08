@@ -2,8 +2,8 @@
 
 Every scan kept in `UserData` carries the mask of the model the user ran. This
 process runs the same stored CT through the **other** models and saves each
-result beside the original, so one scan has an ePAI version, an Atlas-Net
-version and a LesionSegmenter version.
+result beside the original, so one scan has a version from every model the site offers
+(ePAI, Atlas-Net, LesionSegmenter, SuPreM, R-Super-Pancreas-Kidney, R-Super-Merlin).
 
 It is **low priority**: it only works while nobody is using the site and a GPU
 worker is idle, it never uses bdmap1's GPU, and it stops the moment a user job
@@ -112,7 +112,7 @@ failure it gives up (listed by `--status`); delete its entry in
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `SECOND_OPINIONS_MODELS` | `ePAI,Atlas-Net,LesionSegmenter` | models every scan should have |
+| `SECOND_OPINIONS_MODELS` | `ePAI,Atlas-Net,LesionSegmenter,SuPreM,R-Super-Pancreas-Kidney,R-Super-Merlin` | models every scan should have |
 | `SECOND_OPINIONS_BASE_URL` | `http://127.0.0.1:8000` | the website, for `/api/health` |
 | `SECOND_OPINIONS_IDLE_CHECKS` / `_CHECK_INTERVAL` | 3 / 20 s | consecutive idle samples needed |
 | `SECOND_OPINIONS_POLL_SECONDS` | 3 | how often to look for users while a model runs |
@@ -124,6 +124,11 @@ failure it gives up (listed by `--status`); delete its entry in
 
 ## Notes
 
+* **Adding a model to the list** needs it to run on the workers, to write `combined_labels.nii.gz` in the viewer's label
+  scheme (all six do), and a checkpoint rule in `services/model_provenance.py`. The R-Super releases have no label map
+  in `MODEL_TO_VIEWER`, so their `label_support` says `known: false` rather than guess which labels they can produce.
+* A bigger model list means more GPU runs per scan; `SECOND_OPINIONS_DAILY_CAP` (100 per rolling 24 hours) is what paces
+  the backlog of scans already kept, so raise it only when the workers are known to be idle.
 * The stored scans are **not de-identified** (each case keeps `user_id` and
   `session_id`), so these versions are internal until that is decided.
 * The workers must hold the same model environments and weights as the website

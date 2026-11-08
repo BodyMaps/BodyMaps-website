@@ -37,6 +37,22 @@ MODEL_CHECKPOINT = {
     "LesionSegmenter": ("LESIONSEG_CKPT_PATH",
                         "/home/visitor/lesionsegmenter/model/nnUNet_results/Dataset_LesionSegmenter/nnUNetTrainer__nnUNetPlans__3d_fullres"),
 }
+# Models whose weights are one file, not an nnU-Net folder: model -> (checkpoint env var, default path,
+# class-list env var or None, default class list or None). Same names and defaults as the runners in
+# services/auto_segmentor.py (SuPreM, RSUPER_VARIANTS); a test keeps them equal.
+MODEL_CHECKPOINT_FILE = {
+    "SuPreM": ("SUPREM_CHECKPOINT_PATH",
+               "/home/visitor/suprem_native/workspace/SuPreM/pretrained_checkpoints/supervised_suprem_unet_2100.pth",
+               None, None),
+    "R-Super-Pancreas-Kidney": ("RSUPER_PANKID_CHECKPOINT_PATH",
+                                "/home/visitor/rsuper/R-SuperPancreasKidney/R_Super_Kidney_Pancreas_UCSF_Atlas3/fold_0_latest.pth",
+                                "RSUPER_PANKID_CLASS_LIST",
+                                "/home/visitor/rsuper/R-SuperPancreasKidney/labels_rsuper_mask.yaml"),
+    "R-Super-Merlin": ("RSUPER_MERLIN_CHECKPOINT_PATH",
+                       "/home/visitor/rsuper/Merlin-Cancer-Super/checkpoint/fold_0_latest.pth",
+                       "RSUPER_MERLIN_CLASS_LIST",
+                       "/home/visitor/rsuper/Merlin-Cancer-Super/checkpoint/label_names.yaml"),
+}
 DEFAULT_CHECKPOINT_NAME = "checkpoint_final.pth"
 # Files of an nnU-Net model folder that define the model (weights + preprocessing/architecture plan).
 _PLAN_FILES = ("plans.json", "dataset.json")
@@ -83,10 +99,36 @@ def checkpoint_name(model: str, env=None) -> str:
     return DEFAULT_CHECKPOINT_NAME
 
 
+def _file_checkpoint_fingerprint(model: str, env) -> dict:
+    """A model whose weights are one file: hash it, and its class list when it has one (that list
+    decides which label each output channel gets, so it is part of what made the labels)."""
+    ckpt_var, ckpt_default, list_var, list_default = MODEL_CHECKPOINT_FILE[model]
+    path = env.get(ckpt_var, ckpt_default)
+    out: dict = {"path": path, "hashed": False}
+    if not os.path.isfile(path):
+        out["reason"] = "checkpoint file not found on this host"
+        return out
+    try:
+        files = {os.path.basename(path): _cached_sha256(path)}
+        if list_var:
+            class_list = env.get(list_var, list_default)
+            if os.path.isfile(class_list):
+                files[os.path.basename(class_list)] = _cached_sha256(class_list)
+            else:
+                out["class_list_missing"] = class_list
+    except OSError as e:
+        out["reason"] = f"unreadable:{type(e).__name__}"
+        return out
+    out.update(hashed=True, files=files)
+    return out
+
+
 def checkpoint_fingerprint(model: str, env=None) -> dict:
     """Identify the weights this process would load for `model`. Always returns a dict; `hashed` says
     whether the files could be read here."""
     env = os.environ if env is None else env
+    if model in MODEL_CHECKPOINT_FILE:
+        return _file_checkpoint_fingerprint(model, env)
     rule = MODEL_CHECKPOINT.get(model)
     if rule is None:
         return {"hashed": False, "reason": "no checkpoint rule for this model"}
@@ -148,6 +190,13 @@ def inference_settings(model: str, env=None) -> Optional[dict]:
                 # the recall-oriented operating point applied when the labels are exported
                 "lesion_threshold": float(env.get("LESIONSEG_LESION_THRESHOLD", "0.05") or "0.05"),
                 "lesion_channel": int(env.get("LESIONSEG_LESION_CHANNEL", "40") or "40")}
+    if model == "SuPreM":
+        # Fixed on the runner's command line: the U-Net backbone with the SuPreM weights.
+        return {"backbone": "unet", "suprem": True, "checkpoint_name": os.path.basename(MODEL_CHECKPOINT_FILE[model][1])}
+    if model in ("R-Super-Pancreas-Kidney", "R-Super-Merlin"):
+        # RSUPER_VARIANTS: the Pancreas-Kidney release masks lesions with its own organ masks, Merlin does not.
+        return {"checkpoint_name": os.path.basename(MODEL_CHECKPOINT_FILE[model][1]),
+                "organ_mask_on_lesion": model == "R-Super-Pancreas-Kidney"}
     return None
 
 
