@@ -221,18 +221,20 @@ def rank_quality_results(
     return ranked.iloc[selected].drop(columns=["__search_quality_score", "__search_position"])
 
 
-DATASET_ANNOTATION_ORDER = {"PanTS": 0, "AbdomenAtlas": 1}   # anything else (CancerVerse) follows
+DATASET_TURN_ORDER = {"PanTS": 0, "AbdomenAtlas": 1}   # anything else (CancerVerse) goes third
 
 
 def rank_best_first(df: pd.DataFrame) -> pd.DataFrame:
-    """One plain list, best scans first: no rotation between cohorts.
+    """One plain list: the best scan of each dataset in turn, then the second best of each, and so on.
 
-    Order: thumbnail tier; then the datasets whose cases carry full organ masks (PanTS, then
-    AbdomenAtlas) ahead of CT-only CancerVerse; then, inside each, the same scan-detail score as
-    ``rank_quality_results`` (voxel count, voxel spacing, compressed size, shape, known age and sex),
-    best first, with the case ID breaking ties. Without the dataset step the detail score alone puts
-    CancerVerse (larger scans on average) in 478 of the first 480 places. Like that score, this is a
-    metadata proxy for usability and detail, not a clinical quality grade.
+    Inside each dataset the order is the scan-detail score of ``rank_quality_results`` (voxel count,
+    voxel spacing, compressed size, shape, known age and sex), best first, with the case ID breaking
+    ties. The datasets then take turns (PanTS, AbdomenAtlas, CancerVerse), so every page mixes all
+    of them and none is pushed down because its scans are larger. A thumbnail tier never mixes with a
+    worse one, and a dataset that runs out simply drops out of the rotation. There is no rotation by
+    tumor status, sex or age: that is what ``sort_by=quality`` does. Sorting by the score alone put
+    CancerVerse (larger scans on average, no organ masks) in 478 of the first 480 places.
+    Like that score, this is a metadata proxy for usability and detail, not a clinical quality grade.
     Order is computed before pagination, so page 2 continues page 1.
     """
     if df.empty:
@@ -240,11 +242,13 @@ def rank_best_first(df: pd.DataFrame) -> pd.DataFrame:
     ranked = rank_quality_results(df, balance_sex=False, balance_age=False,
                                   balance_tumor=False, balance_dataset=False)
     dataset = ranked["__dataset"] if "__dataset" in ranked.columns else pd.Series("PanTS", index=ranked.index)
-    ranked = ranked.assign(__annotation_rank=dataset.map(DATASET_ANNOTATION_ORDER).fillna(2).astype(int))
-    keys = [c for c in ("__thumbnail_quality_rank", "__annotation_rank") if c in ranked.columns]
-    # rank_quality_results already ordered by tier and score; a stable sort on these keys keeps that
-    # order inside every (tier, dataset) group.
-    return ranked.sort_values(keys, kind="mergesort", na_position="last").drop(columns=["__annotation_rank"])
+    tier = ["__thumbnail_quality_rank"] if "__thumbnail_quality_rank" in ranked.columns else []
+    ranked = ranked.assign(__turn_order=dataset.map(DATASET_TURN_ORDER).fillna(2).astype(int))
+    # Position inside (tier, dataset): rank_quality_results already ordered each group best first.
+    ranked = ranked.assign(__turn=ranked.groupby(tier + ["__turn_order"], sort=False, dropna=False).cumcount())
+    # Stable sort: tier, then turn number, then the dataset's place in the rotation.
+    ranked = ranked.sort_values(tier + ["__turn", "__turn_order"], kind="mergesort", na_position="last")
+    return ranked.drop(columns=["__turn", "__turn_order"])
 
 
 SAMPLE_MAX_CT_BYTES = 16 * 1024 * 1024
