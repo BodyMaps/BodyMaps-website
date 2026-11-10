@@ -233,3 +233,58 @@ describe("a run refused when it is dispatched", () => {
     expect(discards()).toHaveLength(0);
   });
 });
+
+describe("what the page says when the server refuses to start a run", () => {
+  const THREE_D = "This file isn't a single 3D CT scan: it has shape [406, 406, 501, 1, 3], which means it has extra data beyond just X/Y/Z (for example a multi-phase scan or a vector field). Please upload a single 3D CT phase.";
+
+  it("shows the server's own sentence on the status line and the run card, and keeps it with the run (400)", async () => {
+    runReply = () => json({ error: THREE_D }, false, 400);
+
+    await runOneScan();
+
+    await waitFor(() => expect(stored()[0]?.status).toBe("Failed"));
+    expect(stored()[0].failureReason).toBe(THREE_D);
+    expect((await screen.findAllByText(new RegExp("isn't a single 3D CT scan"))).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(`scan.nii.gz could not be run. ${THREE_D} Check the file and select it again.`)).toBeInTheDocument();
+  });
+
+  it("gives a fixed sentence, never the server's text, for a server error (500)", async () => {
+    runReply = () => json({ error: "Traceback (most recent call last): secret path" }, false, 500);
+
+    await runOneScan();
+
+    await waitFor(() => expect(stored()[0]?.status).toBe("Failed"));
+    expect(stored()[0].failureReason).toBe("The server hit an error while starting the run (error 500).");
+    expect(screen.queryByText(new RegExp("Traceback"))).not.toBeInTheDocument();
+    expect((await screen.findAllByText(new RegExp("error 500"))).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("says the server is busy when the queue is full (429)", async () => {
+    runReply = () => json({ error: "The queue is full" }, false, 429);
+
+    await runOneScan();
+
+    await waitFor(() => expect(stored()[0]?.status).toBe("Failed"));
+    expect(stored()[0].failureReason).toBe("The server is busy: too many runs are waiting right now.");
+  });
+
+  it("tells the person to upload again when the upload is not theirs or was lost (403, 409)", async () => {
+    runReply = () => json({ error: "Upload ownership is unknown; upload the scan again." }, false, 409);
+
+    await runOneScan();
+
+    await waitFor(() => expect(stored()[0]?.status).toBe("Failed"));
+    expect(stored()[0].failureReason).toBe("Upload ownership is unknown; upload the scan again.");
+    expect((await screen.findAllByText(new RegExp("Upload the scan again\\."))).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("says the connection was lost when the request never reached the server", async () => {
+    runReply = () => { throw new TypeError("Failed to fetch"); };
+
+    await runOneScan();
+
+    await waitFor(() => expect(stored()[0]?.status).toBe("Failed"));
+    expect(stored()[0].failureReason).toBe("The connection to the server was lost before the run could start.");
+  });
+});
+

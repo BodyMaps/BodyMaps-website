@@ -205,6 +205,7 @@ import {
   type RecentUploadsMigratedDetail,
   type UploadGroup,
 } from "../helpers/recentUploads";
+import { NO_SERVER_MESSAGE, RunRejectedError, runRejectionMessage, runRejectionReason } from "../helpers/runRejection";
 import WorkspaceIntro from "./LandingPage";
 import "./Workspace.css";
 import ProcessingSummaryBar from "../components/ProcessingSummaryBar";
@@ -365,13 +366,6 @@ const SIGN_IN_TO_DOWNLOAD = "Please sign in again before downloading results.";
 
 // The server answering the run request with a refusal: its status picks the
 // sentence (a 400 is about the file, anything else about the server).
-class RunRejectedError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
 
 // A 413 from the server. Picking the same file again or pressing Run again
 // sends the same bytes into the same limit, so this failure never says to retry.
@@ -2099,7 +2093,7 @@ const UploadPage: React.FC = () => {
         if (foreground) clearRunMessage(`Starting ${model} inference...`);
         return;
       }
-      if (!res.ok) throw new RunRejectedError(res.status, data.error || "Failed to start inference");
+      if (!res.ok) throw new RunRejectedError(res.status, typeof data?.error === "string" && data.error ? data.error : NO_SERVER_MESSAGE);
       admissionRetriesRef.current.delete(sid);
       assertUploadAccount(user?.id ?? null, controller.signal);
       // Cancelled while the request was out, too late for this tab to abort it
@@ -2156,22 +2150,12 @@ const UploadPage: React.FC = () => {
       // Not resumable now, so the file it uploaded is nobody's. The server keeps
       // it if a job was made after all (the reply may only have been lost).
       discardServerUpload(sid);
-      setRecentUploads(updateRecentUploadStatus(sid, "Failed", user?.id ?? null));
-      // The card only says "Failed", which does not tell a bad file from a
-      // server that could not start it. Say which, naming the file or folder
-      // picked (the server's own name for a converted DICOM series is not it).
+      // The run card and the status line say why it did not start: the server's own plain
+      // sentence for a bad file, or a fixed one for a server error or a lost connection.
+      setRecentUploads(updateRecentUploadStatus(sid, "Failed", user?.id ?? null, undefined, runRejectionReason(err, isDicom)));
+      // Name the file or folder picked (the server's own name for a converted DICOM series is not it).
       const picked = loadRecentUploads(user?.id ?? null).find((upload) => upload.sessionId === sid)?.sourceName;
-      const thing = isDicom ? "folder" : "file";
-      const what = isDicom ? "DICOM series" : "scan";
-      setMessage(
-        err instanceof RunRejectedError && err.status === 400
-          ? `${picked || `This ${what}`} could not be run. ${
-              isDicom
-                ? "The server couldn't read this DICOM series as a single 3D CT scan."
-                : "The server couldn't read it as a single 3D CT scan (.nii or .nii.gz)."
-            } Check the ${thing} and select it again.`
-          : `The server couldn't start the run for ${picked || `this ${what}`}. Select the ${thing} again and press Run to try again.`,
-      );
+      setMessage(runRejectionMessage(err, picked, isDicom));
     } finally {
       controller.abort();
       if (uploadAbortRef.current.get(sid) === controller) {

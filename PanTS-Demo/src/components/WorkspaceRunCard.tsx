@@ -196,7 +196,9 @@ export default function WorkspaceRunCard({ upload, phase, queuePosition, estimat
         {upload.pipeline?.preprocessing === "OpenVAE" && observedStages?.some((stage) => stage.id === "segmentation" && stage.status === "completed")
           && <p className="workspace-run-note">Segmentation used the reconstructed CT; the viewer retains the original CT.</p>}
         {closeNote && !stopped && !complete && <p className="workspace-run-note">{closeNote}</p>}
-        {stopped && <p className="workspace-run-note">{upload.status === "Cancelled" ? "This run was cancelled." : "This run did not complete. Select your scan again to start another run."}</p>}
+        {stopped && <p className="workspace-run-note">{upload.status === "Cancelled" ? "This run was cancelled."
+          : upload.failureReason ? `${upload.failureReason} Select your scan again to start another run.`
+          : "This run did not complete. Select your scan again to start another run."}</p>}
         {actions && <div className={`workspace-run-actions${complete ? " is-result" : ""}`}>
           {complete && <div className="workspace-result-summary"><strong>{upload.isReconstruction ? "Reconstruction ready" : "Segmentation ready"}</strong>
             <p>{upload.isReconstruction ? "Reconstructed CT is ready to open in the viewer." : "Masks are ready to open in the viewer."}</p></div>}

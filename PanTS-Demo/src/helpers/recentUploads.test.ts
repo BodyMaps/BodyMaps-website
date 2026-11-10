@@ -252,3 +252,22 @@ it("does not resurrect removed legacy entries on a later verified migration", ()
 	expect(loadRecentUploads().map((entry) => entry.sessionId)).toEqual(["b"]);
 	expect(localStorage.getItem("recentUploads")).toBe(legacy);
 });
+
+describe("failureReason", () => {
+  const seed = () => {
+    localStorage.clear();
+    setRecentUploadsAccount("reason-owner");
+    addRecentUpload({ sessionId: "r1", label: "Scan", model: "ePAI", status: "Processing", timestamp: Date.now() }, "reason-owner");
+  };
+  it("is stored with the Failed status and dropped with any other", () => {
+    seed();
+    expect(updateRecentUploadStatus("r1", "Failed", "reason-owner", undefined, "The file is not a CT.")[0].failureReason).toBe("The file is not a CT.");
+    expect(loadRecentUploads("reason-owner")[0].failureReason).toBe("The file is not a CT.");
+    expect(updateRecentUploadStatus("r1", "Completed", "reason-owner")[0].failureReason).toBeUndefined();
+    expect(loadRecentUploads("reason-owner")[0].failureReason).toBeUndefined();
+  });
+  it("is not kept for a Failed run that was given no reason", () => {
+    seed();
+    expect(updateRecentUploadStatus("r1", "Failed", "reason-owner")[0].failureReason).toBeUndefined();
+  });
+});

@@ -61,6 +61,16 @@ describe("observed pipeline stages", () => {
     expect(within(row).queryByText("Scan received")).not.toBeInTheDocument();
     expect(within(row).queryByText("Done", { exact: true })).not.toBeInTheDocument();
   });
+  it("says why a run that never started failed, and keeps the generic line when there is no reason", () => {
+    const reason = "This file isn't a single 3D CT scan: it has shape [406, 406, 501, 1, 3]. Please upload a single 3D CT phase.";
+    const { rerender } = render(<WorkspaceRunCard upload={{ ...run, status: "Failed", failureReason: reason }} />);
+    expect(screen.getByText(`${reason} Select your scan again to start another run.`)).toBeInTheDocument();
+    rerender(<WorkspaceRunCard upload={{ ...run, status: "Failed" }} />);
+    expect(screen.getByText("This run did not complete. Select your scan again to start another run.")).toBeInTheDocument();
+    rerender(<WorkspaceRunCard upload={{ ...run, status: "Cancelled", failureReason: reason }} />);
+    expect(screen.getByText("This run was cancelled.")).toBeInTheDocument();
+  });
+
   it.each(["Failed", "Cancelled"] as const)("lets %s override a stale running state", (status) => {
     render(<WorkspaceRunCard upload={{ ...run, status }} phase="running" estimate="2 minutes" />);
     expect(screen.queryByText("Running the selected pipeline")).not.toBeInTheDocument();
