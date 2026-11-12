@@ -7,9 +7,11 @@
 .card:hover, .card:focus-within { background: #fff; border-color: rgba(15,23,42,.07); box-shadow: 0 22px 48px rgba(15,23,42,.08); transform: translateY(-4px); }
 .avatarRing { width: 112px; height: 112px; border-radius: 50%; border: 2px solid #002d72; background: #fff; padding: 4px; box-sizing: border-box; flex-shrink: 0; }
 .avatarInner { width: 100%; height: 100%; border-radius: 50%; overflow: hidden; background: #f5f7fa; display: flex; align-items: flex-end; justify-content: center; }
-.avatarImg { width: 100%; height: 100%; object-fit: cover; transition: transform .8s; }
-.card:hover .avatarImg, .card:focus-within .avatarImg { transform: scale(1.07); }
+.avatarImg { width: 100%; height: 100%; object-fit: cover; transform: var(--headshot-framing, scale(1)); transition: transform .8s; }
+.card:hover .avatarImg, .card:focus-within .avatarImg { transform: var(--headshot-framing, scale(1)) scale(1.07); }
 .avatarPortrait { --portrait-position: translate(3.646851771069883%, 6.996506784392313%); transform: var(--portrait-position) scale(1.25); transform-origin: center; }
+.avatarImg[src="/headshots/ishita-ahelleya.webp"] { --headshot-framing: translate(-3%, -14%) scale(1.5); }
+.avatarImg[src="/headshots/harleen-sachdev.webp"] { --headshot-framing: translate(-2%, 1%) scale(1.04); }
 .card:hover .avatarPortrait, .card:focus-within .avatarPortrait { transform: var(--portrait-position) scale(1.34); }
 .memberName { font-size: 14px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #0f172a; margin-bottom: 6px; }
 .memberRole { font-size: 11.5px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; color: #6b7285; }
@@ -27,3 +29,7 @@
 @media (max-width: 380px) { .grid { grid-template-columns:1fr; } }
 @media (prefers-reduced-motion: reduce) { .card, .avatarImg { transition: none; } .card:hover, .card:focus-within, .card:hover .avatarImg, .card:focus-within .avatarImg { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .avatarPortrait, .card:hover .avatarPortrait, .card:focus-within .avatarPortrait { transform: var(--portrait-position) scale(1.25); } }
+@media (prefers-reduced-motion: reduce) {
+  .card .avatarImg[src="/headshots/ishita-ahelleya.webp"],
+  .card .avatarImg[src="/headshots/harleen-sachdev.webp"] { transform: var(--headshot-framing); }
+}

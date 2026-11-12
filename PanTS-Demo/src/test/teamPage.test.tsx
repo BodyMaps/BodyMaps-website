@@ -72,6 +72,10 @@ describe("team page", () => {
         expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/ahmad-durre-rehman.jpg?v=20261013");
       } else if (name === "Yusuf Abdulkadir") {
         expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/yusuf-abdulkadir.webp");
+      } else if (name === "Ishita Ahelleya") {
+        expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/ishita-ahelleya.webp");
+      } else if (name === "Harleen Sachdev") {
+        expect(screen.getByAltText(name)).toHaveAttribute("src", "/headshots/harleen-sachdev.webp");
       } else {
         expect(screen.queryByAltText(name)).not.toBeInTheDocument();
       }
