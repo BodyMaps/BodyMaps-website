@@ -68,6 +68,14 @@ export const MEMBERS: Member[] = [
     portrait: true,
     links: { linkedin: "https://linkedin.com/in/ahmad-durre-rehman-121577382" },
   },
-  { name: "Ishita Ahelleya", role: "Core Contributor" },
-  { name: "Harleen Sachdev", role: "Core Contributor" },
+  {
+    name: "Ishita Ahelleya",
+    role: "Core Contributor",
+    photo: "/headshots/ishita-ahelleya.webp",
+  },
+  {
+    name: "Harleen Sachdev",
+    role: "Core Contributor",
+    photo: "/headshots/harleen-sachdev.webp",
+  },
 ];
