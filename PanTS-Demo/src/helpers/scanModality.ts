@@ -13,6 +13,13 @@ export type ScanAnalysis = {
 	p2: number;
 	p98: number;
 	p995: number;
+	/** Further foreground percentiles, for the PACS-style Low / Medium / High contrast windows. */
+	p1: number;
+	p5: number;
+	p10: number;
+	p90: number;
+	p95: number;
+	p99: number;
 	/** Share of sampled voxels that sit in the CT air band (-1100 to -900 HU). */
 	airFraction: number;
 	reason: string;
@@ -57,7 +64,7 @@ export function analyzeScan(data: ArrayLike<number>, name?: string): ScanAnalysi
 	}
 	const values = sample.subarray(0, n);
 	values.sort();
-	if (!n) return { modality: "CT", min: 0, max: 0, p2: 0, p98: 0, p995: 0, airFraction: 0, reason: "no finite voxels" };
+	if (!n) return { modality: "CT", min: 0, max: 0, p2: 0, p98: 0, p995: 0, p1: 0, p5: 0, p10: 0, p90: 0, p95: 0, p99: 0, airFraction: 0, reason: "no finite voxels" };
 	const min = values[0];
 	const max = values[n - 1];
 	let air = 0;
@@ -97,6 +104,12 @@ export function analyzeScan(data: ArrayLike<number>, name?: string): ScanAnalysi
 		p2: percentile(foreground, 0.02),
 		p98: percentile(foreground, 0.98),
 		p995: percentile(foreground, 0.995),
+		p1: percentile(foreground, 0.01),
+		p5: percentile(foreground, 0.05),
+		p10: percentile(foreground, 0.1),
+		p90: percentile(foreground, 0.9),
+		p95: percentile(foreground, 0.95),
+		p99: percentile(foreground, 0.99),
 		airFraction,
 		reason,
 	};
@@ -107,15 +120,18 @@ function toWindow(low: number, high: number): { width: number; center: number } 
 	return { width, center: low + width / 2 };
 }
 
-/** MRI window presets, all derived from the scan's own intensity distribution. The first one is the default. */
-export function mrWindowPresets(a: Pick<ScanAnalysis, "min" | "max" | "p2" | "p98" | "p995">): MrWindowPreset[] {
-	const auto = toWindow(a.p2, a.p995);
-	const bright = toWindow(a.p2 + (a.p98 - a.p2) * 0.35, a.p995);
-	const wide = toWindow(a.min, a.max);
+/**
+ * MRI window presets, all derived from the scan's own intensity distribution. The first one is the default.
+ * Low, Medium and High contrast follow the usual PACS automatic presets: they drop 1%, 5% and 10% of the
+ * foreground voxels from each end of the range, so a larger trim gives a narrower window and more contrast.
+ */
+export function mrWindowPresets(a: Pick<ScanAnalysis, "min" | "max" | "p2" | "p995" | "p1" | "p5" | "p10" | "p90" | "p95" | "p99">): MrWindowPreset[] {
 	return [
-		{ name: "Auto", ...auto },
-		{ name: "High contrast", ...bright },
-		{ name: "Full range", ...wide },
+		{ name: "Auto", ...toWindow(a.p2, a.p995) },
+		{ name: "Low contrast", ...toWindow(a.p1, a.p99) },
+		{ name: "Medium contrast", ...toWindow(a.p5, a.p95) },
+		{ name: "High contrast", ...toWindow(a.p10, a.p90) },
+		{ name: "Full range", ...toWindow(a.min, a.max) },
 	];
 }
 

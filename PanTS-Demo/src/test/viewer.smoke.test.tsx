@@ -369,6 +369,20 @@ describe("viewer smoke test", () => {
 		expect(flipPaneHorizontal).not.toHaveBeenCalled();
 	});
 
+	it("lets the View menu invert the image, and shows the state in place", async () => {
+		render(<AuthProvider><MemoryRouter initialEntries={["/case/35"]}>
+			<Routes><Route path="/case/:caseId" element={<VisualizationPage />} /></Routes>
+		</MemoryRouter></AuthProvider>);
+		await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
+		fireEvent.click(screen.getByRole("button", { name: "View options" }));
+		fireEvent.click(screen.getByRole("menuitem", { name: "Invert" }));
+		fireEvent.click(screen.getByRole("button", { name: "View options" }));
+		expect(screen.getByRole("menuitem", { name: "Invert: on" })).toHaveClass("is-active");
+		fireEvent.click(screen.getByRole("menuitem", { name: "Invert: on" }));
+		fireEvent.click(screen.getByRole("button", { name: "View options" }));
+		expect(screen.getByRole("menuitem", { name: "Invert" })).not.toHaveClass("is-active");
+	});
+
 	it("opens AI, live rooms, and shortcuts directly from the viewer toolbar", async () => {
 		render(<AuthProvider><MemoryRouter initialEntries={["/case/35"]}>
 			<Routes><Route path="/case/:caseId" element={<VisualizationPage />} /></Routes>

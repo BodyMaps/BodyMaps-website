@@ -66,14 +66,34 @@ describe("analyzeScan", () => {
 });
 
 describe("mrWindowPresets", () => {
+	const byName = (a: ReturnType<typeof analyzeScan>) => Object.fromEntries(mrWindowPresets(a).map((p) => [p.name, p]));
+	const edges = (p: { width: number; center: number }) => [p.center - p.width / 2, p.center + p.width / 2];
+
 	it("starts with an Auto window that covers the foreground range", () => {
 		const a = analyzeScan(mrT1());
-		const [auto, , full] = mrWindowPresets(a);
-		expect(auto.name).toBe("Auto");
-		expect(auto.center - auto.width / 2).toBeCloseTo(a.p2);
-		expect(auto.center + auto.width / 2).toBeCloseTo(a.p995);
-		expect(full.name).toBe("Full range");
-		expect(full.width).toBeCloseTo(a.max - a.min);
+		const presets = mrWindowPresets(a);
+		expect(presets[0].name).toBe("Auto");
+		expect(edges(presets[0])[0]).toBeCloseTo(a.p2);
+		expect(edges(presets[0])[1]).toBeCloseTo(a.p995);
+		expect(presets.at(-1)?.name).toBe("Full range");
+		expect(presets.at(-1)?.width).toBeCloseTo(a.max - a.min);
+	});
+
+	it("offers PACS-style Low, Medium and High contrast that trim 1%, 5% and 10% from each end", () => {
+		const a = analyzeScan(mrT1());
+		const p = byName(a);
+		expect(mrWindowPresets(a).map((x) => x.name)).toEqual(["Auto", "Low contrast", "Medium contrast", "High contrast", "Full range"]);
+		expect(edges(p["Low contrast"])).toEqual([expect.closeTo(a.p1), expect.closeTo(a.p99)]);
+		expect(edges(p["Medium contrast"])).toEqual([expect.closeTo(a.p5), expect.closeTo(a.p95)]);
+		expect(edges(p["High contrast"])).toEqual([expect.closeTo(a.p10), expect.closeTo(a.p90)]);
+	});
+
+	it("gets narrower, so more contrasty, as the trim grows", () => {
+		const p = byName(analyzeScan(mrT1()));
+		expect(p["Full range"].width).toBeGreaterThan(p["Low contrast"].width);
+		expect(p["Low contrast"].width).toBeGreaterThan(p["Medium contrast"].width);
+		expect(p["Medium contrast"].width).toBeGreaterThan(p["High contrast"].width);
+		expect(p["High contrast"].width).toBeGreaterThan(0);
 	});
 });
 
