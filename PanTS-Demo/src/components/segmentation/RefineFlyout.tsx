@@ -21,9 +21,20 @@ const FRIENDLY_ERRORS = new Set([
 	"The interactive model is busy. Wait a moment and try again.",
 ]);
 
+const BUSY_MESSAGE = "The interactive model is busy. Wait a moment and try again.";
+const UNAVAILABLE_MESSAGE = "The interactive model is unavailable right now. Try again in a moment.";
+
+// The request layer words a full model server as "Server is busy (too many
+// requests)..." (HTTP 429) and a stalled or down one as "Server error (5xx)...",
+// neither of which is in FRIENDLY_ERRORS above, so both used to surface as a
+// generic "Refining failed" with no hint that waiting would help.
 function refineErrorMessage(error: unknown): string {
 	if (error instanceof TypeError) return "Could not reach the model server. Check your connection and try again.";
-	if (error instanceof Error && FRIENDLY_ERRORS.has(error.message)) return error.message;
+	if (error instanceof Error) {
+		if (FRIENDLY_ERRORS.has(error.message)) return error.message;
+		if (/\b(busy|at capacity|too many requests)\b/i.test(error.message)) return BUSY_MESSAGE;
+		if (/^Server error \(5\d\d\)/.test(error.message)) return UNAVAILABLE_MESSAGE;
+	}
 	return "Refining failed. Try again.";
 }
 
