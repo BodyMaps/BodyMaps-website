@@ -415,6 +415,39 @@ def _evict_oldest_idle(predicate) -> bool:
     return False
 
 
+_LAST_LIMIT_WARNING = 0.0
+
+
+def _warn_if_model_server_refused_below_local_limit(exc: Exception) -> None:
+    """Say so when the model server is full but this backend thinks it has room.
+
+    This backend caps its own leases (NNINTERACTIVE_MAX_SESSIONS) and expects the
+    model server's --max-sessions to be at least as large. If the server refuses a
+    lease while this process holds fewer than its own limit, the two settings have
+    drifted apart (or another client is using the server), and every user sees
+    "busy". Logged at most once a minute. Caller holds _STORE_LOCK.
+    """
+    global _LAST_LIMIT_WARNING
+    if not _is_capacity_error(exc) or len(_SESSIONS) >= _MAX_SESSIONS:
+        return
+    now = time.time()
+    if now - _LAST_LIMIT_WARNING < 60:
+        return
+    _LAST_LIMIT_WARNING = now
+    print(
+        f"[nninteractive_predictor] WARNING: the model server refused a session while this backend holds "
+        f"only {len(_SESSIONS)} of its {_MAX_SESSIONS} (NNINTERACTIVE_MAX_SESSIONS). The model server's "
+        f"--max-sessions is lower than that, or another client is using it. Raise --max-sessions or lower "
+        f"NNINTERACTIVE_MAX_SESSIONS so they match."
+    )
+
+
+def slot_stats() -> dict:
+    """This backend's own model leases, for /api/health. Never raises or blocks on the model server."""
+    with _STORE_LOCK:
+        return {"leases": len(_SESSIONS), "max": _MAX_SESSIONS, "per_user": _MAX_SESSIONS_PER_USER}
+
+
 def session_is_active(
     case_id: str,
     segment_label: int | None,
@@ -470,7 +503,11 @@ def get_or_create_session(
                 raise PromptCapacityError("Interactive segmentation is at capacity; existing prompt sessions were preserved.")
 
         print(f"[nninteractive_predictor] creating session {key} (ct={ct.shape}, baseline={baseline_mask is not None})")
-        sess = _NNSession(ct, baseline_mask=baseline_mask)
+        try:
+            sess = _NNSession(ct, baseline_mask=baseline_mask)
+        except Exception as exc:
+            _warn_if_model_server_refused_below_local_limit(exc)
+            raise
         sess._bodymaps_owner = owner_key
         sess._bodymaps_token = session_token
         sess._bodymaps_case_id = case_id

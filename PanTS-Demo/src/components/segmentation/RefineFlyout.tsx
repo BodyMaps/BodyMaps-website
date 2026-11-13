@@ -115,7 +115,7 @@ export default function RefineFlyout({ classLabel, refine, onApplied }: Props) {
 	return (
 		<div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
 			<p className="atb-flyout-note">
-				The model redraws this class's outline from its current voxels, with no clicks. It only grows into unlabeled voxels, and Undo reverses it.
+				The model redraws this class's outline from its current voxels, with no clicks. It can add unlabeled voxels and trim this class's own, never touches another structure, and Undo reverses it.
 			</p>
 			{error && <p className="atb-flyout-note atb-flyout-note--error" role="alert">{error}</p>}
 			<MenuDivider />

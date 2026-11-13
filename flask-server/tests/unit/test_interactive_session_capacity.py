@@ -211,3 +211,55 @@ def test_expired_remote_lease_retries_from_the_supplied_current_mask(monkeypatch
     assert FakeRemote.instances[1].calls[0] == ("seed", 1)
     assert result[0, 1, 1] == 1
     assert result[1, 1, 1] == 1
+
+
+def test_slot_stats_reports_this_backends_leases_and_limits(monkeypatch):
+    monkeypatch.setattr(predictor, "_NNSession", FakeSession)
+    ct = np.zeros((2, 2, 2), dtype=np.float32)
+    assert predictor.slot_stats() == {"leases": 0, "max": 2, "per_user": 2}
+    predictor.get_or_create_session("case-a", 1, "low", ct, session_token="a", owner="alice")
+    assert predictor.slot_stats()["leases"] == 1
+
+
+class RefusingSession:
+    def __init__(self, *_args, **_kwargs):
+        raise RuntimeError("server is at capacity")
+
+
+def test_warns_when_the_model_server_refuses_below_this_backends_own_limit(monkeypatch, capsys):
+    monkeypatch.setattr(predictor, "_NNSession", RefusingSession)
+    monkeypatch.setattr(predictor, "_LAST_LIMIT_WARNING", 0.0)
+    ct = np.zeros((2, 2, 2), dtype=np.float32)
+
+    with pytest.raises(RuntimeError, match="at capacity"):
+        predictor.get_or_create_session("case-a", 1, "low", ct, session_token="a", owner="alice")
+
+    out = capsys.readouterr().out
+    assert "--max-sessions" in out and "NNINTERACTIVE_MAX_SESSIONS" in out
+    assert "holds only 0 of its 2" in out
+
+
+def test_the_limit_warning_is_rate_limited(monkeypatch, capsys):
+    monkeypatch.setattr(predictor, "_NNSession", RefusingSession)
+    monkeypatch.setattr(predictor, "_LAST_LIMIT_WARNING", 0.0)
+    ct = np.zeros((2, 2, 2), dtype=np.float32)
+
+    for token in ("a", "b", "c"):
+        with pytest.raises(RuntimeError):
+            predictor.get_or_create_session("case-a", 1, "low", ct, session_token=token, owner="alice")
+
+    assert capsys.readouterr().out.count("WARNING: the model server refused") == 1
+
+
+def test_no_limit_warning_for_other_failures_or_when_the_local_pool_is_full(monkeypatch, capsys):
+    monkeypatch.setattr(predictor, "_LAST_LIMIT_WARNING", 0.0)
+    predictor._warn_if_model_server_refused_below_local_limit(RuntimeError("connection refused"))
+    assert "WARNING" not in capsys.readouterr().out
+
+    monkeypatch.setattr(predictor, "_NNSession", FakeSession)
+    ct = np.zeros((2, 2, 2), dtype=np.float32)
+    predictor.get_or_create_session("case-a", 1, "low", ct, session_token="a", owner="alice")
+    predictor.get_or_create_session("case-b", 1, "low", ct, session_token="b", owner="bob")
+    predictor._warn_if_model_server_refused_below_local_limit(RuntimeError("server is at capacity"))
+    assert "WARNING" not in capsys.readouterr().out
+
