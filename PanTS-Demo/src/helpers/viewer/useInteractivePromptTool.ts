@@ -141,10 +141,20 @@ export function useInteractivePromptTool({
 	// The four prompt-mode hooks are mounted together. Their shared session is
 	// released only when its case, target label, or resolution is abandoned;
 	// changing between point, box, lasso, and scribble keeps the same context.
+	//
+	// Closing the tab or leaving the site never runs this cleanup, and the model
+	// server may allow only one lease at a time, so an abandoned tab would keep
+	// every other user's prompts and Refine "busy" until the idle timeout. Release
+	// on `pagehide` too (releasing twice is harmless: the second call finds no token).
 	useEffect(() => {
 		if (caseId == null || activeSegmentIndex == null) return;
-		return () => {
+		const release = () => {
 			void releaseInteractivePromptSession(apiBase, caseId, activeSegmentIndex, res);
+		};
+		window.addEventListener("pagehide", release);
+		return () => {
+			window.removeEventListener("pagehide", release);
+			release();
 		};
 	}, [apiBase, caseId, activeSegmentIndex, res]);
 

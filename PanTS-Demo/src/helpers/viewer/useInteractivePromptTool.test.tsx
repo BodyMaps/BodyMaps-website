@@ -203,6 +203,26 @@ describe("interactive prompt resource changes", () => {
 		);
 	});
 
+	it("releases the model session when the page is closed, and only once when it unmounts afterwards", async () => {
+		promptApi.releaseInteractivePromptSession.mockClear();
+		const { unmount } = renderHook(() => useInteractivePromptTool({
+			enabled: true, mode: "point", apiBase: "http://api.test", caseId: "case-a",
+			activeSegmentIndex: 12, res: "full",
+		}));
+
+		// Closing a tab never unmounts the component, so React cleanup alone would leave
+		// the model server's only lease held until the idle timeout.
+		window.dispatchEvent(new Event("pagehide"));
+		expect(promptApi.releaseInteractivePromptSession).toHaveBeenCalledTimes(1);
+		expect(promptApi.releaseInteractivePromptSession).toHaveBeenCalledWith("http://api.test", "case-a", 12, "full");
+
+		unmount();
+		// The unmount still releases (the real helper finds no token the second time and does nothing).
+		expect(promptApi.releaseInteractivePromptSession).toHaveBeenCalledTimes(2);
+		window.dispatchEvent(new Event("pagehide"));
+		expect(promptApi.releaseInteractivePromptSession).toHaveBeenCalledTimes(2);
+	});
+
 	it("identifies a region-grow fallback as not produced by nnInteractive", async () => {
 		promptApi.submitInteractiveSegmentPrompt.mockResolvedValue({
 			changed: 8, modelFallback: true, sessionActive: false,
