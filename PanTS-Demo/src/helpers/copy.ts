@@ -11,10 +11,6 @@ export const NONCLINICAL_WARNING =
 /** Landing hero subtitle, directly under the wordmark. */
 export const LANDING_SUBTITLE = "The intelligence layer for medical imaging AI";
 
-/** One-paragraph orientation for a first-time visitor, under the stats row. */
-export const LANDING_OVERVIEW =
-  "Browse the library in 2D and 3D, upload your own CT for AI segmentation, and annotate or refine the results.";
-
 /** Browser-tab / link-preview title (index.html <title>, og:title, twitter:title). */
 export const SITE_TITLE = "BodyMaps: CT library, segmentation, and annotation";
 

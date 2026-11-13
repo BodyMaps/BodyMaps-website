@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LIBRARY_CLASS_COUNT, API_BASE } from "../../helpers/constants";
 import { useAuth } from "../../contexts/authContext";
-import { LANDING_OVERVIEW, LANDING_SUBTITLE } from "../../helpers/copy";
+import { LANDING_SUBTITLE } from "../../helpers/copy";
 import styles from "./LandingPage.module.css";
 
 // Signed-out visitors only ever see these (the live volume count needs an account), so keep them current.
@@ -151,7 +151,6 @@ export default function WorkspaceIntro({ collapsed = false }: { collapsed?: bool
             </div>
           ))}
         </div>
-        <p className={styles.heroOverview}>{LANDING_OVERVIEW}</p>
       </section>
       </div>
     </div>
