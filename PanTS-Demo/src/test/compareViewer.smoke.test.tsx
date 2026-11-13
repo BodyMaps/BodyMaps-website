@@ -43,7 +43,7 @@ beforeEach(() => {
 		setFocusedViewport: vi.fn(),
 		setReferenceLines: vi.fn(),
 		flipFocused: vi.fn(),
-		rotateFocused90: vi.fn(),
+		flipFocusedVertical: vi.fn(),
 		startCine: vi.fn(() => true),
 		stopCine: vi.fn(),
 		setActiveMeasurementTool: vi.fn(),

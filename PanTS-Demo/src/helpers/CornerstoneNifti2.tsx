@@ -1740,7 +1740,7 @@ export function stopCine() {
 }
 
 // ---------------------------------------------------------------------------
-// Per-pane flip / rotate — like Cine, these act on whichever pane is currently
+// Per-pane flip — like Cine, these act on whichever pane is currently
 // "in focus" (VisualizationPage tracks that via scroll/click and passes it in).
 // ---------------------------------------------------------------------------
 
@@ -1758,23 +1758,15 @@ export function flipPaneHorizontal(pane: CinePane): void {
   }
 }
 
-// Rotates 90° clockwise from wherever the pane currently sits (cumulative — four
-// clicks return to the start). NOTE: cornerstone's rotation-angle sign convention
-// relative to "on-screen clockwise" isn't independently confirmed here — if a
-// case turns out to visibly rotate counter-clockwise instead, flip the `+ 90`
-// below to `- 90` (mod still needs the `+ 360` to stay positive in that case).
-export function rotatePane90Clockwise(pane: CinePane): void {
+// Mirrors the pane top-bottom. Same toggle behavior as flipPaneHorizontal: a second
+// call on the same pane un-flips it, and flip() renders by itself.
+export function flipPaneVertical(pane: CinePane): void {
   const viewport = _getMprViewport(pane);
   if (!viewport) return;
   try {
-    const next = (viewport.getRotation() + 90) % 360;
-    viewport.setRotation(next);
-    // Unlike flip(), setRotation() only triggers a CAMERA_MODIFIED event — it
-    // never calls render() itself, so without this the rotation wouldn't show
-    // until some unrelated interaction happened to re-render the pane.
-    viewport.render();
+    viewport.flip({ flipVertical: true });
   } catch (e) {
-    console.warn(`Rotate failed for pane "${pane}":`, e);
+    console.warn(`Vertical flip failed for pane "${pane}":`, e);
   }
 }
 

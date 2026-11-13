@@ -93,7 +93,7 @@ vi.mock("../helpers/CornerstoneNifti2", async (importOriginal) => {
 		stopCine: vi.fn(),
 		setReferenceLinesEnabled: vi.fn(),
 		flipPaneHorizontal: vi.fn(),
-		rotatePane90Clockwise: vi.fn(),
+		flipPaneVertical: vi.fn(),
 		resetMprOrientation: vi.fn(),
 	};
 });
@@ -105,7 +105,7 @@ vi.mock("../helpers/NiiVueNifti", () => ({
 }));
 
 import { downloadBytes } from "../helpers/viewer/segmentationFile";
-import { applyRemoteMeasurement, clearMeasurements, LENGTH_TOOL, renderVisualization, getSegmentationExport, saveSegmentation, saveSharedSegmentation, subscribeToSegmentationEdits } from "../helpers/CornerstoneNifti2";
+import { applyRemoteMeasurement, clearMeasurements, LENGTH_TOOL, renderVisualization, flipPaneHorizontal, flipPaneVertical, getSegmentationExport, saveSegmentation, saveSharedSegmentation, subscribeToSegmentationEdits } from "../helpers/CornerstoneNifti2";
 import VisualizationPage from "../routes/VisualizationPage";
 import type { EducationResult, QuizPracticeController, SoloChallengeController } from "../education/types";
 import type { LiveRoomController } from "../liveRooms/types";
@@ -354,6 +354,19 @@ describe("viewer smoke test", () => {
 		expect(screen.queryByRole("button", { name: "Redo" })).not.toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: "Save Segmentation" })).not.toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: "Save", exact: true })).not.toBeInTheDocument();
+	});
+
+	it("offers flip horizontal and flip vertical in the View menu, and no rotate", async () => {
+		render(<AuthProvider><MemoryRouter initialEntries={["/case/35"]}>
+			<Routes><Route path="/case/:caseId" element={<VisualizationPage />} /></Routes>
+		</MemoryRouter></AuthProvider>);
+		await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
+		fireEvent.click(screen.getByRole("button", { name: "View options" }));
+		expect(screen.getByRole("menuitem", { name: "Flip horizontal" })).toBeInTheDocument();
+		expect(screen.queryByRole("menuitem", { name: /rotate/i })).not.toBeInTheDocument();
+		fireEvent.click(screen.getByRole("menuitem", { name: "Flip vertical" }));
+		expect(flipPaneVertical).toHaveBeenCalledTimes(1);
+		expect(flipPaneHorizontal).not.toHaveBeenCalled();
 	});
 
 	it("opens AI, live rooms, and shortcuts directly from the viewer toolbar", async () => {

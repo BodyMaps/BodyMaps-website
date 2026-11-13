@@ -33,7 +33,7 @@ const handle = () => ({
 	setLinked: vi.fn(), setSyncCursor: vi.fn(), setSegVisible: vi.fn(), setSegOpacity: vi.fn(),
 	setOrganVisibility: vi.fn(), applyWindow: vi.fn(), applyZoom: vi.fn(), centerCursor: vi.fn(),
 	jumpToOrgan: vi.fn(), refit: vi.fn(), resetView: vi.fn(), setFocusedViewport: vi.fn(),
-	setReferenceLines: vi.fn(), flipFocused: vi.fn(), rotateFocused90: vi.fn(), startCine: vi.fn(() => true),
+	setReferenceLines: vi.fn(), flipFocused: vi.fn(), flipFocusedVertical: vi.fn(), startCine: vi.fn(() => true),
 	stopCine: vi.fn(), setActiveMeasurementTool: vi.fn(), clearMeasurements: vi.fn(),
 	getMeasurementSummaries: vi.fn(() => []), renameMeasurement: vi.fn(), removeMeasurement: vi.fn(),
 	jumpToMeasurement: vi.fn(), subscribeToMeasurementChanges: vi.fn(() => vi.fn()), destroy: vi.fn(),
