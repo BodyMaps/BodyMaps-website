@@ -18,6 +18,7 @@ import {
     IconClick,
     IconEye,
     IconFlipHorizontal,
+    IconFlipVertical,
     IconGrid3x3,
     IconHome,
     IconId,
@@ -25,7 +26,6 @@ import {
     IconLasso,
     IconLayoutSidebarRight,
     IconListDetails, IconMicrophone, IconPlayerPause, IconPlayerPlay, IconPointer, IconReport,
-    IconRotateClockwise,
     IconRuler2,
     IconScanEye,
     IconShare,
@@ -111,6 +111,7 @@ import {
     ELLIPSE_TOOL,
     enableVolume3D,
     flipPaneHorizontal,
+    flipPaneVertical,
     FREEHAND_ROI_TOOL,
     getCrosshairMm,
     getCurrentVolumeModality,
@@ -134,7 +135,6 @@ import {
     resetMprOrientation,
 	releasePrimaryMouseTools,
     ROI_TOOL,
-    rotatePane90Clockwise,
     setActiveMaskEditTool,
     setActiveMeasurementTool,
     setFillOpacity,
@@ -1768,7 +1768,7 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	const windowFlyout = useToolbarFlyout(); // CT window presets (stays open — a config panel)
 	const adjustFlyout = useToolbarFlyout(); // fill/border/brightness/contrast/zoom sliders + center/reset (stays open)
 	const measureFlyout = useToolbarFlyout(); // measurement tools + magnify loupe
-	const viewFlyout = useToolbarFlyout(); // hover-identify, reference lines, flip, rotate
+	const viewFlyout = useToolbarFlyout(); // hover-identify, reference lines, flip
 	const cineFlyout = useToolbarFlyout(); // play/pause + FPS (stays open — a live mini-panel, not a pick-and-dismiss menu)
 	const captureFlyout = useToolbarFlyout(); // snapshot, reading session, share link
 	const panelsFlyout = useToolbarFlyout(); // organs, organ stats, case metadata, measurements list
@@ -2711,10 +2711,10 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 		sessionRef.current?.log("view", `Flipped ${pane} horizontally`);
 	};
 
-	const handleRotate90Clockwise = () => {
+	const handleFlipVertical = () => {
 		const pane = focusedPane.getFocusedPane()
-		rotatePane90Clockwise(pane);
-		sessionRef.current?.log("view", `Rotated ${pane} 90° clockwise`);
+		flipPaneVertical(pane);
+		sessionRef.current?.log("view", `Flipped ${pane} vertically`);
 	};
 
 	// Reads cinePlaying directly rather than through setState's functional-updater form —
@@ -4696,7 +4696,7 @@ const aiAvailableOrgans = useMemo(() => {
 													)}
 											</div>
 
-											{/* View ▾ — hover-identify + reference lines (toggles) and flip/rotate
+											{/* View ▾ — hover-identify + reference lines (toggles) and flip
 											    (one-shot actions on the focused pane). */}
 											<div className="vp-toolgroup" ref={viewFlyout.groupRef}>
 												<button
@@ -4761,12 +4761,12 @@ const aiAvailableOrgans = useMemo(() => {
 																role="menuitem"
 																title="The focused pane (last one scrolled or clicked)"
 																onClick={() => {
-																	handleRotate90Clockwise();
+																	handleFlipVertical();
 																	viewFlyout.close();
 																}}
 															>
-																<IconRotateClockwise size={18} />
-																<span>Rotate 90° clockwise</span>
+																<IconFlipVertical size={18} />
+																<span>Flip vertical</span>
 															</button>
 														</div>,
 														document.body

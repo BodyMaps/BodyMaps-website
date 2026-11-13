@@ -91,7 +91,7 @@ vi.mock("../helpers/CornerstoneNifti2", async (importOriginal) => {
 		stopCine: vi.fn(),
 		setReferenceLinesEnabled: vi.fn(),
 		flipPaneHorizontal: vi.fn(),
-		rotatePane90Clockwise: vi.fn(),
+		flipPaneVertical: vi.fn(),
 		resetMprOrientation: vi.fn(),
 	};
 });

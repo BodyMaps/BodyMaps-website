@@ -154,14 +154,14 @@ export type CompareHandle = {
 	 *  queued, or the cells moved since the last pass), so the caller refits again. */
 	refit: (keepView?: boolean) => boolean;
 	resetView: () => void;
-	// Which viewport cine/flip/rotate act on — whichever pane was last clicked/scrolled.
+	// Which viewport cine/flip act on — whichever pane was last clicked/scrolled.
 	setFocusedViewport: (viewportId: string) => void;
 	// Dotted line in each case's other 2 panes for whichever of that case's panes was
 	// last focused — tracked independently per case, so both cases can show reference
-	// lines at once even though "focus" for cine/flip/rotate is a single global value.
+	// lines at once even though "focus" for cine/flip is a single global value.
 	setReferenceLines: (enabled: boolean) => void;
 	flipFocused: () => void;
-	rotateFocused90: () => void;
+	flipFocusedVertical: () => void;
 	startCine: (fps?: number) => boolean;
 	stopCine: () => void;
 	// Hands the primary mouse button (on BOTH cases at once) to a measurement tool or
@@ -1232,7 +1232,7 @@ async function buildCompare(els: CompareElements, src: CompareSources, gen: numb
 	eventTarget.addEventListener(tools.Enums.Events.ANNOTATION_REMOVED, annotationCases.onRemoved);
 	const caseKeyForAnnotation = annotationCases.caseKeyFor;
 
-	// --- Focus tracking: which viewport cine/flip/rotate act on (whichever pane was last
+	// --- Focus tracking: which viewport cine/flip act on (whichever pane was last
 	// clicked/scrolled), and which pane is each case's reference-line "source" (tracked
 	// independently per case so both cases can show reference lines simultaneously). ---
 	let focusedViewportId: string = A.ax;
@@ -1555,16 +1555,12 @@ async function buildCompare(els: CompareElements, src: CompareSources, gen: numb
 				console.warn("[compare] flip failed:", e);
 			}
 		},
-		rotateFocused90() {
+		flipFocusedVertical() {
 			const vp = engine.getViewport(focusedViewportId) as unknown as MprViewportLike | undefined;
-			if (!vp) return;
 			try {
-				const next = (vp.getRotation() + 90) % 360;
-				vp.setRotation(next);
-				// setRotation only triggers CAMERA_MODIFIED — it never calls render() itself.
-				vp.render();
+				vp?.flip({ flipVertical: true });
 			} catch (e) {
-				console.warn("[compare] rotate failed:", e);
+				console.warn("[compare] vertical flip failed:", e);
 			}
 		},
 		startCine(fps) {

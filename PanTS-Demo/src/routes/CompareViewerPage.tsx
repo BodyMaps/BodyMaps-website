@@ -19,6 +19,7 @@ import {
 	IconClick,
 	IconClipboardList,
 	IconFlipHorizontal,
+	IconFlipVertical,
 	IconGrid3x3,
 	IconHome,
 	IconLasso,
@@ -27,7 +28,6 @@ import {
 	IconPlayerPause,
 	IconPlayerPlay,
 	IconPointer,
-	IconRotateClockwise,
 	IconRuler2,
 	IconScanEye,
 	IconSettings,
@@ -387,7 +387,7 @@ export default function CompareViewerPage() {
 	};
 	const handlePaneHoverLeave = () => setHoverTip((t) => (t.visible ? { ...t, visible: false } : t));
 
-	// Focus (which pane cine/flip/rotate act on) is tracked inside compareViewer.ts itself
+	// Focus (which pane cine/flip act on) is tracked inside compareViewer.ts itself
 	// via its own mousedown/wheel listeners — this just forwards an explicit click there too,
 	// so clicking (without dragging) a pane also moves focus, matching the single viewer.
 	const handlePaneMouseDown = (viewportId: string) => () => handleRef.current?.setFocusedViewport(viewportId);
@@ -520,12 +520,12 @@ export default function CompareViewerPage() {
 										role="menuitem"
 										title="The focused pane — last one clicked or scrolled"
 										onClick={() => {
-											handleRef.current?.rotateFocused90();
+											handleRef.current?.flipFocusedVertical();
 											viewFlyout.close();
 										}}
 									>
-										<IconRotateClockwise size={18} />
-										<span>Rotate 90° clockwise</span>
+										<IconFlipVertical size={18} />
+										<span>Flip vertical</span>
 									</button>
 								</div>,
 								document.body
