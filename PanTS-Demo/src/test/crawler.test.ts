@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { LANDING_OVERVIEW, LANDING_SUBTITLE, NONCLINICAL_WARNING, SITE_DESCRIPTION } from "../helpers/copy";
+import { LANDING_SUBTITLE, NONCLINICAL_WARNING, SITE_DESCRIPTION } from "../helpers/copy";
 import { MARKER, NOT_FOR_CRAWLERS, injectPublicSections, renderPublicSections } from "../seo/staticSummary";
 import { LAST_UPDATED, PRIVACY, TERMS, TERMS_INTRO } from "../routes/legalText";
 import { MEMBERS } from "../routes/TeamPage/members";
@@ -54,8 +54,9 @@ describe("crawler-readable site", () => {
 
   it("index.html has readable text for non-JavaScript readers, in the canonical copy", () => {
     const block = staticBlock();
-    for (const text of [LANDING_SUBTITLE, LANDING_OVERVIEW, NONCLINICAL_WARNING]) expect(block).toContain(text);
+    for (const text of [LANDING_SUBTITLE, NONCLINICAL_WARNING]) expect(block).toContain(text);
     expect(block).toMatch(/<h1>BodyMaps<\/h1>/);
+    expect(block).not.toContain("Browse the library in 2D and 3D");
     for (const model of ["ePAI", "Atlas-Net", "LesionSegmenter"]) expect(block).toContain(model);
     expect(block).not.toMatch(/—/);
     expect(read("index.html")).toContain('"application/ld+json"');

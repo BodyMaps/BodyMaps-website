@@ -3402,8 +3402,7 @@ const UploadPage: React.FC = () => {
                   <polyline points="17 8 12 3 7 8" />
                   <line x1="12" y1="3" x2="12" y2="15" />
                 </svg>
-                <div className="dropzone-text">Drop a CT scan here</div>
-                <p className="workspace-format-note">NIfTI (.nii, .nii.gz) or a DICOM series</p>
+                <div className="dropzone-text">Drop a medical scan here</div>
               </>
             ) : (
               // ── Selected items: NIfTI files + DICOM series, each individually

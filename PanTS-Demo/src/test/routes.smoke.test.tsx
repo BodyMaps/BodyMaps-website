@@ -60,8 +60,10 @@ describe("route smoke tests", () => {
   it("UploadPage renders", async () => {
     renderRoute(<UploadPage />);
     expect(
-      await screen.findByText("Drop a CT scan here"),
+      await screen.findByText("Drop a medical scan here"),
     ).toBeInTheDocument();
+    // The format line under the heading was removed on purpose.
+    expect(screen.queryByText(/or a DICOM series/)).toBeNull();
   });
 
   it("AuthModal opens as a popup with provider options when prompted", async () => {

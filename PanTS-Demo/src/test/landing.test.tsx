@@ -3,7 +3,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "../contexts/authContext";
 import LandingPage from "../routes/LandingPage";
-import { LANDING_OVERVIEW, LANDING_SUBTITLE } from "../helpers/copy";
+import { LANDING_SUBTITLE } from "../helpers/copy";
 
 // The landing page fetches the live CT count; stub it so the test never
 // touches a backend (same shape as routes.smoke.test.tsx).
@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe("landing hero copy", () => {
-  it("shows the subtitle under the wordmark and the overview under the stats row", () => {
+  it("shows the subtitle under the wordmark and ends with the stats row", () => {
     render(
       <AuthProvider>
         <MemoryRouter>
@@ -33,12 +33,11 @@ describe("landing hero copy", () => {
     );
     const subtitle = screen.getByText(LANDING_SUBTITLE);
     expect(subtitle.previousElementSibling?.tagName).toBe("H1");
-    const overview = screen.getByText(LANDING_OVERVIEW);
-    // Directly after the stats row, not between subtitle and stats.
-    expect(overview.previousElementSibling?.textContent).toContain("CT Volumes");
-    expect(overview.nextElementSibling).toBeNull();
-    // The nonclinical sentence lives in the footer, not in the paragraph.
-    expect(overview.textContent).not.toMatch(/nonclinical|research use only/i);
+    // The stats row is the last thing in the hero: no orientation paragraph under it.
+    const stats = screen.getByText("CT Volumes").closest("div[class*=heroStats]");
+    expect(stats).not.toBeNull();
+    expect(stats?.nextElementSibling).toBeNull();
+    expect(screen.queryByText(/Browse the library in 2D and 3D/)).toBeNull();
   });
 
   it("keeps the existing hero mounted while collapsed and restores its accessible content", () => {
