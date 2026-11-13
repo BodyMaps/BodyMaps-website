@@ -3985,10 +3985,16 @@ def health():
     with _inference_jobs_lock:
         statuses = [job.get("status") for job in inference_jobs.values()]
     running, queued = statuses.count("running"), statuses.count("queued")
+    try:
+        from services import nninteractive_predictor as _nn
+        interactive = _nn.slot_stats()
+    except Exception:
+        interactive = None  # health must answer even if the model client is not installed
     resp = jsonify({
         "status": "ok" if mount["ok"] else "degraded",
         "mount": mount,
         "inference": {"running": running, "queued": queued, "active": running + queued},
+        "interactive": interactive,
         "threads": threading.active_count(),
     })
     resp.status_code = 200 if mount["ok"] else 503

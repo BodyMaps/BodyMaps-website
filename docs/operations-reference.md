@@ -65,6 +65,60 @@ reachable server, a plain click or box falls back to the older region-grow tool,
 prompts only the model can answer (corrections, scribble, lasso) say the model
 is unavailable.
 
+#### Session slots
+
+The model server holds one "slot" (lease) per live prompt session and refuses a request
+when all slots are taken, which the viewer shows as "busy". `--max-sessions` sets the
+number of slots (default 3). One person can need two at once: the click, box, scribble
+and lasso tools keep one session per structure, and "Refine with model" opens a second,
+short-lived one. So:
+
+- Set `NNINTERACTIVE_MAX_SESSIONS` in `flask-server/.env` to the same number as the
+  server's `--max-sessions`, never higher. If the server has fewer, it refuses leases the
+  backend believes it has, and the backend logs a warning saying so.
+- Leave `NNINTERACTIVE_MAX_SESSIONS_PER_USER=2` (prompt session plus Refine).
+- With a single slot, Refine fails whenever the same person used a click tool in the last
+  ten minutes, and everyone else is refused while one person holds it.
+- A slot is freed when the viewer leaves the tool or the page closes, or after the idle
+  timeout (`NNINTERACTIVE_SESSION_TTL`, 600 s).
+
+GPU work is serialised, so with several people predicting at once the later ones wait.
+Measured on the lab host: a click or Refine on a real full-resolution scan answered in
+about 1 to 4 s alone, and three predictions started together on a synthetic volume
+finished about 4 s apart. Every slot also holds its CT in the model server's memory (a
+full-resolution scan is about 140 MB as float32), so check memory before raising the
+count a lot.
+
+#### Running the model server as a service
+
+On the lab host, run it as a systemd user service so it survives logouts and reboots
+(`loginctl enable-linger <user>` once). Save as `~/.config/systemd/user/nninteractive-bodymaps.service`:
+```
+[Unit]
+Description=nnInteractive model server for the BodyMaps website
+After=network.target
+
+[Service]
+ExecStart=/path/to/nninteractive-env/bin/nninteractive-server --model nnInteractive_v1.0 --device cuda --host 127.0.0.1 --port 1530 --no-torch-compile --max-sessions 3
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/path/to/nninteractive.log
+StandardError=append:/path/to/nninteractive.log
+
+[Install]
+WantedBy=default.target
+```
+Then `systemctl --user daemon-reload && systemctl --user enable --now nninteractive-bodymaps`,
+and point `NNINTERACTIVE_URL` at it. To change the slot count, edit `--max-sessions`,
+change `NNINTERACTIVE_MAX_SESSIONS` to match, `systemctl --user restart` the service, then
+restart the backend (`deploy/start_backend.sh`, at 0 running jobs). Restart when the log
+shows `0/N active`: anyone mid-edit loses their model session once, and the viewer
+restarts it from their current mask.
+
+To see what is happening: `GET /api/health` shows `interactive.leases` against
+`interactive.max` (this backend's own leases), and the model server's log prints
+`claimed session ... (k/N active)` and `released session ...` for every slot change.
+
 #### Create Conda Environment
 ```
 conda create -n PanTS_backend python=3.11

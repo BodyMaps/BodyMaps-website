@@ -1,6 +1,7 @@
 /**
- * The old standalone RefineFlyout no longer exists. Refinement now shares the
- * annotation ribbon's AI slot; this contract tests the current copy/state.
+ * Refinement shares the annotation ribbon's AI slot (the label and when it shows
+ * as "AI refine" are tested here); the flyout it opens is RefineFlyout.tsx, whose
+ * failure messages are tested in refineFlyoutErrors.test.tsx.
  */
 import { describe, expect, it } from "vitest";
 import { aiSlotCopy, deriveToolbarState, toolbarLayout } from "../components/viewer/annotationToolbarState";
