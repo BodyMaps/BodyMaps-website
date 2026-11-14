@@ -31,7 +31,7 @@ vi.mock("../helpers/constants", () => ({ APP_CONSTANTS: { API_ORIGIN: "" } }));
 vi.mock("../helpers/utils", () => ({ cornerstoneLpsMmToThree: (position: number[]) => position }));
 vi.mock("../helpers/viewer/meshCapture", () => ({ registerMeshRoot: vi.fn() }));
 vi.mock("../components/viewer/LiveSegmentMesh", () => ({
-  LiveSegmentMesh: ({ segmentIndex }: { segmentIndex: number }) => <span data-testid={`live-${segmentIndex}`} />,
+  LiveSegmentMesh: ({ segmentIndex, maskRevision }: { segmentIndex: number; maskRevision?: number }) => <span data-testid={`live-${segmentIndex}`} data-revision={maskRevision ?? 0} />,
 }));
 vi.mock("../components/viewer/SceneCrosshair3D", () => ({ SceneCrosshair3D: () => <span data-testid="crosshair" /> }));
 vi.mock("../components/viewer/OrganMesh", async () => {
@@ -63,12 +63,20 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("3D mesh pane", () => {
-  it("draws an edited catalog class live only when the scan has no baked mesh for it", async () => {
-    render(<SegmentationMeshViewer {...props} editedOrgans={[{ id: 2, label: "organ2" }, { id: 7, label: "organ7" }]} />);
+  it("rebuilds edited baked organs from the live labelmap while keeping unedited baked meshes", async () => {
+    render(<SegmentationMeshViewer {...props} editedOrgans={[{ id: 2, label: "organ2" }, { id: 7, label: "organ7" }]} maskRevisions={{ 2: 4, 7: 1 }} />);
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("3 of 3 meshes loaded."));
     expect(screen.getByTestId("live-7")).toBeInTheDocument();
-    expect(screen.queryByTestId("live-2")).not.toBeInTheDocument();
-    expect(screen.getByTestId("mesh-2")).toBeInTheDocument();
+    expect(screen.getByTestId("live-2")).toHaveAttribute("data-revision", "4");
+    expect(screen.queryByTestId("mesh-2")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mesh-1")).toBeInTheDocument();
+  });
+
+  it("passes a newer settled mask revision to the edited live surface", async () => {
+    const view = render(<SegmentationMeshViewer {...props} editedOrgans={[{ id: 2, label: "organ2" }]} maskRevisions={{ 2: 4 }} />);
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("3 of 3 meshes loaded."));
+    view.rerender(<SegmentationMeshViewer {...props} editedOrgans={[{ id: 2, label: "organ2" }]} maskRevisions={{ 2: 5 }} />);
+    expect(screen.getByTestId("live-2")).toHaveAttribute("data-revision", "5");
   });
 
   it("returns to the opening framing when the report walkthrough ends", async () => {

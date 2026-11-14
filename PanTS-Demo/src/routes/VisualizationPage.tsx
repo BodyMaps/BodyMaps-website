@@ -72,6 +72,7 @@ import HollowFlyout from "../components/segmentation/HollowFlyout";
 import LevelTracingFlyout from "../components/segmentation/LevelTracingFlyout";
 import { useScissorsTool } from "../helpers/viewer/useScissorsTool";
 import { useInteractivePromptTool } from "../helpers/viewer/useInteractivePromptTool";
+import { useEditedCatalogIds } from "../helpers/viewer/useEditedCatalogIds";
 import { loadSegmentationMetadata } from "../helpers/viewer/segmentationMetadata";
 import { useAuthIfPresent } from "../contexts/authContext";
 import { loadRecentUploads, renameRecentUpload } from "../helpers/recentUploads";
@@ -4138,6 +4139,14 @@ const customOrgans = useMemo(
     () => checkBoxData.filter((o) => o.id > segmentation_categories.length),
     [checkBoxData]
 );
+const { ids: editedCatalogIds, revisions: maskRevisions } = useEditedCatalogIds(caseId, segmentation_categories.length);
+const editedCatalogOrgans = useMemo(
+	() => editedCatalogIds.flatMap((id) => {
+		const organ = checkBoxData.find((item) => item.id === id);
+		return organ ? [organ] : [];
+	}),
+	[checkBoxData, editedCatalogIds]
+);
 
 
 const organCatalog = useMemo(() => {
@@ -5490,7 +5499,7 @@ const aiAvailableOrgans = useMemo(() => {
 									<span>(switch to Volume rendering above)</span>
 								</div>
 											) : (
-								<SegmentationMeshViewer caseId={caseId} isSession={!!sessionId && !pantsCase} crosshairMm={crosshairMm} checkState={meshCheckState} loading={loading} opacity={opacityValue} customOrgans={customOrgans} labelColorMap={labelColorMap} onSwitchToVolume={() => setThreeDMode("volume")} />
+								<SegmentationMeshViewer caseId={caseId} isSession={!!sessionId && !pantsCase} crosshairMm={crosshairMm} checkState={meshCheckState} loading={loading} opacity={opacityValue} customOrgans={customOrgans} editedOrgans={editedCatalogOrgans} maskRevisions={maskRevisions} labelColorMap={labelColorMap} onSwitchToVolume={() => setThreeDMode("volume")} />
 							)}
 						</div>
 						{!loading && (
