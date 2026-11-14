@@ -20,6 +20,7 @@ import { encodeSegmentationSavePayload } from "./viewer/segmentationSavePayload"
 import { gzipBytes } from "./viewer/gzipBytes";
 import { savedRevision, rememberSavedRevision, structureMetadataHeader, type SavedStructures } from "./viewer/segmentationMetadata";
 import { isIndexInsideGrid } from "./viewer/promptGrid";
+import { rasterizeScribbleStroke } from "./viewer/scribbleMask";
 import { analyzeScan, intensityUnit, mrWindowPresets, waitForFrames, type ScanAnalysis, type ScanModality } from "./scanModality";
 
 /** NIfTI scans are medical CTs but do not carry DICOM's Modality metadata. */
@@ -3069,7 +3070,7 @@ export function buildLassoCroppedMask(pane: CinePane, polygonWorld: Point3[]): {
   return { mask: mask2d, bbox };
 }
 
-export function buildScribbleCroppedMask(pane: CinePane, strokeWorld: Point3[], radiusVox: number = 2): { mask: Uint8Array; bbox: [[number, number], [number, number], [number, number]] } | null {
+export function buildScribbleCroppedMask(pane: CinePane, strokeWorld: Point3[], radiusVox: number = 1): { mask: Uint8Array; bbox: [[number, number], [number, number], [number, number]] } | null {
   const ctVolume = _currentCtVolumeId ? cache.getVolume(_currentCtVolumeId) : undefined;
   if (!ctVolume?.imageData || strokeWorld.length < 1) return null;
   const [dimX, dimY, dimZ] = ctVolume.imageData.getDimensions() as [number, number, number];
@@ -3083,25 +3084,12 @@ export function buildScribbleCroppedMask(pane: CinePane, strokeWorld: Point3[], 
   minB = Math.max(0, Math.floor(minB)); maxB = Math.min((axis === 2 ? dimY : axis === 0 ? dimZ : dimZ) - 1, Math.ceil(maxB));
   const w = maxA - minA + 1, h = maxB - minB + 1;
   if (w <= 0 || h <= 0) return null;
-  const mask2d = new Uint8Array(w * h);
-  const r2 = radiusVox * radiusVox;
-  // For each segment, rasterize thick line via distance to segment
-  for (let i = 0; i < pts2d.length; i++) {
-    const p0 = pts2d[i], p1 = pts2d[Math.min(i + 1, pts2d.length - 1)];
-    const dx = p1[0] - p0[0], dy = p1[1] - p0[1], len2 = dx * dx + dy * dy || 1;
-    const steps = Math.ceil(Math.sqrt(len2)) + 1;
-    for (let s = 0; s <= steps; s++) {
-      const t = s / steps;
-      const cx = p0[0] + dx * t, cy = p0[1] + dy * t;
-      const a0 = Math.max(minA, Math.floor(cx - radiusVox)), a1 = Math.min(maxA, Math.ceil(cx + radiusVox));
-      const b0 = Math.max(minB, Math.floor(cy - radiusVox)), b1 = Math.min(maxB, Math.ceil(cy + radiusVox));
-      for (let b = b0; b <= b1; b++) for (let a = a0; a <= a1; a++) {
-        const da = a - cx, db = b - cy;
-        if (da * da + db * db <= r2) mask2d[(a - minA) + (b - minB) * w] = 1;
-      }
-    }
-    if (pts2d.length === 1) break;
-  }
+  // nnInteractive Agent rasterizes scribbles 2 px wide. A 1-voxel radius
+  // gives the nearest digital equivalent while avoiding our old ~5-voxel
+  // diameter stroke, which was substantially wider than the reference UI.
+  const rasterized = rasterizeScribbleStroke(pts2d, minA, minB, maxA, maxB, radiusVox);
+  if (!rasterized) return null;
+  const mask2d = rasterized.mask;
   const bbox: [[number, number], [number, number], [number, number]] = axis === 2 ? [[minA, maxA + 1], [minB, maxB + 1], [sliceIdx, sliceIdx + 1]] : axis === 0 ? [[sliceIdx, sliceIdx + 1], [minA, maxA + 1], [minB, maxB + 1]] : [[minA, maxA + 1], [sliceIdx, sliceIdx + 1], [minB, maxB + 1]];
   return { mask: mask2d, bbox };
 }
