@@ -9,33 +9,35 @@ export const EDITED_CATALOG_SETTLE_MS = 400;
 
 const NONE: number[] = [];
 
-// Catalog classes (ids 1..catalogSize) edited on this page for `caseId`, in id order, for the
-// 3D pane: one the scan has no baked mesh for is drawn live there (see SegmentationMeshViewer).
-// Local edits are picked up once they settle. `refresh` does the same for edits that arrive
-// without a local edit event, such as live-room mask patches and their replay after a reload.
-export function useEditedCatalogIds(caseId: string, catalogSize: number): { ids: number[]; refresh: () => void } {
-	const [state, setState] = useState<{ caseId: string; ids: number[] }>({ caseId: "", ids: NONE });
+// Catalog classes edited on this case switch from their baked mesh to a live
+// surface. Per-segment revisions avoid rebuilding unrelated edited organs.
+export function useEditedCatalogIds(caseId: string, catalogSize: number): { ids: number[]; revisions: Record<number, number>; refresh: (segmentIndex?: number) => void } {
+	const [state, setState] = useState<{ caseId: string; ids: number[]; revisions: Record<number, number> }>({ caseId: "", ids: NONE, revisions: {} });
 	const current = useRef({ caseId, catalogSize });
 	useEffect(() => {
 		current.current = { caseId, catalogSize };
 	}, [caseId, catalogSize]);
 	const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-	const refresh = useCallback(() => {
+	const refresh = useCallback((segmentIndex?: number) => {
 		clearTimeout(timer.current);
 		timer.current = setTimeout(() => {
 			const { caseId: id, catalogSize: size } = current.current;
 			const ids = [...getEditedSegments()].filter((n) => n > 0 && n <= size).sort((a, b) => a - b);
-			setState((prev) =>
-				prev.caseId === id && ids.length === prev.ids.length && ids.every((n, i) => prev.ids[i] === n) ? prev : { caseId: id, ids }
-			);
+			setState((prev) => {
+				const unchanged = prev.caseId === id && ids.length === prev.ids.length && ids.every((value, index) => value === prev.ids[index]);
+				const revisions = prev.caseId === id ? { ...prev.revisions } : {};
+				const touched = segmentIndex != null && ids.includes(segmentIndex) ? [segmentIndex] : ids;
+				for (const touchedId of touched) revisions[touchedId] = (revisions[touchedId] ?? 0) + 1;
+				return { caseId: id, ids: unchanged ? prev.ids : ids, revisions };
+			});
 		}, EDITED_CATALOG_SETTLE_MS);
 	}, []);
 	useEffect(() => {
-		const unsubscribe = subscribeToSegmentationEdits(() => refresh());
+		const unsubscribe = subscribeToSegmentationEdits((detail) => refresh(detail?.segmentIndex));
 		return () => {
 			unsubscribe();
 			clearTimeout(timer.current);
 		};
 	}, [refresh]);
-	return { ids: state.caseId === caseId ? state.ids : NONE, refresh };
+	return { ids: state.caseId === caseId ? state.ids : NONE, revisions: state.caseId === caseId ? state.revisions : {}, refresh };
 }

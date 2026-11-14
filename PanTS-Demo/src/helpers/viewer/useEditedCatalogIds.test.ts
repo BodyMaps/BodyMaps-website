@@ -8,12 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const store = vi.hoisted(() => ({
 	edited: new Set<number>(),
-	listeners: new Set<() => void>(),
+	listeners: new Set<(detail?: { segmentIndex?: number }) => void>(),
 }));
 
 vi.mock("../CornerstoneNifti2", () => ({
 	getEditedSegments: () => store.edited,
-	subscribeToSegmentationEdits: (cb: () => void) => {
+	subscribeToSegmentationEdits: (cb: (detail?: { segmentIndex?: number }) => void) => {
 		store.listeners.add(cb);
 		return () => store.listeners.delete(cb);
 	},
@@ -23,7 +23,7 @@ import { EDITED_CATALOG_SETTLE_MS, useEditedCatalogIds } from "./useEditedCatalo
 
 const edit = (id: number) => {
 	store.edited.add(id);
-	act(() => store.listeners.forEach((cb) => cb()));
+	act(() => store.listeners.forEach((cb) => cb({ segmentIndex: id })));
 };
 const settle = () => act(() => { vi.advanceTimersByTime(EDITED_CATALOG_SETTLE_MS); });
 
@@ -58,6 +58,18 @@ describe("useEditedCatalogIds", () => {
 		edit(25);
 		settle();
 		expect(result.current.ids).toBe(first);
+	});
+
+	it("increments only the revision for the organ that changed", () => {
+		const { result } = renderHook(() => useEditedCatalogIds("7", 30));
+		edit(8);
+		edit(25);
+		settle();
+		const before = result.current.revisions;
+		edit(25);
+		settle();
+		expect(result.current.revisions[25]).toBe(before[25] + 1);
+		expect(result.current.revisions[8]).toBe(before[8]);
 	});
 
 	it("picks up edits that arrive without an edit event when refreshed", () => {

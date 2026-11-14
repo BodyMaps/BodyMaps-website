@@ -111,6 +111,7 @@ type SegmentationMeshViewerProps = {
   crosshairMm: Vec3 | null
   customOrgans?: CheckBoxData[];
   editedOrgans?: CheckBoxData[];
+  maskRevisions?: Record<number, number>;
   fitVisible?: boolean;
   labelColorMap?: { [key: number]: Color };
   onSwitchToVolume?: () => void;
@@ -154,7 +155,7 @@ export function SegmentationMeshViewer(props: SegmentationMeshViewerProps) {
   return <CaseMeshViewer key={`${props.isSession ? "session" : "case"}:${props.caseId}`} {...props} />;
 }
 
-function CaseMeshViewer({ caseId, checkState, loading, opacity, crosshairMm, customOrgans = [], editedOrgans = [], fitVisible = false, labelColorMap = {}, onSwitchToVolume, isSession = false}: SegmentationMeshViewerProps) {
+function CaseMeshViewer({ caseId, checkState, loading, opacity, crosshairMm, customOrgans = [], editedOrgans = [], maskRevisions = {}, fitVisible = false, labelColorMap = {}, onSwitchToVolume, isSession = false}: SegmentationMeshViewerProps) {
   const [manifest, setManifest] = useState<MeshManifest | null>(null);
   const [manifestError, setManifestError] = useState(false);
   const [manifestAttempt, setManifestAttempt] = useState(0);
@@ -206,9 +207,10 @@ function CaseMeshViewer({ caseId, checkState, loading, opacity, crosshairMm, cus
   const organs = useMemo(() => manifest?.organs ?? [], [manifest]);
   const liveOrgans = useMemo(() => {
     const result = new Map(customOrgans.map(organ => [organ.id, organ]));
-    for (const organ of editedOrgans) if (!organs.some(baked => baked.id === organ.id)) result.set(organ.id, organ);
+    for (const organ of editedOrgans) result.set(organ.id, organ);
     return [...result.values()];
-  }, [customOrgans, editedOrgans, organs]);
+  }, [customOrgans, editedOrgans]);
+  const liveOrganIds = useMemo(() => new Set(liveOrgans.map(({ id }) => id)), [liveOrgans]);
   const loadedCount = organs.filter((organ) => meshStates[organ.id] === "loaded").length;
   const failedOrgans = organs.filter((organ) => meshStates[organ.id] === "failed");
   const loadingCount = organs.filter((organ) => meshStates[organ.id] === "loading").length;
@@ -282,18 +284,10 @@ function CaseMeshViewer({ caseId, checkState, loading, opacity, crosshairMm, cus
                   // Admit only two network loads at a time. Completed meshes
                   // stay mounted, and retries wait without displacing active loads.
                   if (meshStates[organ.id] === "queued") return null;
-                  // Always render the pre-baked GLB, even after this organ
-                  // has been edited. Switching to a live marching-cubes
-                  // mesh (LiveSegmentMesh) the instant an edit lands was
-                  // both expensive (isosurface extraction on the stroke
-                  // that triggers the switch â€” visible as a lag spike
-                  // right on the first brush stroke) and unnecessary: the
-                  // 3D pane is meant to show the original mesh, not a
-                  // live reconstruction of in-progress annotations, so
-                  // there's nothing gained by ever recomputing it here.
-                  // Custom classes (no baked GLB to fall back to) still go
-                  // through LiveSegmentMesh below, since that's the only
-                  // way they can be shown in 3D at all.
+                  // Once a catalog organ is edited, use a surface extracted
+                  // from the current labelmap after edits settle. Until then,
+                  // retain the pre-baked mesh for fast initial loading.
+                  if (liveOrganIds.has(organ.id) && (meshStates[organ.id] === "loaded" || meshStates[organ.id] === "failed")) return null;
                   return (
                     <OrganLoadBoundary key={`${organ.id}:${meshAttempts[organ.id] ?? 0}`} id={organ.id} onFailed={onFailed}>
                       <Suspense fallback={null}>
@@ -312,6 +306,7 @@ function CaseMeshViewer({ caseId, checkState, loading, opacity, crosshairMm, cus
                   <LiveSegmentMesh
                     key={organ.id}
                     segmentIndex={organ.id}
+                    maskRevision={maskRevisions[organ.id] ?? 0}
                     color={labelColorMap[organ.id] ?? [255, 255, 255, 255]}
                     visible={!!checkState[organ.id]}
                     opacity={opacity / 100}
