@@ -49,9 +49,9 @@ describe("team page", () => {
       ["Lucy Wu", "Core Contributor"],
     ];
     const added = [
+      "Alexander Poon",
       "Yusuf Abdulkadir",
       "Aditya Sanjeev",
-      "Alexander Poon",
       "Ahmad Durre Rehman",
       "Ishita Ahelleya",
       "Harleen Sachdev",
