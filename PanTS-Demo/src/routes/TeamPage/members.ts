@@ -53,7 +53,7 @@ export const MEMBERS: Member[] = [
     name: "Alexander Poon",
     role: "Core Contributor",
     photo: "/headshots/alexander-poon.webp",
-    links: { linkedin: "https://www.linkedin.com/in/alexander-poon-88640b281/" },
+    links: {linkedin: "https://www.linkedin.com/in/alexander-poon-88640b281/" },
   },
   {
     name: "Yusuf Abdulkadir",
