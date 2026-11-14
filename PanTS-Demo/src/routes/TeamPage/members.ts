@@ -50,17 +50,18 @@ export const MEMBERS: Member[] = [
     photo: "/headshots/lucy-wu.webp",
   },
   {
-    name: "Yusuf Abdulkadir",
-    role: "Core Contributor",
-    photo: "/headshots/yusuf-abdulkadir.webp",
-  },
-  { name: "Aditya Sanjeev", role: "Core Contributor" },
-  {
     name: "Alexander Poon",
     role: "Core Contributor",
     photo: "/headshots/alexander-poon.webp",
     links: { linkedin: "https://www.linkedin.com/in/alexander-poon-88640b281/" },
   },
+  {
+    name: "Yusuf Abdulkadir",
+    role: "Core Contributor",
+    photo: "/headshots/yusuf-abdulkadir.webp",
+  },
+  { name: "Aditya Sanjeev", role: "Core Contributor" },
+
   {
     name: "Ahmad Durre Rehman",
     role: "Core Contributor",
