@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { getCoverageLimitations, getSourceReportText, REPORT_ASSESSMENT_SCOPE } from '../../helpers/reportFindings';
 import type { ReportData } from '../../helpers/reportFindings';
+import SourceConsistencyChecks from './SourceConsistencyChecks';
 
 export default function SourceReportDetails({ data, dark = false }: { data: ReportData; dark?: boolean }) {
   const sourceText = getSourceReportText(data);
@@ -27,6 +28,7 @@ export default function SourceReportDetails({ data, dark = false }: { data: Repo
           {getCoverageLimitations(data).map(limitation => <li key={limitation}>{limitation}</li>)}
         </ul>
       </details>
+      <SourceConsistencyChecks data={data} dark={dark} />
       {sourceText ? (
         <details open={referenceOpen} style={{ borderTop: `1px solid ${dark ? 'rgba(255,255,255,0.16)' : '#d9e0eb'}`, paddingTop: 14, marginBottom: 18 }}>
           <summary onClick={event => { event.preventDefault(); setExpandedReference(referenceOpen ? null : data); }} style={{ cursor: 'pointer', fontSize: 16, fontWeight: 700 }}>
