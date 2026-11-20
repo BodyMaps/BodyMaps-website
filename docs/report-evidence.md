@@ -39,6 +39,18 @@ conventions; without verified structure identities they are not used to produce
 organ measurements. Combined-only cases therefore retain their source report
 but show unavailable measurements.
 
+## Source consistency checks
+
+`consistency` compares sources the payload already holds and reports where they
+disagree: a volume stated in the stored source report against the measured
+volume of the same named structure, a whole structure against the sum of its
+parts (pancreas against head, body and tail), and a sex-specific structure
+against the recorded sex. A discrepancy asks a person to compare the sources. It
+is not a finding, it does not say which source is correct, and it never uses
+size or wording to suggest disease. The only value read from source text is a
+volume stated inside that structure's own section. Thresholds (5% and a 1 cc
+presence minimum) are placeholders for review. Logic: `services/report_consistency.py`.
+
 ## What this fixes
 
 - Unsupported counts of normal or healthy organs based on segmentation status.
@@ -69,7 +81,7 @@ reference preserves the original wording. Do not add patient reports, scans,
 credentials or production databases to fixtures or pull requests.
 
 Run `npm test` and `npm run build` in `PanTS-Demo`. In `flask-server`, run
-`python -m pytest tests/unit/test_report_evidence.py tests/unit/test_report_measurements.py tests/unit/test_report_measurement_cache.py tests/unit/test_quiz_report_questions.py`.
+`python -m pytest tests/unit/test_report_evidence.py tests/unit/test_report_consistency.py tests/unit/test_report_measurements.py tests/unit/test_report_measurement_cache.py tests/unit/test_quiz_report_questions.py`.
 The backend tests use generated files and isolate report functions from model
 services, production data, and database initialization.
 

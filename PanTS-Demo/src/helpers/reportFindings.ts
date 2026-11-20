@@ -1,5 +1,8 @@
 // Report text and segmentation measurements are separate evidence sources.
 // Neither absent flags nor an in-range measurement establishes clinical normality.
+import { normalizeConsistency } from './reportConsistency';
+import type { ReportConsistency } from './reportConsistency';
+
 export interface OrganData {
   volume: number | null;
   mean_hu: number | null;
@@ -49,6 +52,7 @@ export interface ReportData {
     image_review_performed: boolean;
   };
   coverage?: { status: string; measured_structures: number; limitations: string[] };
+  consistency?: ReportConsistency;
 }
 
 const DEFAULT_LIMITATIONS = [
@@ -125,6 +129,7 @@ export function normalizeReportData(value: unknown): ReportData | null {
       status: 'limited', measured_structures: Object.keys(organ_volumes).length,
       limitations: trustedCoverageLimitations(Object.keys(organ_volumes).length, source.load_failed === true),
     },
+    consistency: normalizeConsistency(value.consistency),
   };
 }
 

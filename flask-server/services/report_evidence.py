@@ -9,6 +9,18 @@ import html
 import math
 import re
 
+try:
+    from services.report_consistency import report_consistency
+except ImportError:  # Loaded as a standalone file (isolated unit tests).
+    import importlib.util as _importlib_util
+    from pathlib import Path as _Path
+
+    _spec = _importlib_util.spec_from_file_location(
+        "report_consistency", _Path(__file__).with_name("report_consistency.py"))
+    _consistency_module = _importlib_util.module_from_spec(_spec)
+    _spec.loader.exec_module(_consistency_module)
+    report_consistency = _consistency_module.report_consistency
+
 REPORT_SCHEMA_VERSION = "3"
 REPORT_SOURCE = "RadGPT metadata workbook"
 ASSESSMENT_SCOPE_EXPLANATION = (
@@ -88,6 +100,8 @@ def report_payload(case_id, raw, *, organ_volumes=None, lesions=None, patient=No
         "impression": [],
         "assessment_scope": report_assessment_scope(),
         "source_report": source,
+        # Compares sources already in this payload; never a finding or assessment.
+        "consistency": report_consistency(organs, source["findings"] if source["available"] else "", patient),
         "provenance": {
             "report_source": REPORT_SOURCE,
             "source_column": source_column,
