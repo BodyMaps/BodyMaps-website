@@ -238,7 +238,7 @@ describe("the manager's view of the page", () => {
 		open();
 		expect(await screen.findByTestId("manage-panel")).toBeInTheDocument();
 		expect(screen.getByTestId("open-hand-out")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Annotators" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Collaborators" })).toBeInTheDocument();
 		expect(screen.getByTestId("tiles")).toBeInTheDocument();
 		expect(await screen.findAllByTestId("person-card")).toHaveLength(4); // the three annotators and the manager, who can be given cases too
 		expect(screen.getByRole("button", { name: "Manage" })).toHaveAttribute("aria-pressed", "true");

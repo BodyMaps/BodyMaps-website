@@ -92,7 +92,7 @@ describe("the notice when cases are handed to someone", () => {
 
 	it("says someone is now an annotator when they have no cases yet, once, and only if welcoming is allowed", async () => {
 		const first = mount([]);
-		expect(screen.getByRole("dialog")).toHaveTextContent("You are now an annotator");
+		expect(screen.getByRole("dialog")).toHaveTextContent("You are now a collaborator");
 		await userEvent.click(screen.getByRole("button", { name: "Not now" }));
 		first.unmount();
 		mount([]);

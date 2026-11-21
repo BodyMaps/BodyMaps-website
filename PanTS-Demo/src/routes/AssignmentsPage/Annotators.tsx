@@ -62,7 +62,7 @@ export default function Annotators({ people, assignments, onChanged }: { people:
 			return;
 		}
 		setRemoving(null);
-		setNotice(make ? `${label} is now an annotator and can be handed cases.` : `${label} is no longer an annotator. Their finished marks are kept.`);
+		setNotice(make ? `${label} is now a collaborator and can be handed cases.` : `${label} is no longer a collaborator. Their finished marks are kept.`);
 		setResults((list) => (list ? list.map((a) => (a.id === id ? { ...a, annotator: make } : a)) : list));
 		onChanged();
 	};
@@ -71,7 +71,7 @@ export default function Annotators({ people, assignments, onChanged }: { people:
 		<div data-testid="annotators">
 			<div className="asg-annotator-find">
 				<label className="asg-field">
-					<span>Find a person to make an annotator</span>
+					<span>Find a person to add as a collaborator</span>
 					<input className="asg-input" type="search" placeholder="Part of a name or email" value={query} onChange={(e) => setQuery(e.target.value)} autoComplete="off" />
 				</label>
 				{term.length > 0 && !ready && <p className="asg-note">Type at least {MIN_ACCOUNT_SEARCH} letters.</p>}
@@ -87,10 +87,10 @@ export default function Annotators({ people, assignments, onChanged }: { people:
 									<strong>{whoLabel(a)}</strong>
 									{a.name && <span className="asg-note"> {a.email}</span>}
 								</span>
-								{a.annotator ? <span className="asg-tag">Annotator</span> : a.manager ? <span className="asg-tag">Manager</span> : null}
+								{a.annotator ? <span className="asg-tag">Collaborator</span> : a.manager ? <span className="asg-tag">Project owner</span> : null}
 								{!a.annotator && (
 									<button type="button" className="asg-btn" disabled={busy === a.id} onClick={() => void change(a.id, whoLabel(a), true)}>
-										{busy === a.id ? "Adding…" : "Make annotator"}
+										{busy === a.id ? "Adding…" : "Add as collaborator"}
 									</button>
 								)}
 							</li>
@@ -101,22 +101,22 @@ export default function Annotators({ people, assignments, onChanged }: { people:
 			{notice && <p className="asg-banner" role="status">{notice}</p>}
 			{error && <p className="asg-banner asg-banner--error" role="alert">{error}</p>}
 
-			<h3 className="asg-person-name asg-annotators-heading">Annotators ({annotators.length})</h3>
+			<h3 className="asg-person-name asg-annotators-heading">Collaborators ({annotators.length})</h3>
 			{annotators.length === 0 ? (
-				<p className="asg-note">There are no annotators yet. Search for a person above.</p>
+				<p className="asg-note">There are no collaborators yet. Search for a person above.</p>
 			) : (
-				<ul className="asg-account-list" aria-label="Annotators">
+				<ul className="asg-account-list" aria-label="Collaborators">
 					{annotators.map((p) => (
 						<li key={p.id}>
 							<span>
 								<strong>{whoLabel(p)}</strong>
 								{p.name && <span className="asg-note"> {p.email}</span>}
 							</span>
-							{p.manager && <span className="asg-tag">Manager</span>}
+							{p.manager && <span className="asg-tag">Project owner</span>}
 							{removing === p.id ? (
 								<span className="asg-confirm">
 									<span className="asg-confirm-text">
-										Remove {whoLabel(p)} as an annotator?
+										Remove {whoLabel(p)} as a collaborator?
 										{openCases(p.id) > 0 ? ` ${openCases(p.id)} cases are still to do and stay with them, but they cannot be handed new ones.` : ""} Their finished marks are kept.
 									</span>
 									<button type="button" className="asg-btn asg-btn--danger" disabled={busy === p.id} onClick={() => void change(p.id, whoLabel(p), false)}>Yes, remove</button>

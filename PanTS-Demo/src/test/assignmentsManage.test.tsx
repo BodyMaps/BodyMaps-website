@@ -30,7 +30,7 @@ beforeEach(() => {
 });
 
 describe("the page at a glance", () => {
-	it("shows four numbers: annotators, cases done, overdue, and people with no cases yet", async () => {
+	it("shows four numbers: collaborators, cases done, overdue, and people with no cases yet", async () => {
 		fake.assignments = [
 			assignment({ id: "a", assignee: rad("u1", "Rad One", "r1@x.org"), done: 2, todo: 4 }),
 			assignment({ id: "b", start: 100, end: 109, total: 10, done: 5, todo: 5, assignee: rad("u2", "Rad Two", "r2@x.org"), due_at: "2020-01-01T00:00:00Z" }),
@@ -38,7 +38,7 @@ describe("the page at a glance", () => {
 		open();
 		const tiles = within(await screen.findByTestId("tiles"));
 		await waitFor(() => expect(tiles.getByText("7 / 16")).toBeInTheDocument());
-		expect(tiles.getByText("annotators").previousElementSibling).toHaveTextContent("3");
+		expect(tiles.getByText("collaborators").previousElementSibling).toHaveTextContent("3");
 		expect(tiles.getByText("overdue").previousElementSibling).toHaveTextContent("1");
 		expect(tiles.getByText("no cases yet").previousElementSibling).toHaveTextContent("1");
 	});
@@ -51,7 +51,7 @@ describe("the page at a glance", () => {
 	it("says there are no annotators when there are none, and points at the Annotators button", async () => {
 		fake.accounts = [];
 		open();
-		expect(await screen.findByTestId("no-people")).toHaveTextContent("Press Annotators to add people");
+		expect(await screen.findByTestId("no-people")).toHaveTextContent("Press Collaborators to add people");
 	});
 
 	it("shows an error with a way to try again", async () => {
@@ -215,7 +215,7 @@ describe("the two windows", () => {
 			await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 		}
 		await userEvent.click(screen.getByTestId("open-annotators"));
-		expect(await screen.findByRole("dialog", { name: "Annotators" })).toBeInTheDocument();
+		expect(await screen.findByRole("dialog", { name: "Collaborators" })).toBeInTheDocument();
 	});
 
 	it("do not close when something inside them is clicked", async () => {
@@ -488,17 +488,17 @@ describe("choosing who is an annotator", () => {
 		fake.accounts.push({ id: "m2", name: "Only A Manager", email: "m2@x.org", annotator: false, manager: true });
 		open();
 		const p = await openAnnotators();
-		const list = within(p.getByRole("list", { name: "Annotators" }));
+		const list = within(p.getByRole("list", { name: "Collaborators" }));
 		expect(list.getAllByRole("listitem")).toHaveLength(4);
-		expect(list.getByText("Manager", { selector: ".asg-tag" })).toBeInTheDocument();
+		expect(list.getByText("Project owner", { selector: ".asg-tag" })).toBeInTheDocument();
 		expect(list.queryByText("Only A Manager")).not.toBeInTheDocument();
-		expect(p.getByText("Annotators (4)")).toBeInTheDocument();
+		expect(p.getByText("Collaborators (4)")).toBeInTheDocument();
 	});
 
 	it("asks for at least three letters before searching, and sends nothing until then", async () => {
 		open();
 		const p = await openAnnotators();
-		await userEvent.type(p.getByLabelText("Find a person to make an annotator"), "ma");
+		await userEvent.type(p.getByLabelText("Find a person to add as a collaborator"), "ma");
 		expect(p.getByText("Type at least 3 letters.")).toBeInTheDocument();
 		await new Promise((r) => setTimeout(r, 400));
 		expect(fake.calls.some((c) => c.url.includes("/assignments/accounts"))).toBe(false);
@@ -507,14 +507,14 @@ describe("choosing who is an annotator", () => {
 	it("finds a person by part of a name or email and makes them an annotator, and the page follows", async () => {
 		open();
 		const p = await openAnnotators();
-		await userEvent.type(p.getByLabelText("Find a person to make an annotator"), "maria");
+		await userEvent.type(p.getByLabelText("Find a person to add as a collaborator"), "maria");
 		const results = within(await p.findByRole("list", { name: "Matching accounts" }));
 		expect(results.getByText("Maria Newcomer")).toBeInTheDocument();
-		await userEvent.click(results.getByRole("button", { name: "Make annotator" }));
-		expect(await screen.findByText("Maria Newcomer is now an annotator and can be handed cases.")).toBeInTheDocument();
+		await userEvent.click(results.getByRole("button", { name: "Add as collaborator" }));
+		expect(await screen.findByText("Maria Newcomer is now a collaborator and can be handed cases.")).toBeInTheDocument();
 		expect(fake.calls.find((c) => c.method === "POST" && c.url.includes("/annotators"))?.body).toEqual({ user_id: "u4" });
-		expect(results.getByText("Annotator")).toBeInTheDocument();
-		expect(await p.findByText("Annotators (4)")).toBeInTheDocument();
+		expect(results.getByText("Collaborator")).toBeInTheDocument();
+		expect(await p.findByText("Collaborators (4)")).toBeInTheDocument();
 		await userEvent.keyboard("{Escape}");
 		expect(await cardFor("Maria Newcomer")).toBeTruthy(); // she now has a card on the page, waiting for cases
 	});
@@ -522,36 +522,36 @@ describe("choosing who is an annotator", () => {
 	it("says so when nobody matches, and that they need to sign up first", async () => {
 		open();
 		const p = await openAnnotators();
-		await userEvent.type(p.getByLabelText("Find a person to make an annotator"), "nobody-here");
+		await userEvent.type(p.getByLabelText("Find a person to add as a collaborator"), "nobody-here");
 		expect(await p.findByTestId("no-accounts")).toHaveTextContent("They need to sign up on the website first");
 	});
 
 	it("shows what an account already is: no button for an annotator", async () => {
 		open();
 		const p = await openAnnotators();
-		await userEvent.type(p.getByLabelText("Find a person to make an annotator"), "r2@x");
+		await userEvent.type(p.getByLabelText("Find a person to add as a collaborator"), "r2@x");
 		const results = within(await p.findByRole("list", { name: "Matching accounts" }));
-		expect(results.getByText("Annotator")).toBeInTheDocument();
+		expect(results.getByText("Collaborator")).toBeInTheDocument();
 		expect(results.queryByRole("button")).not.toBeInTheDocument();
 	});
 
 	it("shows the server's message when making an annotator fails, and lets them try again", async () => {
 		open();
 		const p = await openAnnotators();
-		await userEvent.type(p.getByLabelText("Find a person to make an annotator"), "pat@");
+		await userEvent.type(p.getByLabelText("Find a person to add as a collaborator"), "pat@");
 		const results = within(await p.findByRole("list", { name: "Matching accounts" }));
 		fake.failNext.POST = 500;
-		await userEvent.click(results.getByRole("button", { name: "Make annotator" }));
+		await userEvent.click(results.getByRole("button", { name: "Add as collaborator" }));
 		expect(await screen.findByRole("alert")).toHaveTextContent("Server said no.");
-		await userEvent.click(results.getByRole("button", { name: "Make annotator" }));
-		expect(await screen.findByText("Pat Plain is now an annotator and can be handed cases.")).toBeInTheDocument();
+		await userEvent.click(results.getByRole("button", { name: "Add as collaborator" }));
+		expect(await screen.findByText("Pat Plain is now a collaborator and can be handed cases.")).toBeInTheDocument();
 	});
 
 	it("asks before removing an annotator, says what happens to their cases, and removes on confirmation only", async () => {
 		fake.assignments = [assignment({ assignee: rad("u2", "Rad Two", "r2@x.org"), done: 2, todo: 4 })];
 		open();
 		const p = await openAnnotators();
-		const row = within(p.getByRole("list", { name: "Annotators" }).querySelector("li:nth-child(2)") as HTMLElement);
+		const row = within(p.getByRole("list", { name: "Collaborators" }).querySelector("li:nth-child(2)") as HTMLElement);
 		const target = within(p.getByText("Rad Two").closest("li") as HTMLElement);
 		await userEvent.click(target.getByRole("button", { name: "Remove" }));
 		expect(await screen.findByText(/4 cases are still to do and stay with them/)).toBeInTheDocument();
@@ -560,9 +560,9 @@ describe("choosing who is an annotator", () => {
 		expect(fake.calls.some((c) => c.method === "DELETE" && c.url.includes("/annotators"))).toBe(false);
 		await userEvent.click(target.getByRole("button", { name: "Remove" }));
 		await userEvent.click(target.getByRole("button", { name: "Yes, remove" }));
-		expect(await screen.findByText("Rad Two is no longer an annotator. Their finished marks are kept.")).toBeInTheDocument();
+		expect(await screen.findByText("Rad Two is no longer a collaborator. Their finished marks are kept.")).toBeInTheDocument();
 		expect(fake.accounts.find((a) => a.id === "u2")?.annotator).toBe(false);
-		expect(await p.findByText("Annotators (2)")).toBeInTheDocument();
+		expect(await p.findByText("Collaborators (2)")).toBeInTheDocument();
 		expect(row).toBeTruthy();
 	});
 
@@ -570,14 +570,14 @@ describe("choosing who is an annotator", () => {
 		open();
 		const p = await openAnnotators();
 		fake.failNext.GET = 0;
-		await userEvent.type(p.getByLabelText("Find a person to make an annotator"), "maria");
+		await userEvent.type(p.getByLabelText("Find a person to add as a collaborator"), "maria");
 		expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't reach the server");
 	});
 
 	it("does not show stale results after the search is cleared", async () => {
 		open();
 		const p = await openAnnotators();
-		const box = p.getByLabelText("Find a person to make an annotator");
+		const box = p.getByLabelText("Find a person to add as a collaborator");
 		await userEvent.type(box, "maria");
 		await p.findByRole("list", { name: "Matching accounts" });
 		await userEvent.clear(box);

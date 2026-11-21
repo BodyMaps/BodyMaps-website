@@ -69,7 +69,7 @@ export default function AssignmentNotice({ userId, assignments, canWelcome }: { 
 					</>
 				) : (
 					<>
-						<h2 id="asg-notice-title">You are now an annotator</h2>
+						<h2 id="asg-notice-title">You are now a collaborator</h2>
 						<p>Cases handed to you will appear in the Assignments tab on the left, and you will see a notice like this one.</p>
 					</>
 				)}

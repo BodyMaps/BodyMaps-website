@@ -84,7 +84,7 @@ export default function PeopleCards({ all, people, onChanged, onHandOut }: {
 	};
 
 	if (entries.length === 0) {
-		return <p className="asg-note asg-empty" data-testid="no-people">There are no annotators yet. Press Annotators to add people, then hand out cases.</p>;
+		return <p className="asg-note asg-empty" data-testid="no-people">There are no collaborators yet. Press Collaborators to add people, then hand out cases.</p>;
 	}
 
 	return (
