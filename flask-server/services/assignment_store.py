@@ -19,7 +19,8 @@ from models.engine import session_scope
 from models.job import utcnow
 from models.user import User
 from models.user_role import UserRole
-from services import role_store
+from models.project import DEFAULT_PROJECT_ID, ROLE_COLLABORATOR, ROLE_OWNER
+from services import project_store, role_store
 
 MAX_CASE_NUMBER = 200_000
 MAX_RANGE_SIZE = 50_000
@@ -104,6 +105,7 @@ def _as_dict(a: AnnotationAssignment, user: User | None, counts: dict[str, int])
     total = a.range_end - a.range_start + 1
     return {
         "id": a.id,
+        "project_id": a.project_id,
         "assignee": {"id": a.assignee_id, "name": (user.name if user else None), "email": (user.email if user else None)},
         "start": a.range_start,
         "end": a.range_end,
@@ -118,9 +120,10 @@ def _as_dict(a: AnnotationAssignment, user: User | None, counts: dict[str, int])
     }
 
 
-def _find_overlaps(s, start: int, end: int, task: str, ignore_id: str | None = None) -> list[dict]:
+def _find_overlaps(s, start: int, end: int, task: str, project_id: str, ignore_id: str | None = None) -> list[dict]:
     q = select(AnnotationAssignment, User).join(User, User.id == AnnotationAssignment.assignee_id).where(
-        and_(AnnotationAssignment.range_start <= end, AnnotationAssignment.range_end >= start,
+        and_(AnnotationAssignment.project_id == project_id,
+             AnnotationAssignment.range_start <= end, AnnotationAssignment.range_end >= start,
              func.lower(AnnotationAssignment.task) == task.lower())
     )
     if ignore_id:
@@ -134,26 +137,39 @@ def _find_overlaps(s, start: int, end: int, task: str, ignore_id: str | None = N
     return out
 
 
-def _require_annotator(s, user_id: str) -> User:
+def _require_annotator(s, user_id: str, project_id: str = DEFAULT_PROJECT_ID) -> User:
+    """The account, when it is a member of the project and so may be handed its cases."""
     who = s.get(User, user_id) if isinstance(user_id, str) else None
     if who is None or who.deletion_requested_at is not None:
         raise AssignmentError("no_such_person", "That account was not found.")
-    if not (set(role_store.roles_for(user_id)) & role_store.ANNOTATING_ROLES):
-        raise AssignmentError("not_an_annotator", "Only an annotator can be given cases. Make them an annotator first.")
+    if project_store.member_role(user_id, project_id) is None:
+        raise AssignmentError("not_an_annotator", "Only a collaborator can be given cases. Add them to the project first.")
     return who
 
 
-def create(*, assignee_id: str, start, end, task, note=None, due=None, created_by: str, force: bool = False) -> dict:
+def project_of(assignment_id: str) -> str:
+    """The project an assignment belongs to. LookupError when there is no such assignment."""
+    with session_scope() as s:
+        a = s.get(AnnotationAssignment, assignment_id) if isinstance(assignment_id, str) else None
+        if a is None:
+            raise LookupError(assignment_id)
+        return a.project_id
+
+
+def create(*, assignee_id: str, start, end, task, note=None, due=None, created_by: str, force: bool = False,
+           project_id: str = DEFAULT_PROJECT_ID) -> dict:
     start, end = _clean_range(start, end)
     task, note, due_at = _clean_task(task), _clean_note(note), _clean_due(due)
+    if not project_store.exists(project_id):
+        raise LookupError(project_id)
     with session_scope() as s:
-        assignee = _require_annotator(s, assignee_id)
-        overlaps = _find_overlaps(s, start, end, task)
+        assignee = _require_annotator(s, assignee_id, project_id)
+        overlaps = _find_overlaps(s, start, end, task, project_id)
         if overlaps and not force:
             raise AssignmentError("overlap", "Part of this range is already assigned for the same task.", {"overlaps": overlaps})
         a = AnnotationAssignment(
-            id=str(uuid.uuid4()), assignee_id=assignee_id, range_start=start, range_end=end, task=task,
-            note=note, due_at=due_at, created_by=created_by,
+            id=str(uuid.uuid4()), assignee_id=assignee_id, project_id=project_id, range_start=start, range_end=end,
+            task=task, note=note, due_at=due_at, created_by=created_by,
         )
         s.add(a)
         s.flush()
@@ -162,12 +178,13 @@ def create(*, assignee_id: str, start, end, task, note=None, due=None, created_b
         return result
 
 
-def list_all() -> list[dict]:
-    """Every assignment, newest first, with progress."""
+def list_all(project_id: str = DEFAULT_PROJECT_ID) -> list[dict]:
+    """Every assignment of one project, newest first, with progress."""
     with session_scope() as s:
         rows = s.execute(
             select(AnnotationAssignment, User)
             .join(User, User.id == AnnotationAssignment.assignee_id)
+            .where(AnnotationAssignment.project_id == project_id)
             .order_by(AnnotationAssignment.created_at.desc(), AnnotationAssignment.range_start)
         ).all()
         counts = _counts(s, [a.id for a, _ in rows])
@@ -175,7 +192,7 @@ def list_all() -> list[dict]:
 
 
 def list_for(user_id: str) -> list[dict]:
-    """One account's own assignments with the status of every case marked so far."""
+    """One account's own assignments, in every project, with the status of every case marked so far."""
     with session_scope() as s:
         rows = s.execute(
             select(AnnotationAssignment, User)
@@ -207,7 +224,7 @@ def update(assignment_id: str, changes: dict) -> dict:
         if a is None:
             raise LookupError(assignment_id)
         if "assignee_id" in changes:
-            _require_annotator(s, changes["assignee_id"])
+            _require_annotator(s, changes["assignee_id"], a.project_id)
             a.assignee_id = changes["assignee_id"]
         if "task" in changes:
             a.task = _clean_task(changes["task"])
@@ -229,8 +246,8 @@ def delete_assignment(assignment_id: str) -> bool:
         return True
 
 
-def set_case_status(assignment_id: str, case_number, status, *, acting_user_id: str, is_manager: bool) -> dict:
-    """Mark one case of an assignment. Only its assignee, or a manager, may."""
+def set_case_status(assignment_id: str, case_number, status, *, acting_user_id: str, is_manager: bool = False) -> dict:
+    """Mark one case of an assignment. Only its assignee, or an owner of its project, may."""
     if not isinstance(status, str) or status not in CASE_STATUSES:
         raise AssignmentError("bad_status", "The status must be done, flagged or todo.")
     if not isinstance(case_number, int) or isinstance(case_number, bool):
@@ -239,7 +256,7 @@ def set_case_status(assignment_id: str, case_number, status, *, acting_user_id: 
         a = s.get(AnnotationAssignment, assignment_id)
         if a is None:
             raise LookupError(assignment_id)
-        if a.assignee_id != acting_user_id and not is_manager:
+        if a.assignee_id != acting_user_id and not (is_manager or project_store.is_owner(acting_user_id, a.project_id)):
             raise PermissionError(assignment_id)
         if not a.range_start <= case_number <= a.range_end:
             raise AssignmentError("outside_range", "That case is not part of this assignment.")
@@ -261,8 +278,23 @@ def set_case_status(assignment_id: str, case_number, status, *, acting_user_id: 
         return _as_dict(a, s.get(User, a.assignee_id), _counts(s, [a.id])[a.id])
 
 
-def assignable_people() -> list[dict]:
-    """Accounts that may be given cases: those holding an annotating role, with which role(s) they hold."""
+def _flags(person: dict, role: str | None) -> dict:
+    return {**person, "annotator": role == ROLE_COLLABORATOR, "manager": role == ROLE_OWNER}
+
+
+def _refused(e: project_store.ProjectError) -> AssignmentError:
+    return AssignmentError(e.reason, str(e))
+
+
+def assignable_people(project_id: str = DEFAULT_PROJECT_ID) -> list[dict]:
+    """Accounts that may be given cases in a project, flagged with whether each is a collaborator and/or an owner.
+    For the built-in JHU project those are the accounts holding an annotating role."""
+    if project_id != DEFAULT_PROJECT_ID:
+        try:
+            members = project_store.members(project_id)
+        except project_store.ProjectError as e:
+            raise _refused(e)
+        return [_flags({"id": m["id"], "name": m["name"], "email": m["email"]}, m["role"]) for m in members]
     with session_scope() as s:
         rows = s.execute(
             select(User).join(UserRole, UserRole.user_id == User.id)
@@ -281,12 +313,23 @@ MIN_SEARCH = 3
 MAX_SEARCH_RESULTS = 8
 
 
-def search_accounts(query: str) -> list[dict]:
+def search_accounts(query: str, project_id: str = DEFAULT_PROJECT_ID) -> list[dict]:
     """Accounts matching part of a name or email, for choosing who to make an annotator.
 
     Deliberately narrow: at least MIN_SEARCH characters and at most MAX_SEARCH_RESULTS rows, so a manager can find
     one person but cannot page through everyone's email address. Accounts being deleted are left out.
+
+    Only the built-in JHU project searches by part of a name; every other project finds an account by its full
+    email address, so an owner there can add someone they already know and cannot browse the accounts of other groups.
     """
+    if project_id != DEFAULT_PROJECT_ID:
+        try:
+            found = project_store.find_by_email(project_id, query)
+        except project_store.ProjectError as e:
+            raise _refused(e)
+        if found is None:
+            return []
+        return [_flags(found, project_store.member_role(found["id"], project_id))]
     query = (query or "").strip()
     if len(query) < MIN_SEARCH:
         raise AssignmentError("short_query", "Type at least 3 letters of a name or email.")
@@ -311,17 +354,29 @@ def _live_account(user_id) -> User:
         return u
 
 
-def make_annotator(user_id, granted_by: str) -> dict:
+def make_annotator(user_id, granted_by: str, project_id: str = DEFAULT_PROJECT_ID) -> dict:
     """Give an account the annotator role (and so the ability to be handed cases). Idempotent."""
     u = _live_account(user_id)
+    if project_id != DEFAULT_PROJECT_ID:
+        try:
+            added = project_store.add_member(project_id, u.id, ROLE_COLLABORATOR, acting_user_id=granted_by, acting_is_admin=False)
+        except project_store.ProjectError as e:
+            raise _refused(e)
+        return _flags({"id": u.id, "name": u.name, "email": u.email}, added["role"])
     held = role_store.grant(u.id, role_store.ROLE_ANNOTATOR, granted_by=granted_by)
     return {"id": u.id, "name": u.name, "email": u.email,
             "annotator": role_store.ROLE_ANNOTATOR in held, "manager": role_store.ROLE_ANNOTATION_MANAGER in held}
 
 
-def remove_annotator(user_id, acting_user_id: str) -> dict:
+def remove_annotator(user_id, acting_user_id: str, project_id: str = DEFAULT_PROJECT_ID) -> dict:
     """Take the annotator role away. Finished marks stay on record; they just cannot be handed new cases."""
     u = _live_account(user_id)
+    if project_id != DEFAULT_PROJECT_ID:
+        try:
+            project_store.remove_member(project_id, u.id, acting_user_id=acting_user_id, acting_is_admin=False)
+        except project_store.ProjectError as e:
+            raise _refused(e)
+        return _flags({"id": u.id, "name": u.name, "email": u.email}, None)
     held = role_store.revoke(u.id, role_store.ROLE_ANNOTATOR, acting_user_id=acting_user_id)
     return {"id": u.id, "name": u.name, "email": u.email,
             "annotator": role_store.ROLE_ANNOTATOR in held, "manager": role_store.ROLE_ANNOTATION_MANAGER in held}

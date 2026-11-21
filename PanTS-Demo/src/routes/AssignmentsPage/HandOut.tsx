@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CANCERVERSE_LAST_NUMBER } from "../../helpers/caseNumbering";
 import {
+	DEFAULT_PROJECT_ID,
 	type Overlap,
 	type Person,
 	createAssignment,
@@ -17,7 +18,9 @@ import {
 
 type Pending = { person: Person; range: [number, number] }[];
 
-export default function HandOut({ people, tasks, initialChosen = [], onCreated, onDone }: {
+export default function HandOut({ projectId = DEFAULT_PROJECT_ID, people, tasks, initialChosen = [], onCreated, onDone }: {
+	/** The project the cases are for; the case numbers are library numbers only for the built-in one. */
+	projectId?: string;
 	people: Person[];
 	tasks: string[];
 	/** People already ticked when the form opens (a card's own Hand out button). */
@@ -39,15 +42,17 @@ export default function HandOut({ people, tasks, initialChosen = [], onCreated, 
 	const [pending, setPending] = useState<Pending>([]);
 	// How many cases the library really has, so a range past the end is caught here and not on an annotator's screen.
 	const [libraryMax, setLibraryMax] = useState<number | null>(null);
+	const isLibrary = projectId === DEFAULT_PROJECT_ID;
 	useEffect(() => {
+		if (!isLibrary) return;
 		let cancelled = false;
 		void libraryMaxNumber().then((max) => { if (!cancelled) setLibraryMax(max); }).catch(() => undefined);
 		return () => { cancelled = true; };
-	}, []);
+	}, [isLibrary]);
 
 	const range = parseRange(cases);
 	// Where the range falls: only worth showing when it crosses into more than one dataset or is not plain PanTS.
-	const shares = range ? datasetBreakdown(range[0], range[1], libraryMax === null ? undefined : libraryMax - CANCERVERSE_LAST_NUMBER) : [];
+	const shares = range && isLibrary ? datasetBreakdown(range[0], range[1], libraryMax === null ? undefined : libraryMax - CANCERVERSE_LAST_NUMBER) : [];
 	const picked = people.filter((p) => chosen.includes(p.id));
 	const blocks = range && picked.length ? splitRange(range[0], range[1], picked.length) : null;
 	const visible = people.filter((p) => `${p.name ?? ""} ${p.email}`.toLowerCase().includes(filter.trim().toLowerCase()));
@@ -71,6 +76,7 @@ export default function HandOut({ people, tasks, initialChosen = [], onCreated, 
 			const { person, range: r } = queue[i];
 			const res = await createAssignment({
 				assignee_id: person.id, start: r[0], end: r[1], task: task.trim(), note: note.trim() || undefined, due: due || undefined, force,
+				...(isLibrary ? {} : { project_id: projectId }),
 			});
 			if (res.ok) {
 				made++;
@@ -118,7 +124,7 @@ export default function HandOut({ people, tasks, initialChosen = [], onCreated, 
 						The first and last case number.
 						{matched !== null && <strong className="asg-matched"> That is {matched.toLocaleString("en-US")} {matched === 1 ? "case" : "cases"}.</strong>}
 					</p>
-					{libraryMax !== null && (
+					{isLibrary && libraryMax !== null && (
 						<p className="asg-hint" data-testid="library-size">
 							The library has {libraryMax.toLocaleString("en-US")} scans: cases 1 to {libraryMax.toLocaleString("en-US")}.
 						</p>
@@ -161,7 +167,7 @@ export default function HandOut({ people, tasks, initialChosen = [], onCreated, 
 						<legend className="asg-step-label">Who</legend>
 						<p className="asg-hint">Tick one person. Tick several to split the cases evenly between them.</p>
 						{people.length === 0 ? (
-							<p className="asg-note">Nobody can be given cases yet. Make someone an annotator first (see Annotators below).</p>
+							<p className="asg-note">Nobody can be given cases yet. Add someone as a collaborator first (see Collaborators above).</p>
 						) : (
 							<>
 								{people.length > 6 && (

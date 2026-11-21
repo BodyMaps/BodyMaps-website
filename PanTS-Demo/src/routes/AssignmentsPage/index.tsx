@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import AssignmentCaseCard from "../../components/AssignmentCaseCard";
 import { useAuth } from "../../contexts/authContext";
-import { type Assignment, type CaseStatus, dueLabel, dueState, nextTodo, rangeLabel, statusOf } from "../../helpers/assignments";
+import { type Assignment, type CaseStatus, dueLabel, dueState, memberProjects, nextTodo, ownedProjects, rangeLabel, statusOf } from "../../helpers/assignments";
 import { useMyAssignments } from "../../helpers/useMyAssignments";
 import home from "../Homepage/Homepage.module.css";
 import ManagePanel from "./ManagePanel";
@@ -10,8 +10,8 @@ import "./AssignmentsPage.css";
 
 // The annotator's own list of cases, laid out like the Dataset page: a card per case with its state written under it,
 // and filters for pending, complete and flagged cases. Reached from the Assignments tab in the side menu.
-// Annotation managers also get a Manage view here (hand out cases, everyone's progress, who is an annotator); it is
-// shown only to them, and the server checks the role on every call.
+// Project owners also get a Manage view here (hand out cases, everyone's progress, who the collaborators are), for each
+// project they own; it is shown only to them, and the server checks the role on every call.
 
 type Filter = "all" | CaseStatus;
 const PAGE = 24;
@@ -26,9 +26,12 @@ type Row = { a: Assignment; n: number; status: CaseStatus };
 
 export default function AssignmentsPage() {
 	const { user, loading, isAuthenticated } = useAuth();
-	const isManager = !!user && user.roles.includes("annotation_manager");
-	const eligible = !!user && (user.roles.includes("annotator") || isManager);
+	const owned = useMemo(() => ownedProjects(user), [user]);
+	const isManager = owned.length > 0;
+	const eligible = memberProjects(user).length > 0;
 	const [view, setView] = useState<"manage" | "mine">("manage");
+	const [projectId, setProjectId] = useState<string | null>(null);
+	const project = owned.find((p) => p.id === projectId) ?? owned[0];
 	const showManage = isManager && view === "manage";
 	const { assignments, error, reload } = useMyAssignments(eligible);
 	// Until they choose, show what is left to do: finished cases would otherwise fill the top of the list.
@@ -84,7 +87,15 @@ export default function AssignmentsPage() {
 					</div>
 				)}
 
-				{showManage && <ManagePanel />}
+				{showManage && owned.length > 1 && (
+					<label className="asg-project-pick">
+						<span>Project</span>
+						<select className="asg-input" value={project?.id ?? ""} onChange={(e) => setProjectId(e.target.value)} data-testid="project-select">
+							{owned.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+						</select>
+					</label>
+				)}
+				{showManage && project && <ManagePanel key={project.id} project={project} />}
 
 				{!showManage && error && <p className={home.error} role="alert">{error} <button type="button" className="asg-link-btn" onClick={reload}>Try again</button></p>}
 				{!showManage && assignments === null && !error && <p className="asg-page-note">Loading…</p>}

@@ -24,6 +24,12 @@ class AnnotationAssignment(db.Model):
     assignee_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("user_account.id", ondelete="CASCADE"), nullable=False, index=True,
     )
+    # The project the cases belong to. For the built-in ``jhu`` project the range is library case numbers; for any
+    # other project it is that project's own case numbers, counted from 1.
+    project_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("project.id", ondelete="CASCADE"), nullable=False, default="jhu", server_default="jhu",
+        index=True,
+    )
     # Library case numbers, both ends included (the same numbers /case/<number> opens).
     range_start: Mapped[int] = mapped_column(Integer, nullable=False)
     range_end: Mapped[int] = mapped_column(Integer, nullable=False)

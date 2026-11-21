@@ -3,7 +3,11 @@ import type { Assignment } from "../helpers/assignments";
 
 // A small stand-in for the assignments API, behaving like the real one for the paths the screens use.
 
-export type Me = { id: string; email: string; name: string; plan: string; account_type: null; roles: string[] };
+export type Me = {
+	id: string; email: string; name: string; plan: string; account_type: null; roles: string[];
+	/** The projects the account belongs to, as /api/auth/me sends them. */
+	projects?: { id: string; name: string; slug: string; is_default?: boolean; allow_training?: boolean; role: string | null }[];
+};
 
 export const PEOPLE = [
 	{ id: "u1", name: "Rad One", email: "r1@x.org" },
@@ -67,8 +71,9 @@ export function makeFake(me: Partial<Me> = {}): Fake {
 					if (forced === 0) throw new TypeError("network down");
 					return json({ error: "Server said no." }, forced);
 				}
-				const path = u.slice(u.indexOf("/api/assignments") + "/api/assignments".length);
-				const manager = fake.me.roles.includes("annotation_manager");
+				// The query string (?project=, ?q=) is read from the URL where a route needs it, never from the path.
+				const path = u.slice(u.indexOf("/api/assignments") + "/api/assignments".length).split("?")[0];
+				const manager = fake.me.roles.includes("annotation_manager") || (fake.me.projects ?? []).some((p) => p.role === "owner");
 				const mark = /^\/([^/]+)\/cases\/(\d+)$/.exec(path);
 				if (method === "GET" && path === "/mine") {
 					return json({ assignments: fake.assignments.filter((a) => a.assignee.id === fake.me.id).map((a) => ({ ...a, marks: { ...(a.marks ?? {}) } })) });

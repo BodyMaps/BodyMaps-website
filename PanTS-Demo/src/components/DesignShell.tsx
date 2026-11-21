@@ -5,6 +5,7 @@ import AuthButton from "./AuthButton";
 import SiteFooter from "./SiteFooter";
 import WorkspaceTour from "./WorkspaceTour";
 import AssignmentNotice from "./AssignmentNotice";
+import { memberProjects, ownedProjects } from "../helpers/assignments";
 import { pendingTotal, useMyAssignments } from "../helpers/useMyAssignments";
 import { useAuth } from "../contexts/authContext";
 import { groupUploads, isGroupInFlight, loadRecentUploads, markRecentUploadViewed, RECENT_UPLOADS_CHANGED, isRecentUploadsStorageKey, type UploadGroup } from "../helpers/recentUploads";
@@ -16,8 +17,8 @@ export default function DesignShell() {
   const { isAuthenticated, user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  // People who can be given cases (annotators and annotation managers) get an Assignments tab and a one-time notice.
-  const canBeAssigned = isAuthenticated && !!user && (user.roles.includes("annotator") || user.roles.includes("annotation_manager"));
+  // People who can be given cases (collaborators and owners of any project) get an Assignments tab and a one-time notice.
+  const canBeAssigned = isAuthenticated && !!user && memberProjects(user).length > 0;
   const { assignments: myAssignments } = useMyAssignments(canBeAssigned);
   const pendingCases = pendingTotal(myAssignments);
   const [collapsed, setCollapsed] = useState(() => {
@@ -161,6 +162,6 @@ export default function DesignShell() {
       </div>
     </div>
     {isAuthenticated && isWorkspace && <WorkspaceTour replay={tourRequest} name={user?.name} />}
-    {canBeAssigned && user && <AssignmentNotice userId={user.id} assignments={myAssignments} canWelcome={user.roles.includes("annotator") && !user.roles.includes("annotation_manager")} />}
+    {canBeAssigned && user && <AssignmentNotice userId={user.id} assignments={myAssignments} canWelcome={ownedProjects(user).length === 0} />}
   </div>;
 }

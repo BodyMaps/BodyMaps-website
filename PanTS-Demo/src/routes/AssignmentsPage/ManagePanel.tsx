@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { type Assignment, type Person, dueState, fetchAll, fetchPeople } from "../../helpers/assignments";
+import type { ProjectMembership } from "../../contexts/authContext";
+import { DEFAULT_PROJECT_ID, type Assignment, type Person, dueState, fetchAll, fetchPeople } from "../../helpers/assignments";
 import Annotators from "./Annotators";
 import HandOut from "./HandOut";
 import ManageModal from "./ManageModal";
 import PeopleCards from "./PeopleCards";
 import "./ManagePanel.css";
 
-// The manager's half of the Assignments page: a card per person with their progress, four numbers at the top, and two
+// The project owner's half of the Assignments page, for one project: a card per person with their progress, four numbers at the top, and two
 // buttons: Hand out cases (a small window with the three-step form) and Annotators (a small window for choosing who can
-// be given cases). Only annotation managers are shown this, and the server checks the role on every call, so hiding it
+// be given cases). Only that project's owners are shown this, and the server checks the role on every call, so hiding it
 // from others is presentation, not access control.
 
 type Modal = { kind: "handout"; chosen: string[] } | { kind: "annotators" } | null;
 
-export default function ManagePanel() {
+const LIBRARY = { id: DEFAULT_PROJECT_ID, isDefault: true };
+
+/** `project` is the one being managed; the built-in project (the shared library) when left out. */
+export default function ManagePanel({ project = LIBRARY }: { project?: Pick<ProjectMembership, "id" | "isDefault"> }) {
+	const projectId = project.id;
 	const [all, setAll] = useState<Assignment[]>([]);
 	const [people, setPeople] = useState<Person[]>([]);
 	const [loaded, setLoaded] = useState(false);
@@ -23,12 +28,12 @@ export default function ManagePanel() {
 
 	const load = useCallback(async () => {
 		setError(null);
-		const [a, p] = await Promise.all([fetchAll(), fetchPeople()]);
+		const [a, p] = await Promise.all([fetchAll(projectId), fetchPeople(projectId)]);
 		for (const r of [a, p]) if (!r.ok) setError(r.message);
 		if (a.ok) setAll(a.data.assignments);
 		if (p.ok) setPeople(p.data.people);
 		setLoaded(true);
-	}, []);
+	}, [projectId]);
 
 	useEffect(() => { void load(); }, [load]);
 
@@ -80,6 +85,7 @@ export default function ManagePanel() {
 			{modal?.kind === "handout" && (
 				<ManageModal title="Hand out cases" onClose={() => setModal(null)}>
 					<HandOut
+						projectId={projectId}
 						people={people.filter((p) => p.annotator || p.manager)}
 						tasks={tasks}
 						initialChosen={modal.chosen}
@@ -90,8 +96,12 @@ export default function ManagePanel() {
 			)}
 			{modal?.kind === "annotators" && (
 				<ManageModal title="Collaborators" onClose={() => setModal(null)}>
-					<p className="asg-sub">Only collaborators can be given cases. They can also save a corrected scan for everyone.</p>
-					<Annotators people={people} assignments={all} onChanged={() => void load()} />
+					<p className="asg-sub">
+						{project.isDefault
+							? "Only collaborators can be given cases. They can also save a corrected scan for everyone."
+							: "Only collaborators of this project can be given its cases. They can work on this project's cases only."}
+					</p>
+					<Annotators projectId={projectId} people={people} assignments={all} onChanged={() => void load()} />
 				</ManageModal>
 			)}
 		</div>
