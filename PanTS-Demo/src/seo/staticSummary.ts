@@ -1,8 +1,7 @@
-// Static content of every public page, for readers that do not run JavaScript (AI assistants' fetch tools, link
+// Static content of crawlable public pages, for readers that do not run JavaScript (AI assistants' fetch tools, link
 // previews, simple crawlers). The build writes public content into the SPA fallback and emits
 // a page-specific shell for each indexed subpage.
-// The Terms of Service are deliberately left out (the maintainers do not want AI assistants reading them): no Terms
-// section, links to /terms render as plain text, and robots.txt disallows /terms.
+// The Terms of Service and Privacy Notice are excluded from static summaries and crawler discovery.
 // Visitors never see it (index.html hides .bm-static whenever scripts run) and React replaces it on mount.
 // The text comes from the same modules the pages render, so it cannot drift from the site.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -10,37 +9,14 @@ import { join } from "node:path";
 import type { Plugin } from "vite";
 import { FOOTER_INQUIRY_LEAD, NONCLINICAL_WARNING } from "../helpers/copy";
 import { titleForPath } from "../helpers/routeTitles";
-import { LAST_UPDATED, PRIVACY, PRIVACY_INTRO, type Section } from "../routes/legalText";
 import { MEMBERS } from "../routes/TeamPage/members";
 
 export const MARKER = "<!-- bm-static:pages -->";
 
-/** Pages kept out of the summary and out of crawlers' reach (see robots.txt). */
-export const NOT_FOR_CRAWLERS = ["/terms"];
-
 const escape = (text: string): string =>
 	text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-/** Legal text with [label](target) links, as LegalPage renders them ("contact" is the contact page). */
-const withLinks = (text: string): string => {
-	let out = "";
-	let from = 0;
-	for (const m of text.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)) {
-		out += escape(text.slice(from, m.index));
-		const href = m[2] === "contact" ? "/contact" : m[2];
-		out += NOT_FOR_CRAWLERS.includes(href) ? escape(m[1]) : `<a href="${escape(href)}">${escape(m[1])}</a>`;
-		from = (m.index ?? 0) + m[0].length;
-	}
-	return out + escape(text.slice(from));
-};
-
-const legal = (id: string, title: string, intro: string, sections: Section[]): string =>
-	`<section id="${id}"><h2><a href="/${id}">${title}</a></h2>` +
-	`<p>Provisional, under review. ${escape(LAST_UPDATED)}.</p><p>${withLinks(intro)}</p>` +
-	sections.map((s) => `<h3>${escape(s.heading)}</h3><p>${withLinks(s.body)}</p>`).join("") +
-	"</section>";
-
-/** One section per public page, in sitemap order after the landing page. */
+/** Public feature summaries for the SPA fallback. */
 function publicSections() {
 	const team = MEMBERS.map((m) => {
 		const link = m.links?.linkedin ? ` (<a href="${escape(m.links.linkedin)}">LinkedIn</a>)` : "";
@@ -63,7 +39,6 @@ function publicSections() {
 			`<p>${escape(FOOTER_INQUIRY_LEAD)} the <a href="/contact">contact form</a>. Describe your organization, the imaging ` +
 			"modalities and scale, and whether you are evaluating, piloting or ready to contract. Do not send protected health " +
 			"information.</p></section>",
-		privacy: legal("privacy", "Privacy Notice", PRIVACY_INTRO, PRIVACY),
 	};
 }
 
@@ -86,7 +61,6 @@ export function renderPublicPages(html: string): Record<string, string> {
 		statistics: "Explore BodyMaps CT library statistics by contrast phase, demographics, scanner and tumor status.",
 		team: "Meet the Johns Hopkins University research team behind BodyMaps.",
 		contact: "Contact BodyMaps about the CT library, segmentation tools and licensing.",
-		privacy: "Read the BodyMaps Privacy Notice about accounts, CT uploads and data rights.",
 	};
 	// The workspace is represented by the homepage in the sitemap.
 	return Object.fromEntries((Object.keys(descriptions) as (keyof typeof descriptions)[]).map((slug) => {

@@ -62,7 +62,7 @@
   <body>
     <div id="root">
       <!-- Readable without JavaScript. main.tsx uses createRoot (not hydrateRoot), which replaces this on load.
-           This fallback carries the Team, Privacy, Contact, Dataset, Statistics and Workspace sections.
+           This fallback carries the Team, Contact, Dataset, Statistics and Workspace sections.
            The build writes them at the bm-static:pages marker
            (src/seo/staticSummary.ts). Keep it in step with src/helpers/copy.ts, public/llms.txt and public/sitemap.xml
            (src/test/crawler.test.ts checks). -->
@@ -83,7 +83,7 @@
         </ul>
         <h2>About</h2>
         <p>BodyMaps is developed by a research team at Johns Hopkins University led by Zongwei Zhou, PhD, with Alan L. Yuille, PhD as scientific advisor.</p>
-        <p><a href="/team">Team</a> · <a href="/contact">Contact</a> · <a href="/privacy">Privacy</a></p>
+        <p><a href="/team">Team</a> · <a href="/contact">Contact</a></p>
         <h2>Pages</h2>
         <!-- bm-static:pages -->
         <p><strong>For nonclinical use only. Not medical advice or for patient care.</strong></p>
