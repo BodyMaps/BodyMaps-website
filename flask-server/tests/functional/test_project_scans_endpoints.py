@@ -359,6 +359,20 @@ def test_deleting_a_scan_removes_it_and_its_file_and_keeps_the_others_numbers(en
     assert add_scan(env, 22)["modality"] == "ct"
 
 
+
+@pytest.mark.skipif(os.name == "nt", reason="file modes are a POSIX matter")
+def test_a_stored_scan_is_readable_by_the_sites_own_account_only(env):
+    old = os.umask(0o002)          # a group-friendly umask, as on the server: the scan must not follow it
+    try:
+        scan = add_scan(env, 51)
+    finally:
+        os.umask(old)
+    file = env["data"].ct_path(scan["case_id"])
+    case_dir = os.path.dirname(file)
+    for path in (file, os.path.join(case_dir, "metadata.json"), case_dir, os.path.dirname(case_dir), os.path.dirname(os.path.dirname(case_dir))):
+        assert os.stat(path).st_mode & 0o077 == 0, (path, oct(os.stat(path).st_mode))
+
+
 # ---- opening a scan in the viewer ----------------------------------------------------------------------------------
 
 def test_the_projects_own_people_open_its_scan(env):

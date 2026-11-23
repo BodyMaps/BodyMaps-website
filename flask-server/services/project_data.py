@@ -347,6 +347,7 @@ def store_scan(project_id: str, source_path: str, original_name: str, modality, 
     # Copy outside the lock (it can take a while) to a name nobody opens, then take the number and rename into place inside it.
     incoming_dir = _inside(os.path.join(_project_folder(base, project_id), ".incoming"), base)
     os.makedirs(incoming_dir, exist_ok=True)
+    _private(incoming_dir)
     incoming = _inside(os.path.join(incoming_dir, f"{uuid.uuid4().hex}.nii.gz"), incoming_dir)
     try:
         _gzip_copy(source_path, incoming)
@@ -358,6 +359,13 @@ def store_scan(project_id: str, source_path: str, original_name: str, modality, 
             os.remove(incoming)
         except OSError:
             pass
+
+
+def _private(path: str, mode: int = 0o700) -> None:
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
 
 
 def _publish(base, project_id, incoming, size, original_name, modality, digest, shape, spacing, uploaded_by) -> dict:
@@ -386,13 +394,18 @@ def _publish(base, project_id, incoming, size, original_name, modality, digest, 
             target = _scan_dir(base, project_id, case_id)
             try:
                 os.makedirs(target)
+                # other labs' scans: readable by the site's own account only, whatever the server's umask or group setup
+                for folder in (os.path.dirname(os.path.dirname(target)), os.path.dirname(target), target):
+                    _private(folder)
                 os.replace(incoming, os.path.join(target, SCAN_FILE))
+                _private(os.path.join(target, SCAN_FILE), 0o600)
                 with open(os.path.join(target, META_FILE), "w", encoding="utf-8") as handle:
                     json.dump({
                         "case_id": case_id, "number": number, "project_id": project_id, "modality": modality,
                         "original_name": name, "size_bytes": size, "sha256": digest, "shape": shape, "spacing_mm": spacing,
                         "uploaded_by": uploaded_by, "uploaded_at": datetime.now(timezone.utc).isoformat(),
                     }, handle)
+                _private(os.path.join(target, META_FILE), 0o600)
             except Exception:
                 shutil.rmtree(target, ignore_errors=True)
                 raise
