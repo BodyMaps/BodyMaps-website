@@ -62,8 +62,8 @@
   <body>
     <div id="root">
       <!-- Readable without JavaScript. main.tsx uses createRoot (not hydrateRoot), which replaces this on load.
-           nginx answers every page path with this file, so it carries every public page: the build writes the Team,
-           Privacy, Contact, Dataset, Statistics and Workspace sections (not the Terms, by choice) in at the bm-static:pages marker
+           This fallback carries the Team, Privacy, Contact, Dataset, Statistics and Workspace sections.
+           The build writes them at the bm-static:pages marker
            (src/seo/staticSummary.ts). Keep it in step with src/helpers/copy.ts, public/llms.txt and public/sitemap.xml
            (src/test/crawler.test.ts checks). -->
       <main class="bm-static">

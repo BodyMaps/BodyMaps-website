@@ -8,7 +8,8 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { LANDING_SUBTITLE, NONCLINICAL_WARNING, SITE_DESCRIPTION } from "../helpers/copy";
-import { MARKER, NOT_FOR_CRAWLERS, injectPublicSections, renderPublicSections } from "../seo/staticSummary";
+import { MARKER, NOT_FOR_CRAWLERS, injectPublicSections, renderPublicPages, renderPublicSections } from "../seo/staticSummary";
+import { titleForPath } from "../helpers/routeTitles";
 import { LAST_UPDATED, PRIVACY, TERMS, TERMS_INTRO } from "../routes/legalText";
 import { MEMBERS } from "../routes/TeamPage/members";
 
@@ -62,7 +63,7 @@ describe("crawler-readable site", () => {
     expect(read("index.html")).toContain('"application/ld+json"');
   });
 
-  it("the build writes every public page into the summary, since nginx serves this one file for all of them", () => {
+  it("the SPA fallback contains every public summary", () => {
     const html = read("index.html");
     expect(html.split(MARKER).length).toBe(2);
     expect(staticBlock()).toContain(MARKER);
@@ -81,6 +82,32 @@ describe("crawler-readable site", () => {
     }
     expect(() => injectPublicSections(html.replace(MARKER, ""))).toThrow();
     expect(() => injectPublicSections(html + MARKER)).toThrow();
+  });
+
+  it("gives each indexed subpage its own canonical HTML without changing the SPA entry", () => {
+    const fallback = injectPublicSections(read("index.html"));
+    const pages = renderPublicPages(fallback);
+    const slugs = sitemapPaths().filter((path) => path !== "/").map((path) => path.slice(1));
+    const nginx = read("../flask-server/deploy/nginx-bodymaps.conf");
+    const nginxPages = nginx.match(/\(\?<public_page>([^)]+)\)/)?.[1]?.split("|");
+    expect(Object.keys(pages).sort()).toEqual(slugs.sort());
+    expect(nginxPages?.sort()).toEqual(slugs);
+    const descriptions = new Set<string>();
+    for (const [slug, html] of Object.entries(pages)) {
+      const title = titleForPath(`/${slug}`);
+      expect(html).toContain(`<title>${title}</title>`);
+      expect(html).toContain(`<link rel="canonical" href="${ORIGIN}/${slug}"`);
+      expect(html).toContain(`<meta property="og:url" content="${ORIGIN}/${slug}"`);
+      expect(html).toContain(`<meta property="og:title" content="${title}"`);
+      const description = html.match(/<meta name="description" content="([^"]+)"/)?.[1];
+      expect(description).toBeTruthy();
+      descriptions.add(description!);
+      expect(html).toContain(`<section id="${slug}"><h1>`);
+      expect(html.match(/<section id=/g)).toHaveLength(1);
+      expect(html).not.toContain(TERMS_INTRO.slice(0, 60));
+      expect(html).toContain('<script type="module" src="/src/main.tsx">');
+    }
+    expect(descriptions.size).toBe(slugs.length);
   });
 
   it("the Terms of Service stay out: not in the summary, not linked, not listed, disallowed in robots.txt", () => {
