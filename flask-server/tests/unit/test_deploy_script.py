@@ -12,6 +12,8 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -97,6 +99,8 @@ def rig(tmp_path):
     sh(f"git init -q --bare {bare}", tmp_path)
     sh(f"git clone -q {bare} {repo}", tmp_path)
     (repo / "flask-server" / "deploy").mkdir(parents=True)
+    (repo / "flask-server" / "scripts").mkdir()
+    shutil.copy(Path(__file__).resolve().parents[2] / "scripts" / "db_table_counts.py", repo / "flask-server" / "scripts")
     (repo / "PanTS-Demo").mkdir()
     (repo / "flask-server" / "requirements.txt").write_text("")
     start = repo / "flask-server" / "deploy" / "start_backend.sh"
@@ -369,3 +373,57 @@ def test_deploy_never_reports_success_for_failed_access_checks(rig, override):
     res = rig.run(**override)
     assert res.returncode == 1
     assert "DEPLOY OK" not in res.stdout
+
+
+# ---- a migration must never remove rows ----------------------------------------------------------------------------------
+
+def _database_with_marks(rig):
+    database = rig.repo / "flask-server" / "accounts.db"
+    with sqlite3.connect(database) as con:
+        con.execute("CREATE TABLE mark (id INTEGER PRIMARY KEY, status TEXT)")
+        con.executemany("INSERT INTO mark (status) VALUES (?)", [("done",), ("done",), ("flagged",)])
+    return database
+
+
+def _alembic_that_runs(rig, sql):
+    stub = rig.tmp / "conda_bin" / "alembic"
+    stub.write_text(
+        "#!/bin/bash\n"
+        f'"{sys.executable}" - <<\'PY\'\n'
+        "import sqlite3\n"
+        "c = sqlite3.connect('accounts.db')\n"
+        f"c.execute({sql!r})\n"
+        "c.commit()\n"
+        "PY\n"
+    )
+    stub.chmod(0o755)
+
+
+def test_deploy_stops_before_the_restart_when_a_migration_removes_rows(rig):
+    _database_with_marks(rig)
+    _alembic_that_runs(rig, "DELETE FROM mark")
+    res = rig.run()
+    out = res.stdout + res.stderr
+    assert res.returncode != 0, out
+    assert "ROW COUNTS FELL DURING THE MIGRATION" in out
+    assert "table mark went from 3 rows to 0" in out
+    assert "a migration REMOVED rows" in out and "db-backup-" in out
+    assert not rig.start_log.exists(), "the backend must not be restarted on a database that lost rows"
+
+
+def test_deploy_goes_on_when_a_migration_only_adds_rows(rig):
+    _database_with_marks(rig)
+    _alembic_that_runs(rig, "INSERT INTO mark (status) VALUES ('done')")
+    res = rig.run()
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "every table has at least the rows it had before the migration" in res.stdout
+
+
+def test_deploy_does_not_mistake_expiring_rows_for_loss(rig):
+    database = rig.repo / "flask-server" / "accounts.db"
+    with sqlite3.connect(database) as con:
+        con.execute("CREATE TABLE auth_session (id INTEGER PRIMARY KEY)")
+        con.executemany("INSERT INTO auth_session DEFAULT VALUES", [(), ()])
+    _alembic_that_runs(rig, "DELETE FROM auth_session")
+    res = rig.run()
+    assert res.returncode == 0, res.stdout + res.stderr

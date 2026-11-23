@@ -155,7 +155,21 @@ echo "frontend built into dist.new (not live yet); backend deps refreshed"
 step="4. database migrations (manual step 4)"
 say "$step"
 cd "$REPO/flask-server" || die
+# A migration must never remove rows (one that only added a column once emptied the assignment marks through a cascading
+# delete). Record every table's row count, migrate, and compare: if any table has fewer rows, stop here, before the
+# backend is restarted, and name the table and the backup.
+counts_file=$(mktemp) || die "cannot create a temporary file for the row counts"
+dbs=$(ls -- *.db 2>/dev/null)
+if [ -n "$dbs" ]; then
+  # shellcheck disable=SC2086
+  "$PY/python" scripts/db_table_counts.py snapshot "$counts_file" $dbs || die "could not record the row counts before migrating. Nothing was migrated."
+fi
 "$PY/alembic" upgrade head || die "alembic failed. The pre-migration backup from step 1 is at ~/db-backup-$ts-*"
+if [ -n "$dbs" ]; then
+  # shellcheck disable=SC2086
+  "$PY/python" scripts/db_table_counts.py check "$counts_file" $dbs || die "a migration REMOVED rows (see above). The backend was NOT restarted. Restore the lost rows from the pre-migration backup ~/db-backup-$ts-* before going on."
+fi
+rm -f "$counts_file"
 echo "migrations at head"
 
 step="4b. wait for running inference jobs"

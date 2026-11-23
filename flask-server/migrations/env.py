@@ -54,6 +54,16 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
+        if _is_sqlite():
+            # SQLite cannot alter most things in place, so a "batch" migration rebuilds the table: it copies the rows
+            # into a new table, DROPS THE OLD ONE and renames. The app turns foreign keys on for every connection
+            # (models/engine.py), and dropping a table with foreign keys on first deletes its rows, which cascades to
+            # every table that refers to it with ON DELETE CASCADE. A migration that only added a column once emptied
+            # annotation_assignment_case (every done/flagged mark) this way. SQLite's own guidance for rebuilding a
+            # table is to turn foreign keys off for the duration and check them afterwards, which is what this does.
+            # The pragma only takes effect outside a transaction, so it is set before anything is begun.
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            connection.commit()
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
@@ -61,6 +71,14 @@ def run_migrations_online() -> None:
         )
         with context.begin_transaction():
             context.run_migrations()
+        if _is_sqlite():
+            connection.commit()
+            broken = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+            if broken:
+                raise RuntimeError(
+                    f"The migrations left {len(broken)} rows whose foreign keys point at nothing "
+                    f"(first: {tuple(broken[0])}). Restore the pre-migration backup and report this."
+                )
 
 
 if context.is_offline_mode():
