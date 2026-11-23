@@ -36,7 +36,8 @@ export default function ManagePanel({ project = LIBRARY }: { project?: Pick<Proj
 		for (const r of [a, p]) if (!r.ok) setError(r.message);
 		if (a.ok) setAll(a.data.assignments);
 		if (p.ok) setPeople(p.data.people);
-		if (s?.ok) setScanCount(s.data.scans.length);
+		// An answer with no list (an older server, or one that is not set up) leaves the count unknown, not zero.
+		if (s?.ok && Array.isArray(s.data.scans)) setScanCount(s.data.scans.length);
 		setLoaded(true);
 	}, [projectId, project.isDefault]);
 
