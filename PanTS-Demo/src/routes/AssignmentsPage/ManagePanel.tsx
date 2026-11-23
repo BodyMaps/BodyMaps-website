@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ProjectMembership } from "../../contexts/authContext";
 import { DEFAULT_PROJECT_ID, type Assignment, type Person, dueState, fetchAll, fetchPeople } from "../../helpers/assignments";
+import { fetchScans } from "../../helpers/projectScans";
 import Annotators from "./Annotators";
 import HandOut from "./HandOut";
 import ManageModal from "./ManageModal";
 import PeopleCards from "./PeopleCards";
+import UploadDataset from "./UploadDataset";
 import "./ManagePanel.css";
 
 // The project owner's half of the Assignments page, for one project: a card per person with their progress, four numbers at the top, and two
@@ -12,15 +14,17 @@ import "./ManagePanel.css";
 // be given cases). Only that project's owners are shown this, and the server checks the role on every call, so hiding it
 // from others is presentation, not access control.
 
-type Modal = { kind: "handout"; chosen: string[] } | { kind: "annotators" } | null;
+type Modal = { kind: "handout"; chosen: string[] } | { kind: "annotators" } | { kind: "upload" } | null;
 
 const LIBRARY = { id: DEFAULT_PROJECT_ID, isDefault: true };
 
 /** `project` is the one being managed; the built-in project (the shared library) when left out. */
-export default function ManagePanel({ project = LIBRARY }: { project?: Pick<ProjectMembership, "id" | "isDefault"> }) {
+export default function ManagePanel({ project = LIBRARY }: { project?: Pick<ProjectMembership, "id" | "isDefault"> & { name?: string } }) {
 	const projectId = project.id;
 	const [all, setAll] = useState<Assignment[]>([]);
 	const [people, setPeople] = useState<Person[]>([]);
+	// How many scans a project other than the library holds (null until known, and always for the library).
+	const [scanCount, setScanCount] = useState<number | null>(null);
 	const [loaded, setLoaded] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [modal, setModal] = useState<Modal>(null);
@@ -28,12 +32,14 @@ export default function ManagePanel({ project = LIBRARY }: { project?: Pick<Proj
 
 	const load = useCallback(async () => {
 		setError(null);
-		const [a, p] = await Promise.all([fetchAll(projectId), fetchPeople(projectId)]);
+		const [a, p, s] = await Promise.all([fetchAll(projectId), fetchPeople(projectId), project.isDefault ? null : fetchScans(projectId)]);
 		for (const r of [a, p]) if (!r.ok) setError(r.message);
 		if (a.ok) setAll(a.data.assignments);
 		if (p.ok) setPeople(p.data.people);
+		// An answer with no list (an older server, or one that is not set up) leaves the count unknown, not zero.
+		if (s?.ok && Array.isArray(s.data.scans)) setScanCount(s.data.scans.length);
 		setLoaded(true);
-	}, [projectId]);
+	}, [projectId, project.isDefault]);
 
 	useEffect(() => { void load(); }, [load]);
 
@@ -63,6 +69,9 @@ export default function ManagePanel({ project = LIBRARY }: { project?: Pick<Proj
 			<div className="asg-mhead">
 				<p className="asg-note">Everyone at a glance</p>
 				<div className="asg-mbuttons">
+					{!project.isDefault && (
+						<button type="button" className="asg-btn" data-testid="open-upload" onClick={() => { setNotice(null); setModal({ kind: "upload" }); }}>Upload dataset</button>
+					)}
 					<button type="button" className="asg-btn" data-testid="open-annotators" onClick={() => { setNotice(null); setModal({ kind: "annotators" }); }}>Collaborators</button>
 					<button type="button" className="asg-btn asg-btn--primary" data-testid="open-hand-out" onClick={() => openHandOut()}>+ Hand out cases</button>
 				</div>
@@ -86,12 +95,18 @@ export default function ManagePanel({ project = LIBRARY }: { project?: Pick<Proj
 				<ManageModal title="Hand out cases" onClose={() => setModal(null)}>
 					<HandOut
 						projectId={projectId}
+						scanCount={scanCount}
 						people={people.filter((p) => p.annotator || p.manager)}
 						tasks={tasks}
 						initialChosen={modal.chosen}
 						onCreated={() => void load()}
 						onDone={(message) => { setModal(null); setNotice(message); }}
 					/>
+				</ManageModal>
+			)}
+			{modal?.kind === "upload" && (
+				<ManageModal title="Upload dataset" onClose={() => setModal(null)}>
+					<UploadDataset project={{ id: projectId, name: project.name ?? "this project" }} onChanged={() => void load()} />
 				</ManageModal>
 			)}
 			{modal?.kind === "annotators" && (

@@ -174,6 +174,16 @@ jobs:
       - name: AbdomenAtlas routes
         run: python -m pytest tests/functional/test_abdomenatlas_routes.py -v
 
+      # Projects: who owns a project and who collaborates in it, assignments per project (an owner of one project has
+      # no say in another's, or in the shared library's), and the two migrations that add them.
+      - name: Projects and assignments per project
+        run: python -m pytest tests/functional/test_projects_endpoints.py tests/functional/test_project_assignments_endpoints.py tests/functional/test_assignments_endpoints.py tests/unit/test_projects_migrations.py tests/unit/test_project_data.py -v
+
+      # A project's own scans: the owner's upload, the numbering, and that only the project's people can open one.
+      # Own step: api.api_blueprint is imported once per process.
+      - name: Project datasets
+        run: python -m pytest tests/functional/test_project_scans_endpoints.py -v
+
       # An uploaded label map is combined into one mask (it crashed on every multi-file upload), and a
       # malformed case id is a 400, not a 500. Own step: api.api_blueprint is imported once per process.
       - name: Uploaded label-map combine
