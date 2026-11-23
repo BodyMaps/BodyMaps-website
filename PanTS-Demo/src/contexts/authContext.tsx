@@ -70,6 +70,19 @@ export type AuthUser = {
 	/** Roles held, from the user_role table ("admin" is the only one). The server
 	 *  enforces them; these only decide what the UI offers to draw. */
 	roles: string[];
+	/** The projects the account belongs to, each with its role there ("owner" or "collaborator"; an admin also sees
+	 *  projects it is not in, with role null). The built-in JHU project is the one with isDefault. */
+	projects: ProjectMembership[];
+};
+
+/** One project an account belongs to. */
+export type ProjectMembership = {
+	id: string;
+	name: string;
+	slug: string;
+	isDefault: boolean;
+	allowTraining: boolean;
+	role: "owner" | "collaborator" | null;
 };
 
 /** What GET /me/usage returns: the plan's limits and what's been used of them. */
@@ -196,6 +209,9 @@ type ApiUser = {
 	role_description?: string | null;
 	email_verified?: boolean;
 	roles?: string[] | null;
+	projects?: {
+		id: string; name: string; slug: string; is_default?: boolean; allow_training?: boolean; role?: string | null;
+	}[] | null;
 };
 const mapApiUser = (u: ApiUser): AuthUser => {
 	const custom = (u.name || "").trim();
@@ -218,6 +234,14 @@ const mapApiUser = (u: ApiUser): AuthUser => {
 		// Defaulted, never invented: an endpoint that forgets to send roles
 		// leaves you with none, which fails closed.
 		roles: u.roles ?? [],
+		projects: (u.projects ?? []).map((p) => ({
+			id: p.id,
+			name: p.name,
+			slug: p.slug,
+			isDefault: p.is_default === true,
+			allowTraining: p.allow_training === true,
+			role: p.role === "owner" || p.role === "collaborator" ? p.role : null,
+		})),
 	};
 };
 

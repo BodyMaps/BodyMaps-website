@@ -42,7 +42,7 @@ from api.auth import (
 )
 from api.rate_limit import Limiter
 from services.public_errors import known_message
-from services import annotator_invites, auth_store, avatar_store, job_store, mailer, plan_store, role_store
+from services import annotator_invites, auth_store, avatar_store, job_store, mailer, plan_store, project_store, role_store
 
 auth_blueprint = Blueprint("auth", __name__)
 
@@ -193,9 +193,12 @@ def _with_roles(user: dict) -> dict:
     resolves a session.
     """
     version = avatar_store.version_for(user["id"])
+    roles = role_store.roles_for(user["id"])
     return {
         **user,
-        "roles": role_store.roles_for(user["id"]),
+        "roles": roles,
+        # The projects the account belongs to, each with its role there (owner or collaborator).
+        "projects": project_store.list_for(user["id"], is_admin=role_store.ROLE_ADMIN in roles),
         "avatar_url": url_for("auth.avatar_file", user_id=user["id"], version=version) if version else None,
     }
 

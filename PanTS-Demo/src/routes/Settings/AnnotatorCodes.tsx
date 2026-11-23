@@ -108,7 +108,7 @@ const AnnotatorCodes: React.FC = () => {
 
 	return (
 		<div className="set-group" data-testid="annotator-codes">
-			<h2 className="set-heading">Annotator access code</h2>
+			<h2 className="set-heading">Collaborator access code</h2>
 			<p className="set-sub">
 				A one-time code that lets someone save corrected scans for everyone. It expires after the time you choose, or never if permanent.
 			</p>

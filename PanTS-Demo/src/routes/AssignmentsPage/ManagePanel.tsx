@@ -58,13 +58,13 @@ export default function ManagePanel() {
 			<div className="asg-mhead">
 				<p className="asg-note">Everyone at a glance</p>
 				<div className="asg-mbuttons">
-					<button type="button" className="asg-btn" data-testid="open-annotators" onClick={() => { setNotice(null); setModal({ kind: "annotators" }); }}>Annotators</button>
+					<button type="button" className="asg-btn" data-testid="open-annotators" onClick={() => { setNotice(null); setModal({ kind: "annotators" }); }}>Collaborators</button>
 					<button type="button" className="asg-btn asg-btn--primary" data-testid="open-hand-out" onClick={() => openHandOut()}>+ Hand out cases</button>
 				</div>
 			</div>
 
 			<div className="asg-tiles" data-testid="tiles">
-				<div className="asg-tile"><strong>{stats.annotators}</strong><span>annotators</span></div>
+				<div className="asg-tile"><strong>{stats.annotators}</strong><span>collaborators</span></div>
 				<div className="asg-tile"><strong>{stats.done} / {stats.total}</strong><span>cases done</span></div>
 				<div className={`asg-tile ${stats.late > 0 ? "asg-tile--warn" : ""}`}><strong>{stats.late}</strong><span>overdue</span></div>
 				<div className="asg-tile"><strong>{stats.waiting}</strong><span>no cases yet</span></div>
@@ -89,8 +89,8 @@ export default function ManagePanel() {
 				</ManageModal>
 			)}
 			{modal?.kind === "annotators" && (
-				<ManageModal title="Annotators" onClose={() => setModal(null)}>
-					<p className="asg-sub">Only annotators can be given cases. They can also save a corrected scan for everyone.</p>
+				<ManageModal title="Collaborators" onClose={() => setModal(null)}>
+					<p className="asg-sub">Only collaborators can be given cases. They can also save a corrected scan for everyone.</p>
 					<Annotators people={people} assignments={all} onChanged={() => void load()} />
 				</ManageModal>
 			)}

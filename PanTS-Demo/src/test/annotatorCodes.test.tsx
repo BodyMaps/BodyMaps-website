@@ -74,7 +74,7 @@ const renderPage = () =>
 describe("who sees the code panel", () => {
 	it("is shown to an annotation manager", async () => {
 		renderPage();
-		expect(await screen.findByRole("heading", { name: "Annotator access code" })).toBeInTheDocument();
+		expect(await screen.findByRole("heading", { name: "Collaborator access code" })).toBeInTheDocument();
 	});
 
 	it("is hidden from an admin who is not one, and no code request is made", async () => {

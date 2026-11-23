@@ -24,7 +24,7 @@ const AnnotatorAccessRow: React.FC = () => {
 		try {
 			await redeemAnnotatorInvite(code.trim());
 			setCode("");
-			setMessage({ text: "Annotator access added.", ok: true });
+			setMessage({ text: "Collaborator access added.", ok: true });
 		} catch (error) {
 			setMessage({ text: error instanceof Error ? error.message : "Couldn't redeem that code.", ok: false });
 		} finally {
@@ -34,7 +34,7 @@ const AnnotatorAccessRow: React.FC = () => {
 	if (approved) {
 		return (
 			<div className="set-row" data-testid="annotator-access">
-				<span className="set-row-label">Annotator access<span className="set-row-note">You can save corrections to a dataset scan for everyone with Save to JHU server.</span></span>
+				<span className="set-row-label">Collaborator access<span className="set-row-note">You can save corrections to a dataset scan for everyone with Save to JHU server.</span></span>
 			</div>
 		);
 	}
