@@ -50,6 +50,7 @@ from models import annotator_invite as _annotator_invite  # noqa: F401,E402
 from models import annotation_assignment as _annotation_assignment  # noqa: F401,E402
 from models import project as _project  # noqa: F401,E402
 from models import project_scan as _project_scan  # noqa: F401,E402
+from models import scan_edit_lock as _scan_edit_lock  # noqa: F401,E402
 from models import password_reset as _password_reset  # noqa: F401,E402
 from models import email_verification as _email_verification  # noqa: F401,E402
 
