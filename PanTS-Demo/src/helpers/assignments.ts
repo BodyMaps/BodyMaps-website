@@ -1,8 +1,42 @@
+import type { ProjectMembership } from "../contexts/authContext";
 import { API_BASE } from "./constants";
 import { CANCERVERSE_LAST_NUMBER, PANTS_CASE_COUNT, fetchAbdomenAtlasCount, fetchCancerVerseCount, numberToCaseId } from "./caseNumbering";
 
-// Annotation assignments: a manager hands an annotator a range of library case numbers for one task, and the
-// annotator marks each case done or flagged as they go. A case with no mark is still to do.
+// Annotation assignments: a project owner hands a collaborator a range of case numbers for one task, and the
+// collaborator marks each case done or flagged as they go. A case with no mark is still to do. For the built-in JHU
+// project the numbers are library case numbers; every other project counts its own cases from 1.
+
+/** The built-in project that holds the existing library. */
+export const DEFAULT_PROJECT_ID = "jhu";
+
+type WithProjects = { roles: string[]; projects?: ProjectMembership[] };
+
+/**
+ * The projects an account belongs to, with its role in each. An account that holds the older annotation roles but whose
+ * project list has no entry for the built-in project (a server that predates projects) is given that entry, so nothing
+ * disappears for it.
+ */
+export function memberProjects(user: WithProjects | null | undefined): ProjectMembership[] {
+	if (!user) return [];
+	const own = (user.projects ?? []).filter((p) => p.role !== null);
+	if (own.some((p) => p.id === DEFAULT_PROJECT_ID)) return own;
+	const legacy = user.roles.includes("annotation_manager") ? "owner" : user.roles.includes("annotator") ? "collaborator" : null;
+	if (!legacy) return own;
+	return [{ id: DEFAULT_PROJECT_ID, name: "JHU", slug: "jhu", isDefault: true, allowTraining: false, role: legacy }, ...own];
+}
+
+/** Whether an assignment's cases are library cases (the built-in project), the numbers /case/<number> opens. */
+export const isLibraryAssignment = (a: Pick<Assignment, "project_id">) => (a.project_id ?? DEFAULT_PROJECT_ID) === DEFAULT_PROJECT_ID;
+
+/** The projects an account owns: where it may hand out cases and choose who annotates. */
+export const ownedProjects = (user: WithProjects | null | undefined) => memberProjects(user).filter((p) => p.role === "owner");
+
+/** `project=<id>` for a project other than the built-in one, so requests for the built-in project stay as they were. */
+const projectParam = (projectId?: string) => (projectId && projectId !== DEFAULT_PROJECT_ID ? `project=${encodeURIComponent(projectId)}` : "");
+const withProject = (path: string, projectId?: string) => {
+	const p = projectParam(projectId);
+	return p ? `${path}${path.includes("?") ? "&" : "?"}${p}` : path;
+};
 
 export type CaseMark = "done" | "flagged";
 export type CaseStatus = CaseMark | "todo";
@@ -20,6 +54,8 @@ export type Assignment = {
 	done: number;
 	flagged: number;
 	todo: number;
+	/** The project the cases belong to; absent from a server that predates projects, which means the built-in one. */
+	project_id?: string;
 	/** Only on "mine": the mark on each case that has one, keyed by case number. */
 	marks?: Record<string, CaseMark>;
 };
@@ -62,19 +98,29 @@ async function call<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> 
 }
 
 export const fetchMine = () => call<{ assignments: Assignment[] }>("/assignments/mine");
-export const fetchAll = () => call<{ assignments: Assignment[] }>("/assignments");
-export const fetchPeople = () => call<{ people: Person[] }>("/assignments/people");
+export const fetchAll = (projectId?: string) => call<{ assignments: Assignment[] }>(withProject("/assignments", projectId));
+export const fetchPeople = (projectId?: string) => call<{ people: Person[] }>(withProject("/assignments/people", projectId));
 
-export const searchAccounts = (q: string) => call<{ accounts: Account[] }>(`/assignments/accounts?q=${encodeURIComponent(q)}`);
+export const searchAccounts = (q: string, projectId?: string) =>
+	call<{ accounts: Account[] }>(withProject(`/assignments/accounts?q=${encodeURIComponent(q)}`, projectId));
 
-export const makeAnnotator = (userId: string) => call<Account>("/assignments/annotators", { method: "POST", body: JSON.stringify({ user_id: userId }) });
+export const makeAnnotator = (userId: string, projectId?: string) =>
+	call<Account>("/assignments/annotators", {
+		method: "POST",
+		body: JSON.stringify(projectId && projectId !== DEFAULT_PROJECT_ID ? { user_id: userId, project_id: projectId } : { user_id: userId }),
+	});
 
-export const removeAnnotator = (userId: string) => call<Account>(`/assignments/annotators/${encodeURIComponent(userId)}`, { method: "DELETE" });
+export const removeAnnotator = (userId: string, projectId?: string) =>
+	call<Account>(withProject(`/assignments/annotators/${encodeURIComponent(userId)}`, projectId), { method: "DELETE" });
 
 /** Fewest characters the server accepts when searching for an account. */
 export const MIN_ACCOUNT_SEARCH = 3;
 
-export type NewAssignment = { assignee_id: string; start: number; end: number; task: string; note?: string; due?: string; force?: boolean };
+export type NewAssignment = {
+	assignee_id: string; start: number; end: number; task: string; note?: string; due?: string; force?: boolean;
+	/** Left out for the built-in project. */
+	project_id?: string;
+};
 
 export const createAssignment = (body: NewAssignment) =>
 	call<Assignment>("/assignments", { method: "POST", body: JSON.stringify(body) });

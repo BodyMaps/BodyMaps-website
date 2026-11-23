@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+	DEFAULT_PROJECT_ID,
 	type Account,
 	type Assignment,
 	type Person,
@@ -10,9 +11,14 @@ import {
 	whoLabel,
 } from "../../helpers/assignments";
 
-// Who can be given cases. A manager finds an account by part of a name or email (not a list of everyone) and makes it an
-// annotator; an annotator can be taken off again, which keeps their finished marks but stops new cases.
-export default function Annotators({ people, assignments, onChanged }: { people: Person[]; assignments: Assignment[]; onChanged: () => void }) {
+// Who can be given cases. An owner finds an account (not a list of everyone) and adds it as a collaborator; a collaborator
+// can be taken out again, which keeps their finished marks but stops new cases. The built-in JHU project searches by part
+// of a name or email; every other project needs the person's full email address, so an owner can add someone they know
+// and cannot browse the accounts of other groups.
+export default function Annotators({ projectId = DEFAULT_PROJECT_ID, people, assignments, onChanged }: {
+	projectId?: string; people: Person[]; assignments: Assignment[]; onChanged: () => void;
+}) {
+	const byEmail = projectId !== DEFAULT_PROJECT_ID;
 	const [query, setQuery] = useState("");
 	const [results, setResults] = useState<Account[] | null>(null);
 	const [searching, setSearching] = useState(false);
@@ -22,14 +28,14 @@ export default function Annotators({ people, assignments, onChanged }: { people:
 	const [notice, setNotice] = useState<string | null>(null);
 
 	const term = query.trim();
-	const ready = term.length >= MIN_ACCOUNT_SEARCH;
+	const ready = byEmail ? /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(term) : term.length >= MIN_ACCOUNT_SEARCH;
 
 	useEffect(() => {
 		if (!ready) return;
 		let cancelled = false;
 		const timer = window.setTimeout(() => {
 			setSearching(true);
-			void searchAccounts(term).then((res) => {
+			void searchAccounts(term, projectId).then((res) => {
 				if (cancelled) return;
 				setSearching(false);
 				if (res.ok) {
@@ -45,7 +51,7 @@ export default function Annotators({ people, assignments, onChanged }: { people:
 			cancelled = true;
 			window.clearTimeout(timer);
 		};
-	}, [term, ready]);
+	}, [term, ready, projectId]);
 
 	const shown = ready ? results : null;
 	const annotators = people.filter((p) => p.annotator).sort((a, b) => whoLabel(a).localeCompare(whoLabel(b)));
@@ -55,7 +61,7 @@ export default function Annotators({ people, assignments, onChanged }: { people:
 		setBusy(id);
 		setError(null);
 		setNotice(null);
-		const res = make ? await makeAnnotator(id) : await removeAnnotator(id);
+		const res = make ? await makeAnnotator(id, projectId) : await removeAnnotator(id, projectId);
 		setBusy(null);
 		if (!res.ok) {
 			setError(res.message);
@@ -72,12 +78,12 @@ export default function Annotators({ people, assignments, onChanged }: { people:
 			<div className="asg-annotator-find">
 				<label className="asg-field">
 					<span>Find a person to add as a collaborator</span>
-					<input className="asg-input" type="search" placeholder="Part of a name or email" value={query} onChange={(e) => setQuery(e.target.value)} autoComplete="off" />
+					<input className="asg-input" type="search" placeholder={byEmail ? "Their full email address" : "Part of a name or email"} value={query} onChange={(e) => setQuery(e.target.value)} autoComplete="off" />
 				</label>
-				{term.length > 0 && !ready && <p className="asg-note">Type at least {MIN_ACCOUNT_SEARCH} letters.</p>}
+				{term.length > 0 && !ready && <p className="asg-note">{byEmail ? "Type their full email address." : `Type at least ${MIN_ACCOUNT_SEARCH} letters.`}</p>}
 				{ready && searching && <p className="asg-note">Searching…</p>}
 				{ready && !searching && shown && shown.length === 0 && (
-					<p className="asg-note" data-testid="no-accounts">No account matches. They need to sign up on the website first.</p>
+					<p className="asg-note" data-testid="no-accounts">{byEmail ? "No account has that email address. They need to sign up on the website first." : "No account matches. They need to sign up on the website first."}</p>
 				)}
 				{shown && shown.length > 0 && (
 					<ul className="asg-account-list" aria-label="Matching accounts">

@@ -6,7 +6,9 @@ import {
 	type CaseStatus,
 	assignmentsFor,
 	fetchMine,
+	isLibraryAssignment,
 	markCase,
+	memberProjects,
 	nextTodo,
 	statusOf,
 } from "../../helpers/assignments";
@@ -21,7 +23,7 @@ const STATUS_TEXT: Record<CaseStatus, string> = { todo: "Not marked yet", done: 
 
 export default function AssignmentBar({ caseId }: { caseId: string }) {
 	const { user, isAuthenticated } = useAuth();
-	const eligible = isAuthenticated && !!user && (user.roles.includes("annotator") || user.roles.includes("annotation_manager"));
+	const eligible = isAuthenticated && !!user && memberProjects(user).length > 0;
 	const [list, setList] = useState<Assignment[] | null>(null);
 	const n = caseIdToNumber(caseId);
 
@@ -34,7 +36,8 @@ export default function AssignmentBar({ caseId }: { caseId: string }) {
 		return () => { cancelled = true; };
 	}, [eligible, user?.id]);
 
-	const matches = useMemo(() => (list && n !== null ? assignmentsFor(list, n) : []), [list, n]);
+	// Only the shared library's cases are numbered like this case; another project counts its own cases from 1.
+	const matches = useMemo(() => (list && n !== null ? assignmentsFor(list.filter(isLibraryAssignment), n) : []), [list, n]);
 	if (!eligible || n === null || matches.length === 0 || !list) return null;
 	// Keyed by case so a new case starts clean: no old error, no old "all done" message.
 	return <Strip key={n} n={n} matches={matches} setList={setList} />;
