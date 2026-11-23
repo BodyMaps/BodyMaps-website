@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
+from constants import Constants
 from models.engine import session_scope
 from models.job import utcnow
 from models.project import DEFAULT_PROJECT_ID, Project
@@ -49,6 +50,7 @@ SCAN_FILE = "ct.nii.gz"
 META_FILE = "metadata.json"
 
 _CASE_ID = re.compile(r"^PRJ_([0-9a-f]{8})_(\d{8})$", re.IGNORECASE)
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _ANY_PROJECT_ID = re.compile(r"^PRJ_", re.IGNORECASE)
 
 
@@ -152,12 +154,41 @@ def ct_path(case_id) -> str | None:
     base, row = root(), _row(case_id)
     if base is None or row is None:
         return None
-    path = os.path.join(base, row["project_id"], "image_only", row["case_id"], SCAN_FILE)
+    try:
+        path = os.path.join(_scan_dir(base, row["project_id"], row["case_id"]), SCAN_FILE)
+    except ProjectDataError:
+        return None
     return path if os.path.isfile(path) else None
 
 
+def _inside(path: str, folder: str) -> str:
+    """``path`` resolved, when it is inside ``folder``; ProjectDataError otherwise. Every path this module builds or opens
+    goes through here, so nothing taken from a request can point outside the folder it belongs in."""
+    resolved, root_dir = os.path.realpath(path), os.path.realpath(folder)
+    if not resolved.startswith(root_dir + os.sep):
+        raise ProjectDataError("no_such_upload")
+    return resolved
+
+
+def _project_folder(base: str, project_id: str) -> str:
+    """The folder of one project under the dataset root. A project id is a UUID; anything else is not a project."""
+    if not isinstance(project_id, str) or not _UUID.match(project_id):
+        raise ProjectDataError("no_such_project")
+    return _inside(os.path.join(base, project_id), base)
+
+
 def _scan_dir(base: str, project_id: str, case_id: str) -> str:
-    return os.path.join(base, project_id, "image_only", case_id)
+    cid = canonical(case_id)
+    if cid is None:
+        raise ProjectDataError("no_such_scan")
+    return _inside(os.path.join(_project_folder(base, project_id), "image_only", cid), base)
+
+
+def _staged_upload(source_path) -> str:
+    """The finished upload being added, which must be inside the site's upload area (sessions/inference)."""
+    if not isinstance(source_path, str):
+        raise ProjectDataError("no_such_upload")
+    return _inside(source_path, os.path.join(Constants.SESSIONS_DIR_NAME, "inference"))
 
 
 # ---- reading ---------------------------------------------------------------------------------------------------
@@ -285,7 +316,8 @@ def store_scan(project_id: str, source_path: str, original_name: str, modality, 
         raise ProjectDataError("no_such_project")
     if modality not in MODALITIES:
         raise ProjectDataError("bad_modality")
-    if not isinstance(source_path, str) or not os.path.isfile(source_path):
+    source_path = _staged_upload(source_path)
+    if not os.path.isfile(source_path):
         raise ProjectDataError("no_such_upload")
     size = os.path.getsize(source_path)
     if size > MAX_BYTES:
@@ -313,9 +345,9 @@ def store_scan(project_id: str, source_path: str, original_name: str, modality, 
         raise ProjectDataError("no_room")
 
     # Copy outside the lock (it can take a while) to a name nobody opens, then take the number and rename into place inside it.
-    incoming_dir = os.path.join(base, project_id, ".incoming")
+    incoming_dir = _inside(os.path.join(_project_folder(base, project_id), ".incoming"), base)
     os.makedirs(incoming_dir, exist_ok=True)
-    incoming = os.path.join(incoming_dir, f"{uuid.uuid4().hex}.nii.gz")
+    incoming = _inside(os.path.join(incoming_dir, f"{uuid.uuid4().hex}.nii.gz"), incoming_dir)
     try:
         _gzip_copy(source_path, incoming)
         stored_size = os.path.getsize(incoming)

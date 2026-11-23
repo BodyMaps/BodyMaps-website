@@ -77,7 +77,8 @@ export async function uploadProjectScan(opts: {
 	if (!isNifti(file.name)) return fail("Only .nii and .nii.gz files can be uploaded.");
 	if (file.size > MAX_SCAN_BYTES) return fail("That file is larger than the limit for one scan (2 GB).", { reason: "too_large" });
 	if (file.size === 0) return fail("That file is empty.");
-	const sessionId = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}${Math.random()}`).replace(/[^a-z0-9]/gi, "").slice(0, 32).padEnd(16, "0");
+	// 128 random bits from the browser's own source, as 32 hex characters (the server wants a safe id of 8 or more).
+	const sessionId = [...globalThis.crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
 	const total = Math.ceil(file.size / CHUNK_SIZE);
 	const headers = { "X-Upload-Owner": userId };
 	let done = 0;
