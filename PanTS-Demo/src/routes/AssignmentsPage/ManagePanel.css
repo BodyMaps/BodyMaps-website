@@ -167,3 +167,10 @@ textarea.asg-input { resize: vertical; min-height: 64px; }
 	.asg-modal-backdrop { padding: 0; align-items: flex-end; }
 	.asg-modal { width: 100%; max-height: 94vh; border-radius: 22px 22px 0 0; }
 }
+.asg-radio-row { display: flex; gap: 10px; margin: 6px 0 12px; }
+.asg-radio-row label { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid #c8cdda; border-radius: 12px; cursor: pointer; background: #fff; }
+.asg-radio-row label.is-on { border-color: #00306d; background: #eef2fb; }
+.asg-upload-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.asg-upload-state { font-size: 14px; color: #5a6175; }
+.asg-upload-state--stored { color: #14502f; }
+.asg-upload-state--failed { color: #9b1c1c; }

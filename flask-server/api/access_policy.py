@@ -92,6 +92,37 @@ def _showcase_read():
     return case_id is not None and case_id in showcase_case_ids()
 
 
+# Request arguments that can carry a case id besides the ones in the path.
+_CASE_QUERY_ARGS = ("id", "case_id", "clabel_id", "display_id", "case")
+
+
+def _project_case_ids() -> list[str]:
+    """The project case ids (PRJ_...) a request names, in its path or its usual query arguments."""
+    from services import project_data
+    values = list((request.view_args or {}).values()) + [request.args.get(name) for name in _CASE_QUERY_ARGS]
+    found = []
+    for value in values:
+        text = str(value) if value is not None else ""
+        # a path value can carry the extension of a volume (.nii.gz); the id is what comes before it
+        candidate = text.split(".")[0] if text[:4].upper() == "PRJ_" else text
+        if project_data.looks_like_project_case(candidate):
+            found.append(candidate)
+    return found
+
+
+def project_case_refusal(user, ids=None):
+    """None, or the answer to send when the request names a project scan (a PRJ_ id) its account may not open.
+
+    Every value in the path and the usual query arguments is looked at, so no handler has to remember to ask. A project case
+    that does not exist and one in another project are answered alike (404), so ids cannot be probed.
+    """
+    from services import project_data
+    for candidate in (_project_case_ids() if ids is None else ids):
+        if not project_data.can_open(user["id"], candidate):
+            return jsonify({"error": "Not found"}), 404
+    return None
+
+
 def _valid_worker_token() -> bool:
     expected = os.environ.get("WORKER_API_TOKEN", "").strip()
     provided = request.headers.get("X-Worker-Token", "").strip()
@@ -125,6 +156,10 @@ def install_access_policy(app: Flask, *, api_prefix: str = "/api") -> None:
         if request.method in WORKER_ENDPOINT_METHODS.get(request.endpoint, ()) and _valid_worker_token():
             return None
         public = request.method in PUBLIC_ENDPOINT_METHODS.get(request.endpoint, ()) or _showcase_read()
+        project_ids = _project_case_ids()
+        if project_ids:
+            # A project's scans are never public: a request that names one needs a session, whatever endpoint it is for.
+            public = False
         upload_owner = request.headers.get("X-Upload-Owner")
         if public and upload_owner is None:
             return None
@@ -143,7 +178,7 @@ def install_access_policy(app: Flask, *, api_prefix: str = "/api") -> None:
             return None
         if user is None:
             return jsonify({"error": "Authentication required", "code": "authentication_required"}), 401
-        return None
+        return project_case_refusal(user, project_ids)
 
     @app.after_request
     def private_api_responses(response):

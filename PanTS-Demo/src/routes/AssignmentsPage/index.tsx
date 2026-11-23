@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import AssignmentCaseCard from "../../components/AssignmentCaseCard";
 import { useAuth } from "../../contexts/authContext";
-import { type Assignment, type CaseStatus, dueLabel, dueState, memberProjects, nextTodo, ownedProjects, rangeLabel, statusOf } from "../../helpers/assignments";
+import { type Assignment, type CaseStatus, dueLabel, dueState, isLibraryAssignment, memberProjects, nextTodo, ownedProjects, rangeLabel, statusOf } from "../../helpers/assignments";
+import { projectCaseId } from "../../helpers/projectScans";
 import { useMyAssignments } from "../../helpers/useMyAssignments";
 import home from "../Homepage/Homepage.module.css";
 import ManagePanel from "./ManagePanel";
@@ -119,7 +120,7 @@ export default function AssignmentsPage() {
 									</span>
 								</div>
 								{resume ? (
-									<Link className="asg-primary" to={`/case/${resume.n}`}>
+									<Link className="asg-primary" to={`/case/${isLibraryAssignment(resume.a) ? resume.n : projectCaseId(resume.a.project_id!, resume.n!)}`}>
 										{counts.done + counts.flagged === 0 ? "Start" : "Continue"} with case {resume.n}
 									</Link>
 								) : <span className="asg-finished" role="status">Everything is marked. Nice work.</span>}
@@ -168,7 +169,7 @@ export default function AssignmentsPage() {
 							<ul className="asg-grid" aria-label="Cases">
 								{visible.map(({ a, n, status }) => (
 									<li key={`${a.id}-${n}`}>
-										<AssignmentCaseCard number={n} status={status} task={assignments.length > 1 && which === "all" ? a.task : undefined} next={status === "todo" && resume?.a.id === a.id && resume.n === n} />
+										<AssignmentCaseCard number={n} status={status} task={assignments.length > 1 && which === "all" ? a.task : undefined} next={status === "todo" && resume?.a.id === a.id && resume.n === n} projectCaseId={isLibraryAssignment(a) ? undefined : projectCaseId(a.project_id!, n)} />
 									</li>
 								))}
 							</ul>

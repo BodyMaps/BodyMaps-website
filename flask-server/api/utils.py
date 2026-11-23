@@ -78,12 +78,15 @@ def get_abdomenatlas_id(index):
 
 
 def get_dataset_from_case_id(case_str):
-    """Dispatch on the id prefix: 'CancerVerse' for CV ids, 'AbdomenAtlas' for BDMAP ids, else 'PanTS'."""
+    """Dispatch on the id prefix: 'CancerVerse' for CV ids, 'AbdomenAtlas' for BDMAP ids, 'Project' for the scans a
+    project owner uploaded (PRJ_ ids), else 'PanTS'."""
     prefix = str(case_str).strip().upper()
     if prefix.startswith("CV"):
         return "CancerVerse"
     if prefix.startswith("BDMAP"):
         return "AbdomenAtlas"
+    if prefix.startswith("PRJ_"):
+        return "Project"
     return "PanTS"
 
 def get_folder_id(case_id):

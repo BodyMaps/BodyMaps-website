@@ -1,5 +1,5 @@
 import {
-	IconActivity, IconChartBar, IconHeart, IconHistory, IconShieldLock, IconUser, IconUsers,
+	IconActivity, IconChartBar, IconFolders, IconHeart, IconHistory, IconShieldLock, IconUser, IconUsers,
 } from "@tabler/icons-react";
 import React, { Suspense, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -45,6 +45,7 @@ const SECTIONS: Section[] = [
 const ADMIN_SECTIONS: Section[] = [
 	{ to: "/account/analytics", label: "Usage", icon: IconChartBar },
 	{ to: "/account/people", label: "People", icon: IconUsers },
+	{ to: "/account/projects", label: "Projects", icon: IconFolders },
 	{ to: "/account/diagnostics", label: "Diagnostics", icon: IconActivity },
 ];
 

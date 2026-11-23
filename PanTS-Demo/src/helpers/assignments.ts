@@ -69,7 +69,7 @@ export type Overlap = { id: string; assignee: string; start: number; end: number
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; message: string; reason?: string; overlaps?: Overlap[] };
 
-async function call<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
+export async function call<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
 	try {
 		const res = await fetch(`${API_BASE}/api${path}`, {
 			credentials: "include",

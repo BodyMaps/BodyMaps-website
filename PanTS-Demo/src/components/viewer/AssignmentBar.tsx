@@ -13,11 +13,15 @@ import {
 	statusOf,
 } from "../../helpers/assignments";
 import { caseIdToNumber } from "../../helpers/caseNumbering";
+import { parseProjectCaseId, projectCaseId, projectCode } from "../../helpers/projectScans";
 import "./AssignmentBar.css";
 
 // A slim strip above the viewer for an annotator whose assignment includes this case: what to annotate, how far along
 // they are, and one click to mark the case and go to the next one. It shows nothing for anyone else, and nothing when
 // the case is not in any of their assignments, so it never changes the viewer for ordinary visitors.
+
+/** What /case/<...> takes for case `k` of an assignment: the library number, or the project's own scan id. */
+const hrefFor = (a: Assignment, k: number) => (isLibraryAssignment(a) ? String(k) : projectCaseId(a.project_id!, k));
 
 const STATUS_TEXT: Record<CaseStatus, string> = { todo: "Not marked yet", done: "Marked done", flagged: "Flagged for a second look" };
 
@@ -25,7 +29,9 @@ export default function AssignmentBar({ caseId }: { caseId: string }) {
 	const { user, isAuthenticated } = useAuth();
 	const eligible = isAuthenticated && !!user && memberProjects(user).length > 0;
 	const [list, setList] = useState<Assignment[] | null>(null);
-	const n = caseIdToNumber(caseId);
+	// A project's scan is PRJ_<project code>_<number>; the number counts that project's own cases.
+	const project = parseProjectCaseId(caseId);
+	const n = project ? project.number : caseIdToNumber(caseId);
 
 	useEffect(() => {
 		if (!eligible) return;
@@ -36,8 +42,15 @@ export default function AssignmentBar({ caseId }: { caseId: string }) {
 		return () => { cancelled = true; };
 	}, [eligible, user?.id]);
 
-	// Only the shared library's cases are numbered like this case; another project counts its own cases from 1.
-	const matches = useMemo(() => (list && n !== null ? assignmentsFor(list.filter(isLibraryAssignment), n) : []), [list, n]);
+	// Only assignments of the project this case belongs to are numbered like it: the shared library for a library case,
+	// that one project for a project case. Another project counts its own cases from 1.
+	const matches = useMemo(() => {
+		if (!list || n === null) return [];
+		const same = project
+			? list.filter((a) => !isLibraryAssignment(a) && projectCode(a.project_id!) === project.code)
+			: list.filter(isLibraryAssignment);
+		return assignmentsFor(same, n);
+	}, [list, n, project?.code]); // eslint-disable-line react-hooks/exhaustive-deps
 	if (!eligible || n === null || matches.length === 0 || !list) return null;
 	// Keyed by case so a new case starts clean: no old error, no old "all done" message.
 	return <Strip key={n} n={n} matches={matches} setList={setList} />;
@@ -81,7 +94,7 @@ function Strip({ n, matches, setList }: { n: number; matches: Assignment[]; setL
 		if (!advance) return;
 		const target = nextTodo(updated, n);
 		if (target === null) setFinished(`All ${updated.total} cases in "${updated.task}" are marked. Nice work.`);
-		else navigate(`/case/${target}`);
+		else navigate(`/case/${hrefFor(updated, target)}`);
 	};
 
 	const skipTo = nextTodo(current, n);
@@ -114,7 +127,7 @@ function Strip({ n, matches, setList }: { n: number; matches: Assignment[]; setL
 							<button type="button" className="asg-bar-btn" disabled={busy} onClick={() => void apply("todo", false)}>Mark as not done</button>
 						)}
 						{skipTo !== null && skipTo !== n && (
-							<Link className="asg-bar-btn" to={`/case/${skipTo}`}>Skip to case {skipTo}</Link>
+							<Link className="asg-bar-btn" to={`/case/${hrefFor(current, skipTo)}`}>Skip to case {skipTo}</Link>
 						)}
 					</>
 				)}

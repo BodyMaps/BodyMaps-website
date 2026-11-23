@@ -18,9 +18,11 @@ import {
 
 type Pending = { person: Person; range: [number, number] }[];
 
-export default function HandOut({ projectId = DEFAULT_PROJECT_ID, people, tasks, initialChosen = [], onCreated, onDone }: {
+export default function HandOut({ projectId = DEFAULT_PROJECT_ID, scanCount = null, people, tasks, initialChosen = [], onCreated, onDone }: {
 	/** The project the cases are for; the case numbers are library numbers only for the built-in one. */
 	projectId?: string;
+	/** How many scans a project other than the library has, so a range past them is caught here; null when not known. */
+	scanCount?: number | null;
 	people: Person[];
 	tasks: string[];
 	/** People already ticked when the form opens (a card's own Hand out button). */
@@ -61,6 +63,8 @@ export default function HandOut({ projectId = DEFAULT_PROJECT_ID, people, tasks,
 		if (!cases.trim()) return "Type the cases, for example 55 to 95.";
 		if (!range) return "Write the cases as two numbers, for example 55 to 95.";
 		if (libraryMax !== null && range[1] > libraryMax) return `The library has cases 1 to ${libraryMax}. Choose cases up to ${libraryMax}.`;
+		if (!isLibrary && scanCount === 0) return "This project has no scans yet. Upload a dataset first.";
+		if (!isLibrary && scanCount !== null && range[1] > scanCount) return `This project has cases 1 to ${scanCount}. Choose cases up to ${scanCount}.`;
 		if (!task.trim()) return "Say what to annotate, for example Veins and arteries.";
 		if (!picked.length) return "Choose at least one person.";
 		if (!blocks) return `That is ${range[1] - range[0] + 1} cases for ${picked.length} people. Choose fewer people or a bigger range.`;
@@ -124,6 +128,13 @@ export default function HandOut({ projectId = DEFAULT_PROJECT_ID, people, tasks,
 						The first and last case number.
 						{matched !== null && <strong className="asg-matched"> That is {matched.toLocaleString("en-US")} {matched === 1 ? "case" : "cases"}.</strong>}
 					</p>
+					{!isLibrary && scanCount !== null && (
+						<p className="asg-hint" data-testid="project-size">
+							{scanCount === 0
+								? "This project has no scans yet. Press Upload dataset first."
+								: `This project has ${scanCount.toLocaleString("en-US")} ${scanCount === 1 ? "scan" : "scans"}: cases 1 to ${scanCount.toLocaleString("en-US")}.`}
+						</p>
+					)}
 					{isLibrary && libraryMax !== null && (
 						<p className="asg-hint" data-testid="library-size">
 							The library has {libraryMax.toLocaleString("en-US")} scans: cases 1 to {libraryMax.toLocaleString("en-US")}.

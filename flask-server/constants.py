@@ -55,6 +55,9 @@ class Constants:
     # gatekeeper (services/user_dataset.py) is a no-op. Point it at a writable
     # staging dir now; relocate beside PanTS/CancerVerse once write access lands.
     USER_DATASET_PATH = os.environ.get('USER_DATASET_PATH')
+    # Where the scans project owners upload into their projects are stored (<root>/<project id>/image_only/<case id>/ct.nii.gz).
+    # Unset => the Upload dataset feature answers that it is not set up. Must be a writable folder with room for the scans.
+    PROJECT_DATASET_PATH = os.environ.get('PROJECT_DATASET_PATH')
     PERMISSIONS_DIR = os.environ.get('PERMISSIONS_DIR', "/home/visitor/data")
     MESH_PATH = os.environ.get('MESH_PATH', os.path.join(PERMISSIONS_DIR, "render_only"))
     CASE_QUALITY_MANIFEST = os.environ.get('BODYMAPS_CASE_QUALITY_MANIFEST')

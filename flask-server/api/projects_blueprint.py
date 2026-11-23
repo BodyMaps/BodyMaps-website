@@ -9,14 +9,21 @@ Routes (registered under <BASE_PATH>/api):
   POST   /projects/<id>/members                 {user_id, role} -> add someone or change their role
                                                   (an owner adds collaborators; making an owner is an admin's job)
   DELETE /projects/<id>/members/<user_id>       -> take someone out                           (project owner or admin)
+  GET    /projects/<id>/scans                   -> the project's scans, numbered from 1               (project owner)
+  POST   /projects/<id>/scans                   {session_id, uploaded_filename, modality, original_name?}
+                                                  -> keep a finished upload (/upload-inference-chunk + /finalize-upload)
+                                                     as the project's next scan                       (project owner)
+  DELETE /projects/<id>/scans/<number>          -> remove one scan                                    (project owner)
 
 Every project except the built-in ``jhu`` one is created by an admin, who names its owners. See services/project_store.py.
 """
 
-from flask import Blueprint, jsonify, request
+import os
+
+from flask import Blueprint, current_app, jsonify, request
 
 from api.auth import current_roles, current_user, require_auth
-from services import project_store, role_store
+from services import project_data, project_store, role_store
 
 projects_blueprint = Blueprint("projects", __name__)
 
@@ -47,6 +54,29 @@ def _role_refusal(e: role_store.RoleError):
         role_store.SELF_DEMOTE: role_store.SELF_DEMOTE_MESSAGE,
     }
     return jsonify({"error": messages.get(e.reason, project_store.MESSAGES["not_allowed"]), "reason": e.reason}), 409
+
+
+_DATA_STATUS = {
+    "not_configured": 503, "no_room": 503, "library_project": 403, "no_such_project": 404, "no_such_upload": 404,
+    "no_such_scan": 404, "duplicate": 409, "too_large": 413,
+}
+
+
+def _data_refusal(e: project_data.ProjectDataError):
+    reason = e.reason if e.reason in project_data.MESSAGES else "not_a_volume"
+    payload = {"error": project_data.MESSAGES[reason], "reason": reason}
+    if reason == "duplicate" and isinstance(e.details.get("number"), int):
+        payload["number"] = e.details["number"]
+    return jsonify(payload), _DATA_STATUS.get(reason, 400)
+
+
+def _require_owner(project_id: str):
+    """None when the caller owns the project (an admin who is not an owner does not), else the response to send."""
+    if not project_store.exists(project_id):
+        return jsonify({"error": project_store.MESSAGES["no_such_project"], "reason": "no_such_project"}), 404
+    if project_store.is_owner(current_user()["id"], project_id):
+        return None
+    return jsonify({"error": project_store.MESSAGES["not_allowed"], "reason": "not_allowed"}), 403
 
 
 def _require_owner_or_admin(project_id: str):
@@ -134,3 +164,58 @@ def remove_member(project_id: str, user_id: str):
     except role_store.RoleError as e:
         return _role_refusal(e)
     return jsonify({"removed": True}), 200
+
+
+@projects_blueprint.route("/projects/<project_id>/scans", methods=["GET"])
+@require_auth
+def list_scans(project_id: str):
+    refused = _require_owner(project_id)
+    if refused:
+        return refused
+    return jsonify({"scans": project_data.list_scans(project_id), "configured": project_data.root() is not None}), 200
+
+
+@projects_blueprint.route("/projects/<project_id>/scans", methods=["POST"])
+@require_auth
+def add_scan(project_id: str):
+    """Keep a finished chunked upload as the project's next scan. The upload itself is the site's existing one: the file is
+    sent in chunks and put together by /finalize-upload, which records who it belongs to; only that account can add it here."""
+    refused = _require_owner(project_id)
+    if refused:
+        return refused
+    body = _body()
+    session_id, uploaded = body.get("session_id"), body.get("uploaded_filename")
+    if not isinstance(session_id, str) or not isinstance(uploaded, str):
+        return _data_refusal(project_data.ProjectDataError("no_such_upload"))
+    from api import api_blueprint as site
+    user = current_user()
+    source = site._uploaded_file_candidate(session_id, uploaded)
+    if source is None or site._read_owner_marker(session_id) != user["id"]:
+        # The same answer for "not there" and "not yours".
+        return _data_refusal(project_data.ProjectDataError("no_such_upload"))
+    try:
+        stored = project_data.store_scan(project_id, source, body.get("original_name") or os.path.basename(source),
+                                         body.get("modality"), uploaded_by=user["id"])
+    except project_data.ProjectDataError as e:
+        if e.reason == "duplicate":
+            # Already stored: the staged copy is of no further use.
+            site._remove_finalized_upload(session_id)
+        return _data_refusal(e)
+    except Exception:
+        current_app.logger.exception("Storing a project scan failed")
+        return jsonify({"error": "The scan could not be stored. Try again.", "reason": "store_failed"}), 500
+    site._remove_finalized_upload(session_id)
+    return jsonify(stored), 201
+
+
+@projects_blueprint.route("/projects/<project_id>/scans/<int:number>", methods=["DELETE"])
+@require_auth
+def delete_scan(project_id: str, number: int):
+    refused = _require_owner(project_id)
+    if refused:
+        return refused
+    try:
+        project_data.delete_scan(project_id, number)
+    except project_data.ProjectDataError as e:
+        return _data_refusal(e)
+    return jsonify({"deleted": True}), 200

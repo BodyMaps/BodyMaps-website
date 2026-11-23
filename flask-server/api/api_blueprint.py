@@ -516,6 +516,9 @@ def get_image_preview(clabel_id):
             path = at_catalog.resolve_profile_path(
                 get_abdomenatlas_id(safe_id), Constants.ABDOMENATLAS_PATH, Constants.ABDOMENATLAS_OVERLAY_PATH
             )
+        elif get_dataset_from_case_id(safe_id) == "Project":
+            # A project's scans have no thumbnail.
+            return jsonify({"error": "File not found"}), 404
         else:
             path = os.path.join(Constants.PANTS_PATH, "profile_only", get_panTS_id(safe_id), "profile.jpg")
     except ValueError:
@@ -1111,6 +1114,11 @@ def get_main_nifti(clabel_id):
         main_nifti_path = paths["image"]
         if want_low and paths["lowres_image"] and os.path.exists(paths["lowres_image"]):
             main_nifti_path = paths["lowres_image"]
+    elif get_dataset_from_case_id(safe_id) == "Project":
+        # A scan a project owner uploaded: stored under PROJECT_DATASET_PATH, opened only by the project's own people
+        # (the access policy puts every PRJ_ request to project_data.can_open before it gets here). No low-res copy.
+        from services import project_data
+        main_nifti_path = project_data.ct_path(safe_id) or ""
     else:
         try:
             pants_id = get_panTS_id(safe_id)
@@ -1742,6 +1750,9 @@ async def get_segmentations(combined_labels_id):
         _folder, atlas_mask = _abdomenatlas_mask(combined_labels_id)
         if atlas_mask:
             return _serve_viewer_mask(atlas_mask)
+        return jsonify({"masks_available": False}), 200
+    # A project's scans open CT-only: the viewer is told there is no mask, as for any scan without one.
+    if get_dataset_from_case_id(secure_filename(combined_labels_id)) == "Project":
         return jsonify({"masks_available": False}), 200
     try:
         pants_id = get_panTS_id(secure_filename(combined_labels_id))

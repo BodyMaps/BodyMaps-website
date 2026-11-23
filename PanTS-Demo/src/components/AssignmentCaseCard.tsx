@@ -16,15 +16,20 @@ export const STATUS_WORDS: Record<CaseStatus, string> = { todo: "Pending", done:
 
 const STATUS_ICON: Record<CaseStatus, typeof IconCheck> = { todo: IconCircleDashed, done: IconCheck, flagged: IconFlag };
 
-export default function AssignmentCaseCard({ number, status, task, next = false }: { number: number; status: CaseStatus; task?: string; next?: boolean }) {
+export default function AssignmentCaseCard({ number, status, task, next = false, projectCaseId }: {
+	number: number; status: CaseStatus; task?: string; next?: boolean;
+	/** The viewer id of a case in a project other than the shared library (its number only counts that project's cases). */
+	projectCaseId?: string;
+}) {
 	const Icon = STATUS_ICON[status];
-	const id = numberToCaseId(number) ?? number;
+	const id = projectCaseId ?? numberToCaseId(number) ?? number;
 	const idText = typeof id === "string" && isServerOnlyCaseId(id) ? id : `PanTS_${String(id).padStart(8, "0")}`;
 	const [loaded, setLoaded] = useState(false);
-	const [failed, setFailed] = useState(false);
+	// A project's scans have no thumbnail, so none is asked for.
+	const [failed, setFailed] = useState(projectCaseId !== undefined);
 	return (
 		<article className={`${styles.card} asg-case asg-case--${status}`} data-testid="assignment-case" data-status={status}>
-			<Link to={`/case/${number}`} className={styles.caseLink} aria-label={`Open case ${idText}, ${STATUS_WORDS[status]}`} onMouseEnter={prefetchViewer} onFocus={prefetchViewer}>
+			<Link to={`/case/${projectCaseId ?? number}`} className={styles.caseLink} aria-label={`Open case ${idText}, ${STATUS_WORDS[status]}`} onMouseEnter={prefetchViewer} onFocus={prefetchViewer}>
 				<div className={styles.thumbnail}>
 					{!failed && (
 						<img
@@ -38,7 +43,7 @@ export default function AssignmentCaseCard({ number, status, task, next = false 
 						/>
 					)}
 					{!loaded && !failed && <div className={styles.imageStatus} aria-hidden="true"><span className={styles.spinner} /></div>}
-					{failed && <span className={styles.imageStatus}>Preview unavailable</span>}
+					{failed && <span className={styles.imageStatus}>{projectCaseId ? "No preview" : "Preview unavailable"}</span>}
 					{next && <span className="asg-case-next" data-testid="next-case"><IconPlayerPlayFilled size={11} aria-hidden="true" /> Next</span>}
 					{status !== "todo" && <span className={`asg-case-mark asg-case-mark--${status}`} aria-hidden="true"><Icon size={16} stroke={2.6} /></span>}
 				</div>
