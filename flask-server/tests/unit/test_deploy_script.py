@@ -388,20 +388,13 @@ def _database_with_marks(rig):
 def _alembic_that_runs(rig, sql):
     stub = rig.tmp / "conda_bin" / "alembic"
     stub.write_text(
-        "#!/bin/bash
-"
-        f"{sys.executable} - <<'PY'
-"
-        "import sqlite3
-"
-        "c = sqlite3.connect('accounts.db')
-"
-        f"c.execute({sql!r})
-"
-        "c.commit()
-"
-        "PY
-"
+        "#!/bin/bash\n"
+        f'"{sys.executable}" - <<\'PY\'\n'
+        "import sqlite3\n"
+        "c = sqlite3.connect('accounts.db')\n"
+        f"c.execute({sql!r})\n"
+        "c.commit()\n"
+        "PY\n"
     )
     stub.chmod(0o755)
 
