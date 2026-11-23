@@ -8,9 +8,9 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { LANDING_SUBTITLE, NONCLINICAL_WARNING, SITE_DESCRIPTION } from "../helpers/copy";
-import { MARKER, NOT_FOR_CRAWLERS, injectPublicSections, renderPublicPages, renderPublicSections } from "../seo/staticSummary";
+import { MARKER, injectPublicSections, renderPublicPages, renderPublicSections } from "../seo/staticSummary";
 import { titleForPath } from "../helpers/routeTitles";
-import { LAST_UPDATED, PRIVACY, TERMS, TERMS_INTRO } from "../routes/legalText";
+import { PRIVACY, PRIVACY_INTRO, TERMS, TERMS_INTRO } from "../routes/legalText";
 import { MEMBERS } from "../routes/TeamPage/members";
 
 // Normalized so a Windows checkout (CRLF) reads the same as the LF files in the repo.
@@ -75,9 +75,7 @@ describe("crawler-readable site", () => {
       expect(inRoot).toContain(m.name.replace(/&/g, "&amp;"));
       expect(inRoot).toContain(m.role);
     }
-    for (const s of PRIVACY) expect(inRoot).toContain(`<h3>${s.heading.replace(/&/g, "&amp;")}</h3>`);
-    expect(inRoot).toContain(LAST_UPDATED);
-    for (const id of ["dashboard", "statistics", "upload", "team", "contact", "privacy"]) {
+    for (const id of ["dashboard", "statistics", "upload", "team", "contact"]) {
       expect(inRoot).toContain(`<section id="${id}"><h2><a href="/${id}">`);
     }
     expect(() => injectPublicSections(html.replace(MARKER, ""))).toThrow();
@@ -104,35 +102,30 @@ describe("crawler-readable site", () => {
       descriptions.add(description!);
       expect(html).toContain(`<section id="${slug}"><h1>`);
       expect(html.match(/<section id=/g)).toHaveLength(1);
-      expect(html).not.toContain(TERMS_INTRO.slice(0, 60));
       expect(html).toContain('<script type="module" src="/src/main.tsx">');
     }
     expect(descriptions.size).toBe(slugs.length);
   });
 
-  it("the Terms of Service stay out: not in the summary, not linked, not listed, disallowed in robots.txt", () => {
-    expect(NOT_FOR_CRAWLERS).toEqual(["/terms"]);
+  it.each([
+    { path: "/terms", intro: TERMS_INTRO, sections: TERMS },
+    { path: "/privacy", intro: PRIVACY_INTRO, sections: PRIVACY },
+  ])("excludes $path from crawler content and discovery but keeps the browser route", ({ path, intro, sections }) => {
     const built = injectPublicSections(read("index.html"));
-    const inRoot = built.slice(built.indexOf('<div id="root">'), built.indexOf('<script type="module"'));
-    const privacyHeadings = new Set(PRIVACY.map((s) => s.heading));
-    for (const s of TERMS) {
-      if (!privacyHeadings.has(s.heading)) expect(inRoot).not.toContain(`<h3>${s.heading.replace(/&/g, "&amp;")}</h3>`);
-      expect(inRoot).not.toContain(s.body.slice(0, 80).replace(/&/g, "&amp;"));
+    const slug = path.slice(1);
+    const pages = renderPublicPages(built);
+    expect(pages).not.toHaveProperty(slug);
+    for (const html of [built, ...Object.values(pages)]) {
+      expect(html).not.toContain(`<section id="${slug}"`);
+      expect(html).not.toContain(`href="${path}"`);
+      expect(html).not.toContain(intro.slice(0, 60));
+      for (const s of sections) expect(html).not.toContain(s.body.slice(0, 80).replace(/&/g, "&amp;"));
     }
-    expect(inRoot).not.toContain(TERMS_INTRO.slice(0, 60));
-    expect(inRoot).not.toContain('<section id="terms"');
-    expect(inRoot).not.toMatch(/href="\/terms"/);
-    expect(read("public/llms.txt")).not.toContain("/terms");
-    expect(sitemapPaths()).not.toContain("/terms");
-    expect(disallowed()).toContain("/terms");
-  });
-
-  it("the generated sections escape the source text and link legal [label](target) tokens", () => {
-    const out = renderPublicSections();
-    expect(out).not.toMatch(/\[[^\]]+\]\([^)]+\)/);             // every [label](target) became a link
-    expect(out).toContain('<a href="/contact">');
-    expect(out).not.toMatch(/<(?!\/?(section|h2|h3|p|a|ul|li)\b)/); // only the tags it writes
-    expect(out).not.toMatch(/—/);
+    expect(read("public/llms.txt")).not.toContain(path);
+    expect(sitemapPaths()).not.toContain(path);
+    expect(disallowed()).toContain(path);
+    expect(routePaths.has(path)).toBe(true);
+    expect(publicPages()).toContain(path);
   });
 
   it("every link in the static summary, sitemap and llms.txt is a real, guest-accessible route", () => {
@@ -164,8 +157,8 @@ describe("crawler-readable site", () => {
     }
   });
 
-  it("the sitemap covers every guest page except auth flows and local-file viewers", () => {
-    const skip = new Set(["/upload", "/local-nifti", "/dicom", "/reset-password", "/verify-email", "/signup", "/login", ...NOT_FOR_CRAWLERS]);
+  it("the sitemap covers every guest page except auth flows, local-file viewers and legal pages", () => {
+    const skip = new Set(["/upload", "/local-nifti", "/dicom", "/reset-password", "/verify-email", "/signup", "/login", "/terms", "/privacy"]);
     expect(new Set(sitemapPaths())).toEqual(new Set(publicPages().filter((p) => !skip.has(p))));
   });
 

@@ -1,5 +1,5 @@
 # BodyMaps: public pages may be crawled and indexed, including by search engines and AI assistants.
-# Signed-in areas and the JSON API are not useful to crawl. The Terms of Service are not for AI assistants or crawlers.
+# Keep signed-in areas, the JSON API and legal pages out of crawling.
 User-agent: *
 Allow: /
 Disallow: /api/
@@ -15,5 +15,6 @@ Disallow: /compare
 Disallow: /reset-password
 Disallow: /verify-email
 Disallow: /terms
+Disallow: /privacy
 
 Sitemap: https://bodymaps.wse.jhu.edu/sitemap.xml

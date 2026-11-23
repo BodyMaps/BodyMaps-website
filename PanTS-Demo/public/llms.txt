@@ -21,7 +21,3 @@ BodyMaps is a web application developed by a research team at Johns Hopkins Univ
 ## Notes
 
 - For nonclinical use only. Not medical advice or for patient care.
-
-## Optional
-
-- [Privacy](https://bodymaps.wse.jhu.edu/privacy)
