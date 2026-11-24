@@ -51,6 +51,9 @@ export type EditLockState = {
 	/** Annotation managers only: move the hold to the caller. */
 	takeOver: () => Promise<void>;
 	takeOverError: string | null;
+	/** Ask the server who holds the scan now, e.g. after a shared save was refused, instead of waiting for the next
+	 * minute's check. */
+	refresh: () => Promise<void>;
 };
 
 /**
@@ -131,5 +134,11 @@ export function useEditLock(apiBase: string, caseId: string | number, enabled: b
 		else setState((s) => ({ ...s, scan, takeOverError: res.error || "Couldn't take over this scan. Try again." }));
 	}, [apiBase, caseId, apply, scan]);
 
-	return { blockedBy: enabled ? blockedBy : null, holding: enabled && holding, takeOver, takeOverError };
+	const refresh = useCallback(async () => {
+		if (!enabled) return;
+		const res = await fetchEditLock(apiBase, caseId);
+		if (res.ok || res.lock) apply(res.ok ? res.lock : res.lock);
+	}, [apiBase, caseId, enabled, apply]);
+
+	return { blockedBy: enabled ? blockedBy : null, holding: enabled && holding, takeOver, takeOverError, refresh };
 }

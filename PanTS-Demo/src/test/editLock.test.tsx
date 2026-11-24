@@ -122,6 +122,15 @@ describe("useEditLock", () => {
 		expect(result.current.blockedBy).toBeNull();
 	});
 
+	it("checks again on request, e.g. after a refused save, without waiting for the next minute", async () => {
+		const { result } = renderHook(() => useEditLock("", 55, true, true));
+		await waitFor(() => expect(result.current.holding).toBe(true));
+		server.lock = theirs; // a manager took it over
+		await act(async () => { await result.current.refresh(); });
+		expect(result.current.holding).toBe(false);
+		expect(result.current.blockedBy).toBe("rad1@example.org");
+	});
+
 	it("takes the scan over, and says why when it cannot", async () => {
 		server.lock = theirs;
 		const { result } = renderHook(() => useEditLock("", 55, true, false));

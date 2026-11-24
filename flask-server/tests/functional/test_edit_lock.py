@@ -193,6 +193,82 @@ def test_save_and_revert_are_refused_while_someone_else_edits(client):
     assert (r.get_json() or {}).get("reason") != "edit_lock"
 
 
+def test_a_lapsed_lock_does_not_block_saving(client):
+    from models.engine import session_scope
+    from models.job import utcnow
+    from models.scan_edit_lock import ScanEditLock
+    team(client)
+    sign_in(client, "one@b.com")
+    client.post(LOCK)
+    with session_scope() as s:
+        s.get(ScanEditLock, "PanTS_00000055").expires_at = utcnow() - timedelta(seconds=1)
+    sign_in(client, "two@b.com")
+    for r in (client.post("/api/save-segmentation-shared/55"), client.delete("/api/shared-annotation/55")):
+        assert (r.get_json() or {}).get("reason") != "edit_lock"
+
+
+def test_the_former_holder_cannot_save_after_a_take_over(client):
+    team(client)
+    sign_in(client, "one@b.com")
+    client.post(LOCK)
+    sign_in(client, "lead@b.com")
+    assert client.post(LOCK + "/take-over").status_code == 200
+
+    sign_in(client, "one@b.com")
+    r = client.post("/api/save-segmentation-shared/55")
+    assert r.status_code == 409
+    assert r.get_json()["reason"] == "edit_lock" and r.get_json()["holder"] == "lead@b.com"
+    # Their page's next renewal learns the same thing.
+    r = client.post(LOCK)
+    assert r.status_code == 409 and r.get_json()["holder"] == "lead@b.com"
+
+
+def test_saving_goes_ahead_when_the_lock_cannot_be_read(client, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+    from services import edit_lock_store
+    team(client)
+    sign_in(client, "one@b.com")
+    client.post(LOCK)
+
+    def broken(*_args, **_kwargs):
+        raise OperationalError("SELECT", {}, Exception("database is locked"))
+
+    monkeypatch.setattr(edit_lock_store, "blocking_holder", broken)
+    sign_in(client, "two@b.com")
+    for r in (client.post("/api/save-segmentation-shared/55"), client.delete("/api/shared-annotation/55")):
+        assert r.status_code != 500
+        assert (r.get_json() or {}).get("reason") != "edit_lock"
+
+
+def test_two_managers_taking_over_at_once_both_get_an_answer(client):
+    from services import role_store
+    team(client)
+    make(client, "lead2@b.com", role_store.ROLE_ANNOTATION_MANAGER)
+    from models.engine import session_scope
+    from models.user import User
+    from services import edit_lock_store
+    with session_scope() as s:
+        ids = [u.id for u in s.query(User).filter(User.email.in_(["lead@b.com", "lead2@b.com"]))]
+    results, errors, start = [], [], threading.Barrier(len(ids) * 4)
+
+    def grab(uid):
+        start.wait()
+        try:
+            results.append(edit_lock_store.take_over("PanTS_00000078", uid))
+        except Exception as exc:  # noqa: BLE001 - the point is that none escapes
+            errors.append(exc)
+
+    threads = [threading.Thread(target=grab, args=(uid,)) for uid in ids * 4]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert len(results) == len(threads)
+    final = edit_lock_store.status("PanTS_00000078", None)
+    assert final["held"] is True and final["holder"] in {"lead@b.com", "lead2@b.com"}
+
+
 def test_two_people_asking_at_once_get_one_lock(client):
     team(client)
     from models.engine import session_scope

@@ -111,13 +111,26 @@ def take_over(case_key: str, user_id: str) -> dict:
     """Move the hold to the caller whoever had it (annotation managers only; the route checks the role)."""
     now = utcnow()
     expires = now + timedelta(seconds=ttl_seconds())
-    with session_scope() as s:
-        row = s.get(ScanEditLock, case_key)
-        if row is None:
-            s.add(ScanEditLock(case_key=case_key, holder_id=user_id, acquired_at=now, expires_at=expires))
-        else:
-            row.holder_id, row.acquired_at, row.expires_at = user_id, now, expires
+    if not _move_to(case_key, user_id, now, expires):
+        try:
+            with session_scope() as s:
+                s.add(ScanEditLock(case_key=case_key, holder_id=user_id, acquired_at=now, expires_at=expires))
+        except IntegrityError:
+            # Another take over (or an editor) created the row between our UPDATE and INSERT: take it from them.
+            _move_to(case_key, user_id, now, expires)
     return status(case_key, user_id)
+
+
+def _move_to(case_key: str, user_id: str, now, expires) -> bool:
+    """Give an existing row to the caller whoever holds it, in one UPDATE. False when the scan has no row yet."""
+    with session_scope() as s:
+        result = s.execute(
+            update(ScanEditLock)
+            .where(ScanEditLock.case_key == case_key)
+            .values(holder_id=user_id, acquired_at=now, expires_at=expires)
+            .execution_options(synchronize_session=False)
+        )
+        return result.rowcount == 1
 
 
 def blocking_holder(case_key: str, user_id: str | None) -> str | None:
