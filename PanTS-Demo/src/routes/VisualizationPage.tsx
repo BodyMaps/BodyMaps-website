@@ -218,6 +218,8 @@ import { toolDisplayName, type ReportMeasurement } from "../helpers/sessionRepor
 import {getPanTSId } from "../helpers/utils";
 import { useDockOffset } from "../helpers/viewer/useDockOffset";
 import AssignmentBar from "../components/viewer/AssignmentBar";
+import EditLockBanner from "../components/viewer/EditLockBanner";
+import { useEditLock } from "../helpers/editLock";
 import { isAbdomenAtlasCaseId, isServerOnlyCaseId } from "../helpers/caseIds";
 import { filenameToName } from "../helpers/utils.name";
 import { decodeViewerState, encodeViewerState, VIEWER_STATE_PARAMS } from "../helpers/viewerShareState";
@@ -579,7 +581,8 @@ type VisualizationPageProps = {
 };
 
 function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: VisualizationPageProps = {}) {
-	const ownerId = useAuthIfPresent()?.user?.id;
+	const signedInUser = useAuthIfPresent()?.user;
+	const ownerId = signedInUser?.id;
 	// References and state
 	const params = useParams();
 	const isLiveRoom = Boolean(liveRoom);
@@ -2495,6 +2498,13 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			.catch(() => { /* no button when the status cannot be read */ });
 		return () => controller.abort();
 	}, [sharedEligible, caseId, ownerId]);
+	// Edit lock: one approved annotator edits a dataset scan at a time (helpers/editLock.ts). Picking an editing tool
+	// takes the hold; while someone else holds the scan it is view only here, and the Save to JHU server button goes.
+	const editLock = useEditLock(
+		API_BASE, caseId, sharedEligible && Boolean(sharedStatus?.supported && sharedStatus.can_override),
+		editMode !== null || activeToolbarTool !== null,
+	);
+	const refreshEditLock = editLock.refresh;
 	const handleSharedSave = useCallback(async () => {
 		if (!sharedEligible || sharedSave.status === "saving") return;
 		const previous = sharedStatus?.exists
@@ -2514,8 +2524,14 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 			console.error("Shared save failed", e);
 			sessionRef.current?.log("edit", `Shared save failed: ${message}`, 2000);
 			setSharedSave({ status: "error", error: message });
+			// The save may have been refused because a manager took the scan over: show that now, not at the next
+			// minute's check.
+			void refreshEditLock();
 		}
-	}, [sharedEligible, sharedSave.status, sharedStatus, caseId, hdReady, ownerId, triggerSave]);
+	}, [sharedEligible, sharedSave.status, sharedStatus, caseId, hdReady, ownerId, triggerSave, refreshEditLock]);
+	useEffect(() => {
+		if (editLock.blockedBy && (editMode !== null || activeToolbarTool !== null)) handleToolbarToolChange(null);
+	}, [editLock.blockedBy, editMode, activeToolbarTool]); // eslint-disable-line react-hooks/exhaustive-deps
 	const isSaving = saveState.status === "saving";
 	useEffect(() => {
 		dropStaleGuardEntry();
@@ -4378,7 +4394,15 @@ const aiAvailableOrgans = useMemo(() => {
 			{soloChallenge && <SoloChallengeHeader controller={soloChallenge} />}
 			{quizPractice && <QuizPracticeHeader controller={quizPractice} />}
 			{pantsCase && !sessionId && !liveRoom && !soloChallenge && !quizPractice && <AssignmentBar caseId={String(pantsCase)} />}
-		
+			{editLock.blockedBy && (
+				<EditLockBanner
+					holder={editLock.blockedBy}
+					canTakeOver={(signedInUser?.roles ?? []).includes("annotation_manager")}
+					onTakeOver={editLock.takeOver}
+					error={editLock.takeOverError}
+				/>
+			)}
+
 			{/* ---- Top toolbar (PYCAD-style). Lives in normal flow, so it sits ABOVE the
 			     viewports and never overlays them. Always visible - no show/hide toggle. ---- */}
 			<div
@@ -5826,7 +5850,7 @@ const aiAvailableOrgans = useMemo(() => {
 				saveStatus={saveState.status}
 				saveError={saveState.status === "error" ? saveState.message : undefined}
 				onRetrySave={() => { void triggerSave(); }}
-				onSaveShared={sharedEligible && sharedStatus?.supported && sharedStatus.can_override ? () => { void handleSharedSave(); } : undefined}
+				onSaveShared={sharedEligible && sharedStatus?.supported && sharedStatus.can_override && !editLock.blockedBy ? () => { void handleSharedSave(); } : undefined}
 				sharedSaveStatus={sharedSave.status}
 				sharedSaveError={sharedSave.error}
 				/* State machine input: does the targeted structure already have a mask? */

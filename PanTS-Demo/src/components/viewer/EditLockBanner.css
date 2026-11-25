@@ -1,0 +1,28 @@
+.edit-lock-bar {
+	position: relative;
+	z-index: 61;
+	flex: 0 0 auto;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 16px;
+	padding: 6px 16px;
+	background: rgba(120, 78, 18, 0.92);
+	color: #fff8ec;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+	font-size: 13px;
+}
+
+.edit-lock-btn {
+	background: rgba(255, 255, 255, 0.14);
+	color: inherit;
+	border: 1px solid rgba(255, 255, 255, 0.35);
+	border-radius: 8px;
+	padding: 4px 12px;
+	font: inherit;
+	cursor: pointer;
+}
+.edit-lock-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.24); }
+.edit-lock-btn:disabled { opacity: 0.6; cursor: default; }
+
+.edit-lock-error { color: #ffd9d0; }

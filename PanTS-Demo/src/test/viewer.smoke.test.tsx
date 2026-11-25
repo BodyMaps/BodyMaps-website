@@ -631,6 +631,93 @@ describe("viewer smoke test", () => {
 		});
 	});
 
+	// One annotator edits a dataset scan at a time (helpers/editLock.ts): the page wiring around the lock.
+	describe("Edit lock", () => {
+		type Lock = { held: boolean; mine: boolean; holder: string | null; expires_at: string | null };
+		const free: Lock = { held: false, mine: false, holder: null, expires_at: null };
+		const mine: Lock = { held: true, mine: true, holder: "viewer@example.com", expires_at: "2026-11-23T10:30:00Z" };
+		const theirs: Lock = { held: true, mine: false, holder: "rad1@example.org", expires_at: "2026-11-23T10:30:00Z" };
+		let server: { lock: Lock };
+		const mountLocked = async (lock: Lock, roles: string[] = ["annotator"]) => {
+			server = { lock };
+			const fallback = global.fetch;
+			global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input);
+				const method = init?.method ?? "GET";
+				if (url.includes("/api/auth/me")) return new Response(JSON.stringify({ user: { id: "viewer-owner-1", email: "viewer@example.com", roles } }));
+				if (url.includes("/api/shared-annotation/35/lock")) {
+					if (method === "GET") return new Response(JSON.stringify(server.lock));
+					if (method === "DELETE") return new Response(JSON.stringify({ released: true }));
+					if (server.lock.held && !server.lock.mine) {
+						return new Response(JSON.stringify({ ...server.lock, reason: "edit_lock", error: "rad1@example.org is editing this scan." }), { status: 409 });
+					}
+					server.lock = mine;
+					return new Response(JSON.stringify(mine));
+				}
+				if (url.includes("/api/shared-annotation/35")) {
+					return new Response(JSON.stringify({ supported: true, exists: false, revision: "none", can_override: true }));
+				}
+				return fallback(input, init);
+			}) as typeof fetch;
+			render(
+				<AuthProvider>
+					<MemoryRouter initialEntries={["/case/35"]}>
+						<Routes><Route path="/case/:caseId" element={<VisualizationPage />} /></Routes>
+					</MemoryRouter>
+				</AuthProvider>
+			);
+			// Pick the Brush, as an annotator starting to edit does.
+			await waitFor(() => expect(renderVisualization).toHaveBeenCalled());
+			fireEvent.click(screen.getByRole("button", { name: "Segment", exact: true }));
+			fireEvent.click(await screen.findByRole("button", { name: "Select structure" }));
+			fireEvent.click(screen.getByRole("option", { name: /^spleen$/i }));
+			fireEvent.click(screen.getByRole("button", { name: "Brush", exact: true }));
+		};
+		const banner = () => screen.queryByText((_, el) => el?.className === "edit-lock-bar");
+		const brush = () => screen.getByRole("button", { name: "Brush", exact: true });
+		let confirmSpy: ReturnType<typeof vi.spyOn>;
+		beforeEach(() => {
+			confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+			vi.mocked(getSegmentationExport).mockImplementation(() => ({
+				dimensions: [2, 1, 1], spacing: [1, 1, 1], origin: [0, 0, 0], direction: [1, 0, 0, 0, 1, 0, 0, 0, 1], data: [0, 1],
+			}));
+		});
+		afterEach(() => {
+			confirmSpy.mockRestore();
+			vi.mocked(getSegmentationExport).mockImplementation(() => null);
+		});
+
+		it("is view only while someone else edits: names them, puts the brush down and offers no Save to JHU server", async () => {
+			await mountLocked(theirs);
+			await waitFor(() => expect(banner()).toHaveTextContent("rad1@example.org is editing this scan. It is view only until they finish."));
+			await waitFor(() => expect(brush()).not.toHaveClass("is-active"));
+			expect(screen.queryByRole("button", { name: "Save to JHU server" })).not.toBeInTheDocument();
+			expect(screen.queryByRole("button", { name: "Take over" })).not.toBeInTheDocument();
+		});
+
+		it("offers take over to an annotation manager", async () => {
+			await mountLocked(theirs, ["annotation_manager"]);
+			expect(await screen.findByRole("button", { name: "Take over" })).toBeEnabled();
+		});
+
+		it("lets the holder edit and save for everyone", async () => {
+			await mountLocked(free);
+			expect(await screen.findByRole("button", { name: "Save to JHU server" })).toBeEnabled();
+			expect(brush()).toHaveClass("is-active");
+			expect(banner()).toBeNull();
+		});
+
+		it("shows who took the scan over as soon as a shared save is refused, without waiting for the next check", async () => {
+			await mountLocked(free);
+			const save = await screen.findByRole("button", { name: "Save to JHU server" });
+			server.lock = { ...theirs, holder: "lead@example.org" }; // a manager takes it over
+			vi.mocked(saveSharedSegmentation).mockRejectedValueOnce(new Error("lead@example.org is editing this scan. It is view only until they finish."));
+			fireEvent.click(save);
+			await waitFor(() => expect(banner()).toHaveTextContent("lead@example.org is editing this scan."));
+			expect(screen.queryByRole("button", { name: "Save to JHU server" })).not.toBeInTheDocument();
+		});
+	});
+
 	describe("Adjust panel", () => {
 		const openAdjust = async () => {
 			render(<AuthProvider><MemoryRouter initialEntries={["/case/35"]}>

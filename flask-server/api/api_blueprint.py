@@ -9717,6 +9717,32 @@ def _refuse_unless_annotator():
     return None
 
 
+def _refuse_if_someone_else_editing(case_id):
+    """409 while another annotator holds this scan's edit lock (services/edit_lock_store.py), else None.
+
+    The revision check in the save already stops a save over a newer version; this refuses earlier and names who is
+    editing. If the lock table cannot be read the save goes ahead on the revision check alone, so a database hiccup
+    never blocks saving.
+    """
+    key = _shared_case_key(case_id)
+    if not key:
+        return None
+    from sqlalchemy.exc import SQLAlchemyError
+    from services import edit_lock_store
+    try:
+        holder = edit_lock_store.blocking_holder(key, (current_user() or {}).get("id"))
+    except SQLAlchemyError:
+        current_app.logger.warning("Edit lock for %s could not be read; relying on the revision check", key)
+        return None
+    if not holder:
+        return None
+    return jsonify({
+        "error": f"{holder} is editing this scan. It is view only until they finish.",
+        "reason": "edit_lock",
+        "holder": holder,
+    }), 409
+
+
 @api_blueprint.route('/save-segmentation-shared/<case_id>', methods=['POST'])
 def save_segmentation_shared(case_id):
     """Save the caller's edit as the version of this scan EVERY viewer sees (annotators and admins).
@@ -9724,9 +9750,10 @@ def save_segmentation_shared(case_id):
     The normal ``/save-segmentation`` keeps an edit private to the account; this replaces what the
     dataset shows for everyone, so it needs the ``annotator`` (or ``admin``) role. The version it
     replaces is archived. Meshes, metrics and the 2D masks follow because every reader resolves
-    the mask through ``_pants_viewer_mask_path``.
+    the mask through ``_pants_viewer_mask_path``. While another annotator holds the scan's edit lock
+    the save is refused (409, ``reason: "edit_lock"``).
     """
-    refused = _refuse_unless_annotator()
+    refused = _refuse_unless_annotator() or _refuse_if_someone_else_editing(case_id)
     if refused:
         return refused
     from services.segmentation_save_lock import segmentation_save_lock
@@ -9759,7 +9786,7 @@ def shared_annotation_status(case_id):
 @api_blueprint.route('/shared-annotation/<case_id>', methods=['DELETE'])
 def revert_shared_annotation(case_id):
     """Remove the shared override so everyone sees the original again (archived first)."""
-    refused = _refuse_unless_annotator()
+    refused = _refuse_unless_annotator() or _refuse_if_someone_else_editing(case_id)
     if refused:
         return refused
     if not _shared_case_key(case_id):
@@ -9782,6 +9809,70 @@ def revert_shared_annotation(case_id):
         _AI_METRICS_CACHE.pop(str(case_id).strip(), None)
         current_app.logger.info("SHARED annotation for case %s reverted by user %s", case_id, (current_user() or {}).get("id"))
     return jsonify({"reverted": True, "exists": False}), 200
+
+
+# Edit lock: one annotator edits a dataset scan's shared version at a time (services/edit_lock_store.py).
+#   GET    /shared-annotation/<case>/lock            -> {held, mine, holder, expires_at, ttl_seconds}   (signed in)
+#   POST   /shared-annotation/<case>/lock            -> take or renew the lock; 409 with the holder if someone else has it
+#   DELETE /shared-annotation/<case>/lock            -> let go of the caller's own lock
+#   POST   /shared-annotation/<case>/lock/take-over  -> move the lock to the caller (annotation managers only)
+
+def _edit_lock_payload(lock):
+    from services import edit_lock_store
+    return {**lock, "ttl_seconds": edit_lock_store.ttl_seconds()}
+
+
+@api_blueprint.route('/shared-annotation/<case_id>/lock', methods=['GET'])
+@require_auth
+def edit_lock_status(case_id):
+    key = _shared_case_key(case_id)
+    if not key:
+        return jsonify({"error": "Only dataset scans have a shared version."}), 400
+    from services import edit_lock_store
+    return jsonify(_edit_lock_payload(edit_lock_store.status(key, current_user()["id"]))), 200
+
+
+@api_blueprint.route('/shared-annotation/<case_id>/lock', methods=['POST'])
+def edit_lock_acquire(case_id):
+    refused = _refuse_unless_annotator()
+    if refused:
+        return refused
+    key = _shared_case_key(case_id)
+    if not key:
+        return jsonify({"error": "Only dataset scans have a shared version."}), 400
+    from services import edit_lock_store
+    lock = edit_lock_store.acquire(key, current_user()["id"])
+    if not lock["mine"]:
+        return jsonify({**_edit_lock_payload(lock),
+                        "error": f"{lock['holder']} is editing this scan. It is view only until they finish.",
+                        "reason": "edit_lock"}), 409
+    return jsonify(_edit_lock_payload(lock)), 200
+
+
+@api_blueprint.route('/shared-annotation/<case_id>/lock', methods=['DELETE'])
+@require_auth
+def edit_lock_release(case_id):
+    key = _shared_case_key(case_id)
+    if not key:
+        return jsonify({"error": "Only dataset scans have a shared version."}), 400
+    from services import edit_lock_store
+    released = edit_lock_store.release(key, current_user()["id"])
+    return jsonify({"released": released}), 200
+
+
+@api_blueprint.route('/shared-annotation/<case_id>/lock/take-over', methods=['POST'])
+def edit_lock_take_over(case_id):
+    if current_user() is None:
+        return jsonify({"error": "Authentication required"}), 401
+    if role_store.ROLE_ANNOTATION_MANAGER not in current_roles():
+        return jsonify({"error": "Only annotation managers can take over a scan."}), 403
+    key = _shared_case_key(case_id)
+    if not key:
+        return jsonify({"error": "Only dataset scans have a shared version."}), 400
+    from services import edit_lock_store
+    lock = edit_lock_store.take_over(key, current_user()["id"])
+    current_app.logger.info("Edit lock for %s taken over by user %s", key, current_user()["id"])
+    return jsonify(_edit_lock_payload(lock)), 200
 
 
 @api_blueprint.route('/segmentation-metadata/<case_id>', methods=['GET'])
