@@ -208,9 +208,17 @@ describe("Viewer shell layout", () => {
 		const stats = container.querySelector(".vp-stats");
 		const body = container.querySelector(".vp-body");
 		expect(stats).not.toBeNull();
-		// The panel and the viewport body are sibling docks under the page shell.
-		expect(stats!.parentElement).toBe(body!.parentElement);
+		// The panel sits in the tray below the viewport body (PanelDock).
+		const tray = stats!.closest(".vp-tray");
+		expect(tray).not.toBeNull();
+		expect(tray!.parentElement).toBe(body!.parentElement);
 		expect(body!.querySelector(":scope > .vp-stage")).not.toBeNull();
+
+		// Opening Case metadata adds it beside Organ statistics instead of replacing it.
+		fireEvent.click(screen.getByLabelText("Panels"));
+		fireEvent.click(screen.getByRole("menuitem", { name: "Case metadata" }));
+		const labels = [...tray!.querySelectorAll(":scope > .vp-pframe")].map((el) => el.getAttribute("aria-label"));
+		expect(labels).toEqual(["Organ statistics", "Case metadata"]);
 	});
 
 	it("names the armed measurement tool on its trigger, and Escape hands back the crosshair", async () => {

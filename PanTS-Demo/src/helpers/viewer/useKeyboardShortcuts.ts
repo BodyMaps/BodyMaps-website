@@ -128,8 +128,6 @@ export function useKeyboardShortcuts({
 	setEditMode,
 	setActiveMeasureTool,
 	setCrosshairToolActive,
-	setShowStats,
-	setShowMetadata,
 	setShowAnnotationToolbar,
 	setShowMeasurePanel,
 	brushDiameterMm,
@@ -369,8 +367,8 @@ export function useKeyboardShortcuts({
 			} else if (key === "v") {
 				toggleCine();
 			} else if (key === "m") {
-				setShowStats(false);
-				setShowMetadata(false);
+				// Panels share the bottom tray, so Measurements no longer closes
+				// Organ statistics or Case metadata.
 				setShowAnnotationToolbar(false);
 				setEditMode(null);
 				setShowMeasurePanel((v) => !v);
@@ -388,8 +386,6 @@ export function useKeyboardShortcuts({
 		setEditMode,
 		setActiveMeasureTool,
 		setCrosshairToolActive,
-		setShowStats,
-		setShowMetadata,
 		setShowAnnotationToolbar,
 		setShowMeasurePanel,
 		brushDiameterMm,
