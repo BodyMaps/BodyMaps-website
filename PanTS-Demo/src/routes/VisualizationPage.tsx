@@ -44,6 +44,7 @@ import AISidebar from "../components/AIAssistant/AISidebar";
 import { track } from "../helpers/analytics";
 import { buildViewerActions } from "../components/AIAssistant/assistantActions";
 import MeasurementPanel from "../components/MeasurementPanel/MeasurementPanel";
+import PanelDock, { DockPanel } from "../components/viewer/PanelDock";
 import MessagePage from "../components/MessagePage";
 import { SegmentationMeshViewer } from "../components/viewer/MeshViewer";
 import { probeSessionVolume } from '../helpers/viewer/sessionProbe';
@@ -281,6 +282,9 @@ export type MaskEditMode = "brush" | "eraser" | "smartfill" | "lasso" | null;
 // Case metadata fields from the dataset metadata (PanTS or CancerVerse, via /api/search),
 // in display order — a curated subset of row_to_item's fields; spacing_sum/shape_sum/
 // complete are internal sort helpers, not meaningful to show a reader.
+// Floating panel windows get a resize corner; set to false to turn resizing off.
+const PANEL_WINDOWS_RESIZABLE = true;
+
 const METADATA_FIELDS: { key: string; label: string }[] = [
 	{ key: "PanTS ID", label: "Case ID" },
 	{ key: "dataset", label: "Dataset" },
@@ -3995,6 +3999,16 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 		}
 	};
 
+	// Panels reopened from saved prefs (not clicked open from the menu) need their
+	// data too; otherwise they sit on "No organ data" / "Loading…" after a reload.
+	// Both loaders skip work that is already done or in flight.
+	useEffect(() => {
+		if (!viewerReady || noSeg) return;
+		if (showStats) void loadOrganStats();
+		if (showStats || showMetadata) void loadPercentileContext();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [viewerReady]);
+
 	// Watches the HD upgrade kicked off by the Annotate button (see
 	// handleAnnotateClick below). Once it resolves, either open the
 	// annotation toolbar/SegmentsPopup (success — this is the moment the
@@ -4056,9 +4070,8 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	};
 
 	const handleToggleStats = () => {
-		// The right-side slot is shared by stats / metadata / measurements / mask editing.
-		setShowMetadata(false);
-		setShowMeasurePanel(false);
+		// Panels share the bottom tray (PanelDock), so opening one no longer
+		// closes the others. Mask editing still closes when a panel opens.
 		setShowAnnotationToolbar(false);
 		setEditMode(null);
 		setActiveToolbarTool(null);
@@ -4068,8 +4081,6 @@ function VisualizationPage({ liveRoom, soloChallenge, quizPractice }: Visualizat
 	};
 
 	const handleToggleMetadata = () => {
-		setShowStats(false);
-		setShowMeasurePanel(false);
 		setShowAnnotationToolbar(false);
 		setEditMode(null);
 		setActiveToolbarTool(null);
@@ -4990,9 +5001,6 @@ const aiAvailableOrgans = useMemo(() => {
 																		if (showOrganDetails) {
 																			setShowOrganDetails(false);
 																		} else {
-																			setShowStats(false);
-																			setShowMetadata(false);
-																			setShowMeasurePanel(false);
 																			setShowOrganDetails(true);
 																		}
 																		panelsFlyout.close();
@@ -5032,8 +5040,6 @@ const aiAvailableOrgans = useMemo(() => {
 																className={`vp-flyout__item ${showMeasurePanel ? "is-active" : ""}`}
 																role="menuitem"
 																onClick={() => {
-																	setShowStats(false);
-																	setShowMetadata(false);
 																	setShowAnnotationToolbar(false);
 																	setEditMode(null);
 																	setActiveToolbarTool(null);
@@ -5568,7 +5574,12 @@ const aiAvailableOrgans = useMemo(() => {
 				</div>
 			)}
 
+			{/* Organ statistics, Case metadata and Measurements sit side by side in a
+			     tray below the scans, and can be dragged up onto the scans as
+			     floating windows (components/viewer/PanelDock.tsx). */}
+			<PanelDock stageRef={stageRef} resizable={PANEL_WINDOWS_RESIZABLE}>
 			{!noSeg && showStats && (
+				<DockPanel id="stats" title="Organ statistics">
 				<div className="vp-stats">
 					<div className="vp-stats__head">
 						<span className="vp-panel__title">Organ Statistics</span>
@@ -5724,9 +5735,11 @@ const aiAvailableOrgans = useMemo(() => {
 						<div className="vp-stats__msg">No organ data available.</div>
 					)}
 				</div>
+				</DockPanel>
 			)}
 
 			{!noSeg && showMetadata && (
+				<DockPanel id="metadata" title="Case metadata">
 				<div className="vp-stats">
 					<div className="vp-stats__head">
 						<span className="vp-panel__title">Case Metadata</span>
@@ -5761,14 +5774,18 @@ const aiAvailableOrgans = useMemo(() => {
 						</div>
 					)}
 				</div>
+				</DockPanel>
 			)}
 
 			{showMeasurePanel && (
+				<DockPanel id="measurements" title="Measurements">
 				<MeasurementPanel
 					onClose={() => setShowMeasurePanel(false)}
 					onJump={(mm) => setCrosshairMm(mm)}
 				/>
+				</DockPanel>
 			)}
+			</PanelDock>
 			{/* Kept mounted (display toggles) so the chat history survives open/close. */}
 			{!noSeg && !soloChallenge && liveRoom?.metadata.mode !== "quiz" && <AISidebar
 				open={showAISidebar}
